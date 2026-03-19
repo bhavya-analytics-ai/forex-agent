@@ -15,40 +15,34 @@ from filters.session import get_session_context
 logger = logging.getLogger(__name__)
 
 
-def scan_pair(pair: str) -> dict | None:
+def scan_pair(pair: str, return_confluence: bool = False):
     """
     Full scan pipeline for one pair.
-    Returns scored signal or None if not worth watching.
+    return_confluence=True returns (scored, confluence) tuple for alert printing.
     """
     try:
         logger.info(f"Scanning {pair}...")
 
-        # Fetch all timeframes
         candles = fetch_all_timeframes(pair)
         if any(df.empty for df in candles.values()):
             logger.warning(f"{pair}: Missing candle data, skipping")
-            return None
+            return (None, None) if return_confluence else None
 
-        # Check confluence
         confluence = check_confluence(candles, pair)
+        scored     = score_signal(confluence, pair)
 
-        # Score the signal
-        scored = score_signal(confluence, pair)
-
-        # Add trend labels for display
         scored["h1_trend"]  = confluence["h1"]["structure"].get("trend", "—")
         scored["m15_trend"] = confluence["m15"]["structure"].get("trend", "—")
         scored["m5_trend"]  = confluence["m5"]["structure"].get("trend", "—")
 
-        # Log everything above min threshold
         if scored["should_log"]:
             log_signal(scored, confluence, alerted=scored["should_alert"])
 
-        return scored
+        return (scored, confluence) if return_confluence else scored
 
     except Exception as e:
         logger.error(f"Error scanning {pair}: {e}", exc_info=True)
-        return None
+        return (None, None) if return_confluence else None
 
 
 def generate_briefing(session: str) -> dict:

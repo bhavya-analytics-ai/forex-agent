@@ -51,9 +51,12 @@ def send_signal_alert(scored_signal: dict, confluence: dict):
     else:
         fvg_line = "—"
 
-    h1_trend  = confluence["h1"]["structure"].get("trend", "—")
-    m15_trend = confluence["m15"]["structure"].get("trend", "—")
-    m5_trend  = confluence["m5"]["structure"].get("trend", "—")
+    h1_trend   = confluence["h1"]["structure"].get("trend", "—")
+    h1_phase   = confluence["h1"]["structure"].get("phase", "—")
+    h1_quality = confluence["h1"]["structure"].get("setup_quality", "—")
+    h1_depth   = confluence["h1"]["structure"].get("pullback_depth", 0)
+    m15_trend  = confluence["m15"]["structure"].get("trend", "—")
+    m5_trend   = confluence["m5"]["structure"].get("trend", "—")
 
     breakdown = scored_signal["breakdown"]
 
@@ -67,8 +70,12 @@ def send_signal_alert(scored_signal: dict, confluence: dict):
         f"🕯️ Pattern:   {pattern_name}\n"
         f"⚡ FVG:       {fvg_line}\n"
         f"\n"
-        f"*Timeframe Alignment*\n"
-        f"  H1:  {_trend_emoji(h1_trend)} {h1_trend}\n"
+        f"*What This Means*\n"
+        f"_{confluence.get('tf_reading', '')} _\n"
+        f"\n"
+        f"*Market Structure*\n"
+        f"  H1:  {_trend_emoji(h1_trend)} {h1_trend} | {h1_phase} | Quality: {h1_quality}"
+        + (f" | Pullback: {int(h1_depth*100)}%" if h1_depth > 0 else "") + "\n"
         f"  M15: {_trend_emoji(m15_trend)} {m15_trend}\n"
         f"  M5:  {_trend_emoji(m5_trend)} {m5_trend}\n"
         f"\n"
