@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forex Scanner Dashboard</title>
+<style>
+  :root {
+    --bg:      #0d0d0d;
+    --bg2:     #151515;
+    --bg3:     #1e1e1e;
+    --border:  #2a2a2a;
+    --text:    #e8e8e8;
+    --muted:   #666;
+    --green:   #00c853;
+    --red:     #ff1744;
+    --yellow:  #ffd600;
+    --orange:  #ff6d00;
+    --blue:    #2979ff;
+    --purple:  #aa00ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; font-size: 13px; }
+
+  .header {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 14px 24px; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 100;
+  }
+  .header-title { font-size: 16px; font-weight: bold; letter-spacing: 2px; }
+  .header-title span { color: var(--green); }
+  .header-meta { display: flex; gap: 24px; font-size: 12px; color: var(--muted); }
+  .pulse { display: inline-block; width: 8px; height: 8px; background: var(--green);
+    border-radius: 50%; animation: pulse 1.5s infinite; margin-right: 6px; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .stats-bar {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 8px 24px; display: flex; gap: 32px; font-size: 12px;
+  }
+  .stat { color: var(--muted); }
+  .stat span { color: var(--text); font-weight: bold; margin-left: 6px; }
+  .stat .alert-count { color: var(--green); }
+
+  .container { padding: 20px 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: var(--bg3); color: var(--muted); font-size: 11px;
+    letter-spacing: 1px; text-transform: uppercase; padding: 10px 12px;
+    text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; cursor: pointer; }
+  tbody tr:hover { background: var(--bg3); }
+  tbody tr.alert-row { background: rgba(0,200,83,.04); }
+  tbody tr.alert-row:hover { background: rgba(0,200,83,.08); }
+  td { padding: 11px 12px; vertical-align: middle; }
+
+  .pair-cell { font-size: 14px; font-weight: bold; letter-spacing: 1px; }
+
+  .grade { display: inline-block; padding: 3px 9px; border-radius: 4px;
+    font-weight: bold; font-size: 12px; min-width: 34px; text-align: center; }
+  .grade-aplus { background: rgba(0,200,83,.18);  color: #00c853; border: 1px solid #00c853; }
+  .grade-a     { background: rgba(100,221,23,.14); color: #64dd17; border: 1px solid #64dd17; }
+  .grade-b     { background: rgba(255,214,0,.12);  color: #ffd600; border: 1px solid #ffd600; }
+  .grade-c     { background: rgba(255,109,0,.10);  color: #ff6d00; border: 1px solid #ff6d00; }
+  .grade-none  { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+
+  .score-wrap { min-width: 100px; }
+  .score-bar-bg { background: var(--border); border-radius: 3px; height: 5px; width: 70px; margin-top: 4px; overflow: hidden; }
+  .score-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+  .score-num { font-weight: bold; font-size: 13px; }
+
+  .dir-bullish { color: var(--green); font-weight: bold; }
+  .dir-bearish { color: var(--red);   font-weight: bold; }
+  .dir-neutral { color: var(--muted); }
+
+  .status-live  { color: var(--green); font-weight: bold; }
+  .status-watch { color: var(--yellow); }
+  .status-log   { color: var(--muted); }
+  .status-scan  { color: var(--muted); font-style: italic; }
+
+  .trend-up    { color: var(--green); }
+  .trend-down  { color: var(--red); }
+  .trend-range { color: var(--muted); }
+
+  .ict-pill { font-size: 11px; color: var(--purple);
+    background: rgba(170,0,255,.08); border: 1px solid rgba(170,0,255,.2);
+    padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
+  .ict-empty { color: var(--muted); font-size: 11px; }
+
+  .price-cell { font-size: 12px; color: var(--muted); }
+  .time-cell  { font-size: 11px; color: var(--muted); }
+
+  /* Expanded detail row */
+  .detail-row { display: none; background: var(--bg3); }
+  .detail-row td { padding: 0; }
+  .detail-inner { padding: 16px 20px 16px 48px; }
+
+  .trade-box {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 12px; margin-bottom: 14px;
+  }
+  .trade-level {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 14px;
+  }
+  .trade-level .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .trade-level .value { font-size: 14px; font-weight: bold; }
+  .trade-level .pips  { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .entry-level .value { color: var(--blue); }
+  .sl-level    .value { color: var(--red); }
+  .tp1-level   .value { color: var(--green); }
+  .tp2-level   .value { color: #00e676; }
+
+  .flags-section { margin-top: 10px; }
+  .flag-item { color: var(--muted); font-size: 12px; line-height: 2; }
+
+  .footer { text-align: center; color: var(--muted); font-size: 11px;
+    padding: 24px; border-top: 1px solid var(--border); margin-top: 12px; }
+
+  @keyframes flash { 0%,100%{background:transparent} 50%{background:rgba(0,200,83,.15)} }
+  .new-signal { animation: flash 1s ease-in-out 2; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-title">⚡ FOREX <span>SCANNER</span></div>
+  <div class="header-meta">
+    <span><span class="pulse"></span>LIVE</span>
+    <span id="clock">—</span>
+    <span>Refresh: {{ refresh }}s</span>
+  </div>
+</div>
+
+<div class="stats-bar">
+  <div class="stat">Pairs: <span id="stat-pairs">{{ pairs|length }}</span></div>
+  <div class="stat">Alerts: <span id="stat-alerts" class="alert-count">0</span></div>
+  <div class="stat">Updated: <span id="stat-updated">—</span></div>
+  <div class="stat">Session: <span id="stat-session">—</span></div>
+</div>
+
+<div class="container">
+<table id="signal-table">
+  <thead>
+    <tr>
+      <th>Pair</th>
+      <th>Grade</th>
+      <th>Score</th>
+      <th>Direction</th>
+      <th>Status</th>
+      <th>Setup</th>
+      <th>H1 Trend</th>
+      <th>M15</th>
+      <th>M5</th>
+      <th>ICT</th>
+      <th>Price</th>
+      <th>Updated</th>
+    </tr>
+  </thead>
+  <tbody id="signal-body">
+    <tr><td colspan="12" style="text-align:center;padding:40px;color:#666;">
+      Waiting for scanner data...
+    </td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="footer">
+  Slack: A+ and A only &nbsp;|&nbsp; Dashboard: all grades &nbsp;|&nbsp;
+  Click row for Entry / SL / TP1 / TP2 &nbsp;|&nbsp; Refreshes every {{ refresh }}s
+</div>
+
+<script>
+const REFRESH_MS = {{ refresh }} * 1000;
+let prevSignals  = {};
+
+function gradeClass(g) {
+  if (g==="A+") return "grade-aplus";
+  if (g==="A")  return "grade-a";
+  if (g==="B")  return "grade-b";
+  if (g==="C")  return "grade-c";
+  return "grade-none";
+}
+function scoreColor(s) {
+  if (s>=82) return "#00c853";
+  if (s>=68) return "#64dd17";
+  if (s>=54) return "#ffd600";
+  if (s>=40) return "#ff6d00";
+  return "#444";
+}
+function dirClass(d) {
+  if (!d) return "dir-neutral";
+  d = d.toLowerCase();
+  if (d==="bullish") return "dir-bullish";
+  if (d==="bearish") return "dir-bearish";
+  return "dir-neutral";
+}
+function trendClass(t) {
+  if (!t||t==="—") return "trend-range";
+  t = t.toLowerCase();
+  if (t.includes("up"))   return "trend-up";
+  if (t.includes("down")) return "trend-down";
+  return "trend-range";
+}
+function trendLabel(t) {
+  if (!t||t==="—") return "—";
+  t = t.toLowerCase();
+  if (t==="uptrend")        return "↑ UP";
+  if (t==="downtrend")      return "↓ DN";
+  if (t==="weak_uptrend")   return "↑ weak";
+  if (t==="weak_downtrend") return "↓ weak";
+  if (t==="ranging")        return "→ RNG";
+  return t;
+}
+function statusLabel(s) {
+  if (s.should_alert)                     return '<span class="status-live">⚡ LIVE</span>';
+  if (s.score>=54)                        return '<span class="status-watch">🔍 Watch</span>';
+  if (s.score>=40)                        return '<span class="status-log">📋 Logged</span>';
+  if (s.setup_type==="scanning...")       return '<span class="status-scan">scanning...</span>';
+  return '<span class="status-scan">—</span>';
+}
+function formatPrice(p, pair) {
+  if (!p||p===0) return "—";
+  if (pair&&pair.includes("JPY")) return p.toFixed(3);
+  if (pair&&pair.includes("XAU")) return p.toFixed(2);
+  if (pair&&pair.includes("XAG")) return p.toFixed(3);
+  return p.toFixed(5);
+}
+
+function buildTradeLevels(s) {
+  const tl = s.trade_levels;
+  if (!tl || !tl.entry_price) return "";
+
+  return `
+    <div class="trade-box">
+      <div class="trade-level entry-level">
+        <div class="label">Entry</div>
+        <div class="value">${tl.entry_price}</div>
+        <div class="pips">at zone/OB</div>
+      </div>
+      <div class="trade-level sl-level">
+        <div class="label">Stop Loss</div>
+        <div class="value">${tl.sl_price}</div>
+        <div class="pips">${tl.sl_pips} pips risk</div>
+      </div>
+      <div class="trade-level tp1-level">
+        <div class="label">TP1 — ${tl.rr1||'1:2'}</div>
+        <div class="value">${tl.tp1_price}</div>
+        <div class="pips">${tl.tp1_pips} pips</div>
+      </div>
+      <div class="trade-level tp2-level">
+        <div class="label">TP2 — ${tl.rr2||'1:3'}</div>
+        <div class="value">${tl.tp2_price}</div>
+        <div class="pips">${tl.tp2_pips} pips</div>
+      </div>
+    </div>
+  `;
+}
+
+function buildRow(s) {
+  const isNew   = prevSignals[s.pair] && prevSignals[s.pair].score !== s.score;
+  const isAlert = s.should_alert;
+  const rowClass = [isAlert?"alert-row":"", isNew?"new-signal":""].filter(Boolean).join(" ");
+  const detailId = `detail-${s.pair.replace("/","_")}`;
+
+  const flagsHtml = s.flags && s.flags.length
+    ? s.flags.map(f=>`<div class="flag-item">${f}</div>`).join("")
+    : '<div class="flag-item" style="color:#444">No flags</div>';
+
+  const gradeMeaning = s.grade_meaning
+    ? `<div style="font-size:11px;color:#888;margin-top:4px">${s.grade_meaning}</div>` : "";
+
+  const detailHtml = `
+    <tr id="${detailId}" class="detail-row">
+      <td colspan="12">
+        <div class="detail-inner">
+          ${buildTradeLevels(s)}
+          <div class="flags-section">
+            ${gradeMeaning}
+            ${flagsHtml}
+          </div>
+        </div>
+      </td>
+    </tr>
+  `;
+
+  const mainRow = `
+    <tr class="${rowClass}" onclick="toggleDetail('${detailId}')">
+      <td class="pair-cell">${s.pair.replace("_","/")}</td>
+      <td><span class="grade ${gradeClass(s.grade)}">${s.grade||"—"}</span></td>
+      <td class="score-wrap">
+        <div class="score-num" style="color:${scoreColor(s.score)}">${s.score||0}</div>
+        <div class="score-bar-bg">
+          <div class="score-bar-fill" style="width:${s.score}%;background:${scoreColor(s.score)}"></div>
+        </div>
+      </td>
+      <td class="${dirClass(s.direction)}">${s.direction?s.direction.toUpperCase():"—"}</td>
+      <td>${statusLabel(s)}</td>
+      <td style="font-size:12px;color:#aaa">${(s.setup_type||"").replace(/_/g," ")}</td>
+      <td class="${trendClass(s.h1_trend)}">${trendLabel(s.h1_trend)}</td>
+      <td class="${trendClass(s.m15_trend)}">${trendLabel(s.m15_trend)}</td>
+      <td class="${trendClass(s.m5_trend)}">${trendLabel(s.m5_trend)}</td>
+      <td>${s.ict_summary?`<span class="ict-pill">${s.ict_summary}</span>`:'<span class="ict-empty">—</span>'}</td>
+      <td class="price-cell">${formatPrice(s.current_price, s.pair)}</td>
+      <td class="time-cell">${s.updated_at||"—"}</td>
+    </tr>
+    ${detailHtml}
+  `;
+
+  return mainRow;
+}
+
+function toggleDetail(id) {
+  const row = document.getElementById(id);
+  if (row) row.style.display = row.style.display==="table-row" ? "none" : "table-row";
+}
+
+async function fetchAndRender() {
+  try {
+    const resp = await fetch("/api/signals");
+    const data = await resp.json();
+
+    document.getElementById("stat-alerts").textContent  = data.alert_count||0;
+    document.getElementById("stat-updated").textContent = data.updated_at||"—";
+
+    const signals = data.signals||[];
+    if (signals.length>0) {
+      const s = signals.find(x=>x.session&&x.session!=="—");
+      document.getElementById("stat-session").textContent =
+        s ? s.session.replace("_"," ").toUpperCase() : "—";
+    }
+
+    document.getElementById("signal-body").innerHTML = signals.map(buildRow).join("");
+    prevSignals = {};
+    signals.forEach(s=>prevSignals[s.pair]=s);
+
+  } catch(e) { console.warn("Fetch error:", e); }
+}
+
+function updateClock() {
+  const now = new Date();
+  const h   = String(now.getUTCHours()).padStart(2,"0");
+  const m   = String(now.getUTCMinutes()).padStart(2,"0");
+  const s   = String(now.getUTCSeconds()).padStart(2,"0");
+  document.getElementById("clock").textContent = `${h}:${m}:${s} UTC`;
+}
+
+fetchAndRender();
+setInterval(fetchAndRender, REFRESH_MS);
+setInterval(updateClock, 1000);
+updateClock();
+</script>
+</body>
+</html>

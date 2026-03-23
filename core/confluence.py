@@ -1,6 +1,11 @@
 """
 confluence.py — Multi-timeframe confluence engine
 H1 = structure anchor, M15 = confirmation, M5 = entry trigger
+
+UPDATES:
+- ICT context (OB, MSS, ChoCH, sweep, premium/discount) wired in
+- active_zones comes from get_active_zones() — strict price proximity check
+- approaching_warning properly stored in result dict
 """
 
 import logging
@@ -17,7 +22,6 @@ def get_approaching_zones(df, pair: str, zones: list, pip_buffer: int = 15) -> l
     """
     Find zones price is approaching but not yet at.
     Fires early warning so trader is ready before price arrives.
-    pip_buffer: how many pips away = 'approaching'
     """
     current_price = df["close"].iloc[-1]
     pip           = pip_size(pair)
@@ -25,7 +29,6 @@ def get_approaching_zones(df, pair: str, zones: list, pip_buffer: int = 15) -> l
     approaching   = []
 
     for zone in zones:
-        # Already at zone — skip (handled by active_zones)
         if price_at_zone(current_price, zone, pair):
             continue
 
@@ -37,7 +40,7 @@ def get_approaching_zones(df, pair: str, zones: list, pip_buffer: int = 15) -> l
             pips_away = round(min_dist / pip)
             approaching.append({
                 **zone,
-                "pips_away":   pips_away,
+                "pips_away":        pips_away,
                 "approaching_from": "below" if current_price < zone["low"] else "above",
             })
 
@@ -46,31 +49,33 @@ def get_approaching_zones(df, pair: str, zones: list, pip_buffer: int = 15) -> l
 
 def analyze_timeframe(candles: dict, pair: str, timeframe: str) -> dict:
     """Analyze a single timeframe — structure, zones, patterns, FVGs."""
-    df = candles[timeframe]
-    if df.empty:
-        return {"bias": "neutral", "zones": [], "patterns": [], "structure": {},
-                "active_zones": [], "approaching_zones": [], "consolidation": {},
-                "flips": [], "fvgs": [], "fvg_overlaps": [], "current_price": 0}
+    df = candles.get(timeframe)
+    if df is None or df.empty:
+        return {
+            "bias": "neutral", "zones": [], "patterns": [], "structure": {},
+            "active_zones": [], "approaching_zones": [], "consolidation": {},
+            "flips": [], "fvgs": [], "fvg_overlaps": [], "current_price": 0,
+        }
 
-    structure    = detect_market_structure(df)
-    zones        = get_all_zones(df, pair)
-    active_zones = get_active_zones(df, pair)
-    approaching  = get_approaching_zones(df, pair, zones)
+    structure     = detect_market_structure(df)
+    zones         = get_all_zones(df, pair)
+    active_zones  = get_active_zones(df, pair)   # strict — price must be AT zone
+    approaching   = get_approaching_zones(df, pair, zones)
     consolidation = detect_consolidation(df)
-    flips        = detect_sr_flips(df, zones)
-    active_fvgs  = get_active_fvgs(df)
-    fvg_overlaps = fvg_zone_overlap(active_fvgs, zones)
+    flips         = detect_sr_flips(df, zones)
+    active_fvgs   = get_active_fvgs(df)
+    fvg_overlaps  = fvg_zone_overlap(active_fvgs, zones)
 
-    # Phase-aware bias — this is the key
+    # Phase-aware bias
     bias = structure.get("bias", "neutral")
     if bias == "neutral":
         trend = structure.get("trend", "ranging")
         bias  = "bullish" if "up" in trend else ("bearish" if "down" in trend else "neutral")
 
     # Zone context overrides when price is AT a zone
-    zone_bias = None
     if active_zones:
-        top_zone = active_zones[0]
+        top_zone  = active_zones[0]
+        zone_bias = None
         if top_zone["type"] in ["support", "demand", "resistance_to_support"]:
             zone_bias = "bullish"
         elif top_zone["type"] in ["resistance", "supply", "support_to_resistance"]:
@@ -80,30 +85,28 @@ def analyze_timeframe(candles: dict, pair: str, timeframe: str) -> dict:
     patterns = detect_patterns(df, bias=bias)
 
     return {
-        "bias":             bias,
-        "zones":            zones,
-        "active_zones":     active_zones,
+        "bias":              bias,
+        "zones":             zones,
+        "active_zones":      active_zones,
         "approaching_zones": approaching,
-        "consolidation":    consolidation,
-        "patterns":         patterns,
-        "structure":        structure,
-        "flips":            flips,
-        "fvgs":             active_fvgs,
-        "fvg_overlaps":     fvg_overlaps,
-        "current_price":    df["close"].iloc[-1],
+        "consolidation":     consolidation,
+        "patterns":          patterns,
+        "structure":         structure,
+        "flips":             flips,
+        "fvgs":              active_fvgs,
+        "fvg_overlaps":      fvg_overlaps,
+        "current_price":     df["close"].iloc[-1],
     }
 
 
 def check_confluence(candles: dict, pair: str) -> dict:
     """
-    Core confluence engine — analyzes H1, M15, M5.
+    Core confluence engine — analyzes H1, M15, M5, M1.
 
-    Smart logic:
-    - H1 is always the anchor for direction
-    - M15 confirms the move is starting
-    - M5 provides entry trigger (pattern)
-    - Consolidation on M5 = wait, not enter
-    - Zone approach = early warning, not entry
+    H1  = direction anchor
+    M15 = confirmation
+    M5  = entry trigger
+    M1  = precision entry (used by streamer)
     """
     h1  = analyze_timeframe(candles, pair, "H1")
     m15 = analyze_timeframe(candles, pair, "M15")
@@ -116,15 +119,19 @@ def check_confluence(candles: dict, pair: str) -> dict:
     if bullish_count == 3:
         direction, aligned, confidence = "bullish", True, 3
         tf_reading = "H1 + M15 + M5 all bullish — full alignment, momentum entry opportunity"
+
     elif bearish_count == 3:
         direction, aligned, confidence = "bearish", True, 3
         tf_reading = "H1 + M15 + M5 all bearish — full alignment, momentum entry opportunity"
+
     elif bullish_count == 2:
         direction, aligned, confidence = "bullish", False, 2
         tf_reading = "H1 + one lower TF bullish — good timing, wait for M5 confirmation candle"
+
     elif bearish_count == 2:
         direction, aligned, confidence = "bearish", False, 2
         tf_reading = "H1 + one lower TF bearish — good timing, wait for M5 confirmation candle"
+
     else:
         # Fall back to H1 anchor
         h1_bias      = h1["structure"].get("bias", "neutral")
@@ -163,10 +170,13 @@ def check_confluence(candles: dict, pair: str) -> dict:
                 f"Range trade only. Tight SL, TP at range midpoint."
             )
         else:
-            tf_reading = f"Mixed signals. H1 bias {direction}. Proceed with caution, wait for alignment."
+            tf_reading = (
+                f"Mixed signals. H1 bias {direction}. "
+                f"Proceed with caution, wait for alignment."
+            )
 
-    # Consolidation check — if M5 is consolidating at zone, it's not an entry yet
-    m5_consolidating = m5["consolidation"].get("consolidating", False)
+    # Consolidation check
+    m5_consolidating   = m5["consolidation"].get("consolidating", False)
     consolidation_note = ""
     if m5_consolidating:
         consolidation_note = (
@@ -178,7 +188,9 @@ def check_confluence(candles: dict, pair: str) -> dict:
     setup_type = "none"
     if h1["flips"] or m15["flips"]:
         setup_type = "sr_flip"
-    elif h1["active_zones"] and any(z["type"] in ["supply", "demand"] for z in h1["active_zones"]):
+    elif h1["active_zones"] and any(
+        z["type"] in ["supply", "demand"] for z in h1["active_zones"]
+    ):
         setup_type = "supply_demand"
     elif h1["active_zones"]:
         h1_candles = candles["H1"]
@@ -191,12 +203,13 @@ def check_confluence(candles: dict, pair: str) -> dict:
     entry_confirmed = bool(m5["patterns"]) and not m5_consolidating
     entry_pattern   = m5["patterns"][0] if entry_confirmed else None
 
-    # Zone approach warning
+    # Approaching warning — stored here, wired into result
+    # main.py reads result["approaching_warning"] — this is where it comes from
     approaching_warning = ""
     if h1["approaching_zones"] and not h1["active_zones"]:
         closest = h1["approaching_zones"][0]
         approaching_warning = (
-            f"🔜 Price approaching {closest['type']} zone at {closest['mid']:.3f} "
+            f"🔜 Price approaching {closest['type']} zone at {closest['mid']:.5f} "
             f"({closest['pips_away']} pips away) — get ready"
         )
 
@@ -204,30 +217,41 @@ def check_confluence(candles: dict, pair: str) -> dict:
     has_fvg_overlap = bool(h1["fvg_overlaps"] or m15["fvg_overlaps"])
     active_fvgs     = h1["fvgs"] + m15["fvgs"] + m5["fvgs"]
 
+    # ICT context — run across H1/M15/M5
+    ict_context = {}
+    try:
+        from core.ict import get_ict_context
+        ict_context = get_ict_context(
+            candles["H1"], candles["M15"], candles["M5"]
+        )
+    except Exception as e:
+        logger.warning(f"ICT context failed: {e}")
+
     return {
-        "pair":                 pair,
-        "aligned":              aligned,
-        "direction":            direction,
-        "confidence":           confidence,
-        "tf_reading":           tf_reading,
-        "consolidation_note":   consolidation_note,
-        "approaching_warning":  approaching_warning,
-        "setup_type":           setup_type,
-        "entry_confirmed":      entry_confirmed,
-        "entry_pattern":        entry_pattern,
-        "has_fvg_overlap":      has_fvg_overlap,
-        "active_fvgs":          active_fvgs,
-        "fvg_overlaps":         h1["fvg_overlaps"] + m15["fvg_overlaps"],
-        "h1":                   h1,
-        "m15":                  m15,
-        "m5":                   m5,
-        "current_price":        m5["current_price"],
+        "pair":                pair,
+        "aligned":             aligned,
+        "direction":           direction,
+        "confidence":          confidence,
+        "tf_reading":          tf_reading,
+        "consolidation_note":  consolidation_note,
+        "approaching_warning": approaching_warning,
+        "setup_type":          setup_type,
+        "entry_confirmed":     entry_confirmed,
+        "entry_pattern":       entry_pattern,
+        "has_fvg_overlap":     has_fvg_overlap,
+        "active_fvgs":         active_fvgs,
+        "fvg_overlaps":        h1["fvg_overlaps"] + m15["fvg_overlaps"],
+        "h1":                  h1,
+        "m15":                 m15,
+        "m5":                  m5,
+        "ict":                 ict_context,
+        "current_price":       m5["current_price"],
     }
 
 
 def is_tradeable(confluence: dict) -> bool:
-    h1_zone_active = bool(confluence["h1"]["active_zones"])
-    tf_agreement   = confluence["confidence"] >= 2
-    entry_signal   = confluence["entry_confirmed"]
+    h1_zone_active    = bool(confluence["h1"]["active_zones"])
+    tf_agreement      = confluence["confidence"] >= 2
+    entry_signal      = confluence["entry_confirmed"]
     not_consolidating = not confluence["h1"]["consolidation"].get("consolidating", False)
     return h1_zone_active and tf_agreement and entry_signal and not_consolidating

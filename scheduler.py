@@ -1,6 +1,6 @@
 """
-scheduler.py — Auto-run briefings before Tokyo and New York sessions.
-Run this once and leave it — it fires the briefing 30 min before each session.
+scheduler.py — Auto-run briefings before Tokyo, London, and New York sessions.
+Run once and leave it — fires the briefing 30 min before each session open.
 
 Usage: python scheduler.py
 """
@@ -20,30 +20,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger("scheduler")
 
-# Track last briefing sent to avoid duplicates
-_last_briefing = {"tokyo": None, "new_york": None}
-BRIEFING_COOLDOWN_MINUTES = 120  # Don't re-send within 2 hours
+# Track last briefing to avoid duplicates
+_last_briefing         = {"tokyo": None, "london": None, "new_york": None}
+BRIEFING_COOLDOWN_MINS = 120
 
 
 def should_send(session: str) -> bool:
-    """Check if we should send the briefing — within window and not recently sent."""
-    last = _last_briefing[session]
+    last = _last_briefing.get(session)
     now  = datetime.utcnow()
 
     if last:
         mins_since = (now - last).total_seconds() / 60
-        if mins_since < BRIEFING_COOLDOWN_MINUTES:
+        if mins_since < BRIEFING_COOLDOWN_MINS:
             return False
 
     return is_briefing_time(session, window_minutes=35)
 
 
 def run_scheduler():
-    logger.info("Scheduler started. Watching for Tokyo and New York session opens...")
+    logger.info(
+        "Scheduler started. Watching for Tokyo, London, and New York session opens..."
+    )
 
     while True:
         try:
-            for session in ["tokyo", "new_york"]:
+            for session in ["tokyo", "london", "new_york"]:
                 if should_send(session):
                     logger.info(f"Triggering {session} briefing...")
                     from main import run_briefing
@@ -52,15 +53,15 @@ def run_scheduler():
 
             # Log next session times every 30 min
             now = datetime.utcnow()
-            if now.minute % 30 == 0 and now.second < 60:
-                for session in ["tokyo", "new_york"]:
+            if now.minute % 30 == 0 and now.second < 30:
+                for session in ["tokyo", "london", "new_york"]:
                     mins = minutes_to_session(session)
                     logger.info(f"  {session.title()}: {mins} min away")
 
         except Exception as e:
             logger.error(f"Scheduler error: {e}", exc_info=True)
 
-        time.sleep(60)  # Check every minute
+        time.sleep(60)
 
 
 if __name__ == "__main__":
