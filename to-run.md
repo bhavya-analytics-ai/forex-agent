@@ -20,4 +20,8 @@ python main.py scan
 python main.py took GBP_JPY long
 
 # Short trade
-python main.py took GBP_JPY short
+python main.py took GBP_USD short
+
+forex-agent) ompandya@MacBookAir forex-agent % git log --oneline -1
+13d6262 (HEAD -> main) Gold nd jpy breakout not good
+(forex-agent) ompandya@MacBookAir forex-agent % 
