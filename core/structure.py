@@ -108,9 +108,9 @@ def detect_dominant_trend(df: pd.DataFrame) -> dict:
     """
     swings = get_swing_points(df)
 
-    # Use last 4 clean swings only
-    highs = swings["highs"]["price"].values[-4:]
-    lows  = swings["lows"]["price"].values[-4:]
+    # Use last 6 clean swings only
+    highs = swings["highs"]["price"].values[-6:]
+    lows  = swings["lows"]["price"].values[-6:]
 
     if len(highs) < 2 or len(lows) < 2:
         return {
@@ -133,7 +133,7 @@ def detect_dominant_trend(df: pd.DataFrame) -> dict:
 
         for i in range(1, len(values)):
             # Last comparison (most recent) gets weight 2, older get weight 1
-            weight = 2 if i == len(values) - 1 else 1
+            weight = 2 if i == len(values) - 2 else 1
             total_weight += weight
 
             if direction == "up" and values[i] > values[i - 1]:

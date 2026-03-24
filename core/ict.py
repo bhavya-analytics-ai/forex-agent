@@ -1,15 +1,18 @@
 """
 core/ict.py — ICT / Smart Money Concepts
 
-Concepts implemented:
-  1. Order Blocks (OB)       — last bearish candle before bullish impulse (and vice versa)
-  2. Breaker Blocks          — order blocks that got broken, now act as opposing zone
-  3. Liquidity Sweeps        — wick above swing high closes back below = sweep
-  4. MSS (Market Structure Shift) — price breaks last Lower High in downtrend = bullish flip
-  5. ChoCH (Change of Character)  — first break of any short-term high, precedes MSS
-  6. Premium / Discount Zones     — 50% of swing range = equilibrium
-                                    above = premium (sell bias)
-                                    below = discount (buy bias)
+FIXES IN THIS VERSION:
+1. ChoCH — was firing on EVERY candle because it just checked if price
+   was above any recent high. Now correctly checks if price JUST broke
+   a level (prev close was below, current close is above). Real ChoCH only.
+
+2. Premium/Discount — was using highs[-1] and lows[-1] independently,
+   which could be from completely different swing legs. Now uses the most
+   recent PAIRED swing high and low from the same price leg. Gold at 4466
+   is not "premium" relative to a range from 6 months ago.
+
+3. MSS — added mss_direction to return dict so confluence.py can use it
+   to influence final direction decision.
 """
 
 import pandas as pd
@@ -25,15 +28,6 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────
 
 def find_order_blocks(df: pd.DataFrame) -> list:
-    """
-    Bullish OB: last bearish candle before a strong bullish impulse move.
-    Bearish OB: last bullish candle before a strong bearish impulse move.
-
-    Impulse = next candle body is >= 1.5x average candle size AND
-              moves decisively away from the OB candle.
-
-    Returns list of OBs sorted most recent first.
-    """
     avg_body = df["high"].sub(df["low"]).rolling(10).mean()
     obs      = []
 
@@ -47,12 +41,11 @@ def find_order_blocks(df: pd.DataFrame) -> list:
         if avg == 0:
             continue
 
-        # Bullish OB: bearish candle followed by strong bullish impulse
         if (
-            candle["close"] < candle["open"]          # bearish candle
-            and next_candle["close"] > next_candle["open"]  # bullish next
-            and next_body >= avg * 1.5                # strong impulse
-            and next_candle["close"] > candle["high"] # closes above OB high
+            candle["close"] < candle["open"]
+            and next_candle["close"] > next_candle["open"]
+            and next_body >= avg * 1.5
+            and next_candle["close"] > candle["high"]
         ):
             obs.append({
                 "type":       "bullish",
@@ -66,12 +59,11 @@ def find_order_blocks(df: pd.DataFrame) -> list:
                 "timeframe":  _guess_tf(df),
             })
 
-        # Bearish OB: bullish candle followed by strong bearish impulse
         elif (
-            candle["close"] > candle["open"]           # bullish candle
-            and next_candle["close"] < next_candle["open"]  # bearish next
-            and next_body >= avg * 1.5                 # strong impulse
-            and next_candle["close"] < candle["low"]   # closes below OB low
+            candle["close"] > candle["open"]
+            and next_candle["close"] < next_candle["open"]
+            and next_body >= avg * 1.5
+            and next_candle["close"] < candle["low"]
         ):
             obs.append({
                 "type":       "bearish",
@@ -85,36 +77,25 @@ def find_order_blocks(df: pd.DataFrame) -> list:
                 "timeframe":  _guess_tf(df),
             })
 
-    # Check which OBs have been broken (price traded through them)
     obs = _mark_broken_obs(df, obs)
-
-    # Return unbroken OBs only, most recent first
     active = [ob for ob in obs if not ob["broken"]]
     active.sort(key=lambda x: x["formed_at"], reverse=True)
-
-    logger.debug(f"Found {len(active)} active OBs ({len(obs)} total)")
     return active
 
 
 def _mark_broken_obs(df: pd.DataFrame, obs: list) -> list:
-    """Mark OBs where price has since traded through the body."""
     for ob in obs:
         try:
-            formed_loc  = df.index.get_loc(ob["formed_at"])
-            subsequent  = df.iloc[formed_loc + 2:]   # skip impulse candle
-
+            formed_loc = df.index.get_loc(ob["formed_at"])
+            subsequent = df.iloc[formed_loc + 2:]
             if subsequent.empty:
                 continue
-
             if ob["type"] == "bullish":
-                # Broken if price closes below the OB low
                 ob["broken"] = bool((subsequent["close"] < ob["low"]).any())
             else:
-                # Broken if price closes above the OB high
                 ob["broken"] = bool((subsequent["close"] > ob["high"]).any())
         except Exception:
             continue
-
     return obs
 
 
@@ -123,20 +104,12 @@ def _mark_broken_obs(df: pd.DataFrame, obs: list) -> list:
 # ─────────────────────────────────────────────────────────────
 
 def find_breaker_blocks(df: pd.DataFrame) -> list:
-    """
-    Breaker Block = an Order Block that got broken through.
-    Now it flips polarity and acts as resistance (was support) or support (was resistance).
-
-    Bullish OB gets broken → becomes bearish breaker (resistance)
-    Bearish OB gets broken → becomes bullish breaker (support)
-    """
-    all_obs  = find_order_blocks.__wrapped__(df) if hasattr(find_order_blocks, "__wrapped__") else _find_all_obs(df)
+    all_obs  = _find_all_obs(df)
     breakers = []
 
     for ob in all_obs:
         if not ob["broken"]:
             continue
-
         breaker_type = "bearish" if ob["type"] == "bullish" else "bullish"
         breakers.append({
             "type":          breaker_type,
@@ -145,7 +118,7 @@ def find_breaker_blocks(df: pd.DataFrame) -> list:
             "low":           ob["low"],
             "mid":           ob["mid"],
             "formed_at":     ob["formed_at"],
-            "timeframe":     ob["timeframe"],
+            "timeframe":     ob.get("timeframe", ""),
             "note":          f"Broken {ob['type']} OB — now acts as {breaker_type} zone",
         })
 
@@ -154,7 +127,6 @@ def find_breaker_blocks(df: pd.DataFrame) -> list:
 
 
 def _find_all_obs(df: pd.DataFrame) -> list:
-    """Internal: find ALL OBs including broken ones."""
     avg_body = df["high"].sub(df["low"]).rolling(10).mean()
     obs      = []
 
@@ -200,40 +172,24 @@ def _find_all_obs(df: pd.DataFrame) -> list:
 # ─────────────────────────────────────────────────────────────
 
 def find_liquidity_sweeps(df: pd.DataFrame) -> list:
-    """
-    Liquidity Sweep:
-      Buy-side sweep:  wick above a swing high, candle CLOSES back below it
-      Sell-side sweep: wick below a swing low,  candle CLOSES back above it
-
-    This is a classic smart money move — take out stops above highs/below lows
-    then reverse. A sweep is a strong reversal signal.
-    """
-    swings  = get_swing_points(df)
-    sweeps  = []
-    atr     = df["high"].sub(df["low"]).rolling(14).mean()
-
-    # Check recent candles for sweeps
+    swings   = get_swing_points(df)
+    sweeps   = []
+    atr      = df["high"].sub(df["low"]).rolling(14).mean()
     lookback = min(30, len(df) - 1)
 
     for i in range(len(df) - lookback, len(df)):
-        candle    = df.iloc[i]
+        candle     = df.iloc[i]
         candle_atr = atr.iloc[i]
 
         if candle_atr == 0:
             continue
 
-        # Buy-side sweep: wick above swing high, close back below
         for _, swing_row in swings["highs"].iterrows():
             swing_price = swing_row["price"]
-
-            if swing_price <= df["high"].iloc[:i].max() * 0.999:
-                # Only check recent swing highs (within lookback)
-                pass
-
-            wick_above   = candle["high"] > swing_price
-            close_below  = candle["close"] < swing_price
-            wick_size    = candle["high"] - max(candle["open"], candle["close"])
-            meaningful   = wick_size >= candle_atr * 0.3  # wick must be meaningful
+            wick_above  = candle["high"] > swing_price
+            close_below = candle["close"] < swing_price
+            wick_size   = candle["high"] - max(candle["open"], candle["close"])
+            meaningful  = wick_size >= candle_atr * 0.3
 
             if wick_above and close_below and meaningful:
                 sweeps.append({
@@ -244,19 +200,17 @@ def find_liquidity_sweeps(df: pd.DataFrame) -> list:
                     "wick_size":    wick_size,
                     "time":         df.index[i],
                     "bars_ago":     len(df) - i - 1,
-                    "bias":         "bearish",  # sweep buy stops = bearish
+                    "bias":         "bearish",
                     "description":  f"Buy-side liquidity swept @ {swing_price:.5f} — bearish reversal signal",
                 })
-                break  # one sweep per candle is enough
+                break
 
-        # Sell-side sweep: wick below swing low, close back above
         for _, swing_row in swings["lows"].iterrows():
             swing_price = swing_row["price"]
-
-            wick_below   = candle["low"] < swing_price
-            close_above  = candle["close"] > swing_price
-            wick_size    = min(candle["open"], candle["close"]) - candle["low"]
-            meaningful   = wick_size >= candle_atr * 0.3
+            wick_below  = candle["low"] < swing_price
+            close_above = candle["close"] > swing_price
+            wick_size   = min(candle["open"], candle["close"]) - candle["low"]
+            meaningful  = wick_size >= candle_atr * 0.3
 
             if wick_below and close_above and meaningful:
                 sweeps.append({
@@ -267,12 +221,11 @@ def find_liquidity_sweeps(df: pd.DataFrame) -> list:
                     "wick_size":    wick_size,
                     "time":         df.index[i],
                     "bars_ago":     len(df) - i - 1,
-                    "bias":         "bullish",  # sweep sell stops = bullish
+                    "bias":         "bullish",
                     "description":  f"Sell-side liquidity swept @ {swing_price:.5f} — bullish reversal signal",
                 })
                 break
 
-    # Most recent sweeps first, only sweeps from last 10 bars are actionable
     sweeps = [s for s in sweeps if s["bars_ago"] <= 10]
     sweeps.sort(key=lambda x: x["bars_ago"])
     return sweeps
@@ -283,38 +236,26 @@ def find_liquidity_sweeps(df: pd.DataFrame) -> list:
 # ─────────────────────────────────────────────────────────────
 
 def detect_mss(df: pd.DataFrame) -> dict:
-    """
-    MSS (Market Structure Shift):
-      Bullish MSS: in a downtrend, price breaks above the LAST Lower High
-                   with a full candle close above it
-      Bearish MSS: in an uptrend, price breaks below the LAST Higher Low
-                   with a full candle close below it
-
-    MSS = trend is officially changing. Strong signal.
-    """
-    swings        = get_swing_points(df)
-    current_price = df["close"].iloc[-1]
-    last_close    = df["close"].iloc[-1]
-    prev_close    = df["close"].iloc[-2]
+    swings     = get_swing_points(df)
+    last_close = df["close"].iloc[-1]
+    prev_close = df["close"].iloc[-2]
 
     highs = swings["highs"]["price"].values
     lows  = swings["lows"]["price"].values
 
     result = {
-        "detected":  False,
-        "type":      None,
-        "level":     None,
-        "bars_ago":  None,
+        "detected":    False,
+        "type":        None,
+        "level":       None,
+        "bars_ago":    None,
         "description": "",
     }
 
     if len(highs) < 2 or len(lows) < 2:
         return result
 
-    # Bullish MSS: closed above last swing high (breaks lower high in downtrend)
     last_high = highs[-1]
     if last_close > last_high and prev_close <= last_high:
-        # Fresh break — happened on last closed candle
         result.update({
             "detected":    True,
             "type":        "bullish",
@@ -324,7 +265,6 @@ def detect_mss(df: pd.DataFrame) -> dict:
         })
         return result
 
-    # Bearish MSS: closed below last swing low (breaks higher low in uptrend)
     last_low = lows[-1]
     if last_close < last_low and prev_close >= last_low:
         result.update({
@@ -336,7 +276,6 @@ def detect_mss(df: pd.DataFrame) -> dict:
         })
         return result
 
-    # Check last 5 candles for recent MSS
     for i in range(2, min(6, len(df))):
         close_i      = df["close"].iloc[-i]
         close_before = df["close"].iloc[-i - 1]
@@ -370,19 +309,17 @@ def detect_mss(df: pd.DataFrame) -> dict:
 
 def detect_choch(df: pd.DataFrame) -> dict:
     """
-    ChoCH (Change of Character):
-      The FIRST break of a short-term swing high/low that precedes MSS.
-      Less confirmed than MSS but fires earlier.
+    FIX: Previous version fired ChoCH if last_close > ANY recent high.
+    That's almost always true and means nothing.
 
-      In downtrend: first candle that closes above any recent swing high
-      In uptrend:   first candle that closes below any recent swing low
-
-    ChoCH = early warning. MSS = confirmation.
+    Correct ChoCH: price must have been BELOW the level on the previous
+    candle and CLOSE ABOVE it on the current candle. A fresh break only.
+    We check the last 3 candles for a recent fresh break.
     """
     swings     = get_swing_points(df)
     last_close = df["close"].iloc[-1]
+    prev_close = df["close"].iloc[-2] if len(df) >= 2 else last_close
 
-    # Use short-term swings — last 5 swing points
     recent_highs = swings["highs"]["price"].values[-5:]
     recent_lows  = swings["lows"]["price"].values[-5:]
 
@@ -397,27 +334,55 @@ def detect_choch(df: pd.DataFrame) -> dict:
     if len(recent_highs) == 0 or len(recent_lows) == 0:
         return result
 
-    # Bullish ChoCH: close above any recent swing high
-    for i, level in enumerate(reversed(recent_highs)):
-        if last_close > level:
+    # Bullish ChoCH: current close ABOVE level AND previous close was BELOW it
+    # = fresh break, not just "price is above some high"
+    for level in reversed(recent_highs):
+        if last_close > level and prev_close <= level:
             result.update({
                 "detected":    True,
                 "type":        "bullish",
                 "level":       level,
                 "bars_ago":    0,
-                "description": f"⚡ Bullish ChoCH — broke short-term high @ {level:.5f} (precedes MSS)",
+                "description": f"⚡ Bullish ChoCH — just broke short-term high @ {level:.5f}",
             })
             return result
 
-    # Bearish ChoCH: close below any recent swing low
-    for i, level in enumerate(reversed(recent_lows)):
-        if last_close < level:
+    # Check 2-3 bars back for recent ChoCH
+    for lookback in range(2, min(4, len(df))):
+        close_now  = df["close"].iloc[-lookback]
+        close_prev = df["close"].iloc[-lookback - 1]
+
+        for level in reversed(recent_highs):
+            if close_now > level and close_prev <= level:
+                result.update({
+                    "detected":    True,
+                    "type":        "bullish",
+                    "level":       level,
+                    "bars_ago":    lookback - 1,
+                    "description": f"⚡ Bullish ChoCH {lookback-1}b ago — broke {level:.5f}",
+                })
+                return result
+
+        for level in reversed(recent_lows):
+            if close_now < level and close_prev >= level:
+                result.update({
+                    "detected":    True,
+                    "type":        "bearish",
+                    "level":       level,
+                    "bars_ago":    lookback - 1,
+                    "description": f"⚡ Bearish ChoCH {lookback-1}b ago — broke {level:.5f}",
+                })
+                return result
+
+    # Bearish ChoCH: current close BELOW level AND previous close was ABOVE it
+    for level in reversed(recent_lows):
+        if last_close < level and prev_close >= level:
             result.update({
                 "detected":    True,
                 "type":        "bearish",
                 "level":       level,
                 "bars_ago":    0,
-                "description": f"⚡ Bearish ChoCH — broke short-term low @ {level:.5f} (precedes MSS)",
+                "description": f"⚡ Bearish ChoCH — just broke short-term low @ {level:.5f}",
             })
             return result
 
@@ -430,33 +395,56 @@ def detect_choch(df: pd.DataFrame) -> dict:
 
 def get_premium_discount(df: pd.DataFrame) -> dict:
     """
-    Premium / Discount based on the current swing range.
+    FIX: Previous version used highs[-1] and lows[-1] independently.
+    These could be from completely different swing legs — e.g. last high
+    from 3 weeks ago, last low from yesterday. The range was meaningless.
 
-    Equilibrium = 50% of the range between last swing high and swing low
-    Discount    = below 50% → buy bias (price is cheap)
-    Premium     = above 50% → sell bias (price is expensive)
+    Now: find the most recent COMPLETE swing leg — either:
+    - Last swing high → last swing low (if high came after low = bearish leg)
+    - Last swing low → last swing high (if low came after high = bullish leg)
 
-    Trading rule:
-      Buy in discount (0%–40% of range)
-      Sell in premium (60%–100% of range)
-      Avoid equilibrium zone (40%–60%) — less edge
+    This gives the CURRENT range price is trading in, not some random range.
+    Critical for gold which has moved into entirely new price territory.
     """
     swings = get_swing_points(df)
-    highs  = swings["highs"]["price"].values
-    lows   = swings["lows"]["price"].values
+    highs  = swings["highs"]
+    lows   = swings["lows"]
 
-    if len(highs) == 0 or len(lows) == 0:
+    if highs.empty or lows.empty:
         return {
-            "zone":          "unknown",
-            "pct":           0.5,
-            "equilibrium":   0,
-            "swing_high":    0,
-            "swing_low":     0,
-            "description":   "Not enough swing data",
+            "zone":        "unknown",
+            "pct":         0.5,
+            "equilibrium": 0,
+            "swing_high":  0,
+            "swing_low":   0,
+            "description": "Not enough swing data",
         }
 
-    swing_high    = float(highs[-1])
-    swing_low     = float(lows[-1])
+    # Get the most recent swing high and low WITH their timestamps
+    last_high_time  = highs.index[-1]
+    last_high_price = float(highs["price"].values[-1])
+    last_low_time   = lows.index[-1]
+    last_low_price  = float(lows["price"].values[-1])
+
+    # Use whichever came LATER as the anchor, pair with the most recent opposite
+    # This finds the current active swing range
+    if last_high_time > last_low_time:
+        # Most recent event was a swing high — find the swing low BEFORE it
+        lows_before = lows[lows.index < last_high_time]
+        if lows_before.empty:
+            swing_low = last_low_price
+        else:
+            swing_low = float(lows_before["price"].values[-1])
+        swing_high = last_high_price
+    else:
+        # Most recent event was a swing low — find the swing high BEFORE it
+        highs_before = highs[highs.index < last_low_time]
+        if highs_before.empty:
+            swing_high = last_high_price
+        else:
+            swing_high = float(highs_before["price"].values[-1])
+        swing_low = last_low_price
+
     swing_range   = swing_high - swing_low
     current_price = df["close"].iloc[-1]
 
@@ -470,9 +458,9 @@ def get_premium_discount(df: pd.DataFrame) -> dict:
             "description": "Range too tight — no premium/discount context",
         }
 
-    pct           = (current_price - swing_low) / swing_range
-    pct           = max(0.0, min(pct, 1.0))
-    equilibrium   = (swing_high + swing_low) / 2
+    pct         = (current_price - swing_low) / swing_range
+    pct         = max(0.0, min(pct, 1.0))
+    equilibrium = (swing_high + swing_low) / 2
 
     if pct >= 0.60:
         zone        = "premium"
@@ -503,30 +491,22 @@ def get_premium_discount(df: pd.DataFrame) -> dict:
 # ─────────────────────────────────────────────────────────────
 
 def get_ict_context(df_h1: pd.DataFrame, df_m15: pd.DataFrame, df_m5: pd.DataFrame) -> dict:
-    """
-    Run full ICT analysis across all timeframes.
-    Returns a single dict used by confluence engine and scorer.
-    """
     try:
-        # H1 — structure-level ICT
-        obs_h1        = find_order_blocks(df_h1)
-        breakers_h1   = find_breaker_blocks(df_h1)
-        pd_h1         = get_premium_discount(df_h1)
-        mss_h1        = detect_mss(df_h1)
+        obs_h1      = find_order_blocks(df_h1)
+        breakers_h1 = find_breaker_blocks(df_h1)
+        pd_h1       = get_premium_discount(df_h1)
+        mss_h1      = detect_mss(df_h1)
 
-        # M15 — confirmation-level ICT
-        obs_m15       = find_order_blocks(df_m15)
-        sweeps_m15    = find_liquidity_sweeps(df_m15)
-        mss_m15       = detect_mss(df_m15)
-        choch_m15     = detect_choch(df_m15)
+        obs_m15   = find_order_blocks(df_m15)
+        sweeps_m15 = find_liquidity_sweeps(df_m15)
+        mss_m15   = detect_mss(df_m15)
+        choch_m15 = detect_choch(df_m15)
 
-        # M5 — entry-level ICT
-        obs_m5        = find_order_blocks(df_m5)
-        sweeps_m5     = find_liquidity_sweeps(df_m5)
-        mss_m5        = detect_mss(df_m5)
-        choch_m5      = detect_choch(df_m5)
+        obs_m5    = find_order_blocks(df_m5)
+        sweeps_m5 = find_liquidity_sweeps(df_m5)
+        mss_m5    = detect_mss(df_m5)
+        choch_m5  = detect_choch(df_m5)
 
-        # Most relevant OB for signal (closest to current price on M15)
         current_price = df_m5["close"].iloc[-1]
         nearby_obs    = [
             ob for ob in obs_m15
@@ -535,47 +515,49 @@ def get_ict_context(df_h1: pd.DataFrame, df_m15: pd.DataFrame, df_m5: pd.DataFra
         ]
         top_ob = nearby_obs[0] if nearby_obs else (obs_m15[0] if obs_m15 else None)
 
-        # Recent sweep (within 5 bars)
         recent_sweep = next(
             (s for s in (sweeps_m5 + sweeps_m15) if s["bars_ago"] <= 5),
             None
         )
 
+        # Determine ICT-based direction signal
+        # MSS is the strongest signal — if MSS fired, that's the direction
+        # ChoCH is secondary — earlier warning
+        ict_direction = None
+        if mss_m5["detected"]:
+            ict_direction = mss_m5["type"]
+        elif mss_m15["detected"]:
+            ict_direction = mss_m15["type"]
+        elif mss_h1["detected"]:
+            ict_direction = mss_h1["type"]
+        elif choch_m5["detected"]:
+            ict_direction = choch_m5["type"]
+        elif choch_m15["detected"]:
+            ict_direction = choch_m15["type"]
+
         return {
-            # Order blocks
             "obs_h1":      obs_h1,
             "obs_m15":     obs_m15,
             "obs_m5":      obs_m5,
             "top_ob":      top_ob,
-
-            # Breakers
             "breakers_h1": breakers_h1,
-
-            # Sweeps
             "sweeps_m15":  sweeps_m15,
             "sweeps_m5":   sweeps_m5,
             "recent_sweep": recent_sweep,
-
-            # MSS
             "mss_h1":      mss_h1,
             "mss_m15":     mss_m15,
             "mss_m5":      mss_m5,
-
-            # ChoCH
             "choch_m15":   choch_m15,
             "choch_m5":    choch_m5,
-
-            # Premium/Discount
             "premium_discount": pd_h1,
-
-            # Quick flags for scorer
-            "has_ob":           bool(top_ob),
-            "has_sweep":        bool(recent_sweep),
-            "has_mss":          mss_m5["detected"] or mss_m15["detected"],
-            "has_choch":        choch_m5["detected"] or choch_m15["detected"],
-            "in_premium":       pd_h1["zone"] == "premium",
-            "in_discount":      pd_h1["zone"] == "discount",
-            "mss_direction":    mss_m5.get("type") or mss_m15.get("type"),
+            "has_ob":      bool(top_ob),
+            "has_sweep":   bool(recent_sweep),
+            "has_mss":     mss_m5["detected"] or mss_m15["detected"],
+            "has_choch":   choch_m5["detected"] or choch_m15["detected"],
+            "in_premium":  pd_h1["zone"] == "premium",
+            "in_discount": pd_h1["zone"] == "discount",
+            "mss_direction":  mss_m5.get("type") or mss_m15.get("type"),
+            "ict_direction":  ict_direction,  # NEW: clean single direction signal from ICT
         }
 
     except Exception as e:
@@ -589,7 +571,7 @@ def get_ict_context(df_h1: pd.DataFrame, df_m15: pd.DataFrame, df_m5: pd.DataFra
             "premium_discount": {"zone": "unknown", "pct": 0.5},
             "has_ob": False, "has_sweep": False, "has_mss": False,
             "has_choch": False, "in_premium": False, "in_discount": False,
-            "mss_direction": None,
+            "mss_direction": None, "ict_direction": None,
         }
 
 
@@ -598,16 +580,14 @@ def get_ict_context(df_h1: pd.DataFrame, df_m15: pd.DataFrame, df_m5: pd.DataFra
 # ─────────────────────────────────────────────────────────────
 
 def _guess_tf(df: pd.DataFrame) -> str:
-    """Guess timeframe from candle count."""
     n = len(df)
-    if n >= 150:  return "H1"
-    if n >= 80:   return "M15"
-    if n >= 50:   return "M5"
+    if n >= 150: return "H1"
+    if n >= 80:  return "M15"
+    if n >= 50:  return "M5"
     return "M1"
 
 
 def format_ict_summary(ict: dict) -> str:
-    """One-line ICT summary for alert output."""
     parts = []
 
     pd_zone = ict.get("premium_discount", {})
@@ -629,10 +609,10 @@ def format_ict_summary(ict: dict) -> str:
     if ict.get("has_sweep"):
         sweep = ict.get("recent_sweep")
         if sweep:
-            parts.append(f"Swept {sweep['type'].replace('_',' ')} @ {sweep['swept_level']:.5f}")
+            parts.append(f"Swept {sweep['type'].replace('_',' ')}")
 
     if ict.get("top_ob"):
         ob = ict["top_ob"]
-        parts.append(f"{ob['type'].title()} OB {ob['low']:.5f}–{ob['high']:.5f}")
+        parts.append(f"{ob['type'].title()} OB")
 
     return " | ".join(parts) if parts else "No ICT context"

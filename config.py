@@ -39,7 +39,7 @@ TIMEFRAMES = {
 
 # Candle counts to fetch per timeframe
 CANDLE_COUNTS = {
-    "H1":  200,
+    "H1":  400,
     "M15": 100,
     "M5":  60,
     "M1":  60,

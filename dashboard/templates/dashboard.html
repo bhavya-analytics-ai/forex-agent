@@ -3,143 +3,588 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Forex Scanner Dashboard</title>
+<title>Forex Scanner — ICT Edition</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:      #0d0d0d;
-    --bg2:     #151515;
-    --bg3:     #1e1e1e;
-    --border:  #2a2a2a;
-    --text:    #e8e8e8;
-    --muted:   #666;
-    --green:   #00c853;
-    --red:     #ff1744;
-    --yellow:  #ffd600;
-    --orange:  #ff6d00;
-    --blue:    #2979ff;
-    --purple:  #aa00ff;
+    --navy-darkest: #060d1a;
+    --navy-dark:    #0a1628;
+    --navy-mid:     #0f2040;
+    --navy-light:   #162d56;
+    --navy-border:  #1e3a6e;
+    --navy-glow:    #1a4080;
+
+    --blue-bright:  #4d9fff;
+    --blue-mid:     #2979ff;
+    --blue-dim:     #1565c0;
+
+    --green:        #00e676;
+    --green-dim:    #00c853;
+    --green-glow:   rgba(0,230,118,.15);
+
+    --red:          #ff4444;
+    --red-dim:      #d32f2f;
+    --red-glow:     rgba(255,68,68,.15);
+
+    --yellow:       #ffd740;
+    --yellow-dim:   #ffc400;
+    --orange:       #ff9100;
+
+    --purple:       #e040fb;
+    --purple-dim:   rgba(224,64,251,.12);
+
+    --text-primary:   #e8f0fe;
+    --text-secondary: #8ab4f8;
+    --text-muted:     #4a6fa5;
+    --text-dim:       #2d4a7a;
+
+    --aplus-bg:  rgba(0,230,118,.1);
+    --aplus-border: #00e676;
+    --a-bg:      rgba(77,159,255,.1);
+    --a-border:  #4d9fff;
+    --b-bg:      rgba(255,215,64,.08);
+    --b-border:  #ffd740;
+    --c-bg:      rgba(255,145,0,.06);
+    --c-border:  #ff9100;
   }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; font-size: 13px; }
 
+  body {
+    background: var(--navy-darkest);
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ─────────────────────────────── */
   .header {
-    background: var(--bg2); border-bottom: 1px solid var(--border);
-    padding: 14px 24px; display: flex; align-items: center;
-    justify-content: space-between; position: sticky; top: 0; z-index: 100;
+    background: linear-gradient(180deg, var(--navy-dark) 0%, var(--navy-darkest) 100%);
+    border-bottom: 1px solid var(--navy-border);
+    padding: 0 28px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 20px rgba(0,0,0,.5);
   }
-  .header-title { font-size: 16px; font-weight: bold; letter-spacing: 2px; }
-  .header-title span { color: var(--green); }
-  .header-meta { display: flex; gap: 24px; font-size: 12px; color: var(--muted); }
-  .pulse { display: inline-block; width: 8px; height: 8px; background: var(--green);
-    border-radius: 50%; animation: pulse 1.5s infinite; margin-right: 6px; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--blue-mid), var(--blue-bright));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    box-shadow: 0 0 16px rgba(41,121,255,.4);
+  }
+
+  .logo-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--text-primary);
+  }
+  .logo-text span { color: var(--blue-bright); }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .live-badge {
+    display: flex; align-items: center; gap: 7px;
+    background: rgba(0,230,118,.08);
+    border: 1px solid rgba(0,230,118,.25);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--green);
+    letter-spacing: 1px;
+  }
+
+  .pulse {
+    width: 7px; height: 7px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+    box-shadow: 0 0 6px var(--green);
+  }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.85)} }
+
+  .clock {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+  }
+
+  .session-badge {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--blue-bright);
+    background: rgba(41,121,255,.1);
+    border: 1px solid rgba(41,121,255,.25);
+    border-radius: 4px;
+    padding: 3px 10px;
+  }
+
+  /* ── NEWS TICKER ─────────────────────────── */
+  #news-bar {
+    background: var(--navy-dark);
+    border-bottom: 1px solid var(--navy-border);
+    padding: 0 28px;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow: hidden;
+    transition: all .3s;
+  }
+
+  #news-bar.news-alert {
+    background: rgba(255,68,68,.06);
+    border-bottom-color: rgba(255,68,68,.4);
+  }
+
+  #news-bar.news-caution {
+    background: rgba(255,215,64,.04);
+    border-bottom-color: rgba(255,215,64,.3);
+  }
+
+  .news-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 0 14px 0 0;
+    border-right: 1px solid var(--navy-border);
+    margin-right: 14px;
+    white-space: nowrap;
+    color: var(--text-muted);
+  }
+
+  .news-items {
+    display: flex;
+    gap: 28px;
+    align-items: center;
+    flex: 1;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .news-items::-webkit-scrollbar { display: none; }
+
+  .news-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+
+  .news-impact-high {
+    background: rgba(255,68,68,.15);
+    color: var(--red);
+    border: 1px solid rgba(255,68,68,.35);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .news-impact-medium {
+    background: rgba(255,215,64,.1);
+    color: var(--yellow);
+    border: 1px solid rgba(255,215,64,.3);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .news-currency {
+    color: var(--blue-bright);
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+
+  .news-event { color: var(--text-primary); }
+
+  .news-time {
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+
+  .news-countdown {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 3px;
+  }
+  .news-countdown.soon  { background: rgba(255,68,68,.15); color: var(--red); }
+  .news-countdown.close { background: rgba(255,215,64,.12); color: var(--yellow); }
+  .news-countdown.far   { background: rgba(77,159,255,.08); color: var(--blue-bright); }
+  .news-countdown.past  { background: rgba(100,100,100,.1); color: var(--text-muted); }
+
+  .no-news {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-style: italic;
+  }
+
+  /* ── STATS BAR ───────────────────────────── */
   .stats-bar {
-    background: var(--bg2); border-bottom: 1px solid var(--border);
-    padding: 8px 24px; display: flex; gap: 32px; font-size: 12px;
+    background: var(--navy-dark);
+    border-bottom: 1px solid var(--navy-border);
+    padding: 10px 28px;
+    display: flex;
+    gap: 32px;
+    align-items: center;
   }
-  .stat { color: var(--muted); }
-  .stat span { color: var(--text); font-weight: bold; margin-left: 6px; }
-  .stat .alert-count { color: var(--green); }
 
-  .container { padding: 20px 24px; }
+  .stat {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .stat-value {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .stat-value.alerts { color: var(--green); }
+  .stat-divider { color: var(--text-dim); }
+
+  /* ── TABLE ───────────────────────────────── */
+  .container { padding: 20px 28px; }
+
   table { width: 100%; border-collapse: collapse; }
+
   thead th {
-    background: var(--bg3); color: var(--muted); font-size: 11px;
-    letter-spacing: 1px; text-transform: uppercase; padding: 10px 12px;
-    text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap;
+    background: var(--navy-mid);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 2px solid var(--navy-border);
+    white-space: nowrap;
+    font-family: 'JetBrains Mono', monospace;
   }
-  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; cursor: pointer; }
-  tbody tr:hover { background: var(--bg3); }
-  tbody tr.alert-row { background: rgba(0,200,83,.04); }
-  tbody tr.alert-row:hover { background: rgba(0,200,83,.08); }
-  td { padding: 11px 12px; vertical-align: middle; }
 
-  .pair-cell { font-size: 14px; font-weight: bold; letter-spacing: 1px; }
-
-  .grade { display: inline-block; padding: 3px 9px; border-radius: 4px;
-    font-weight: bold; font-size: 12px; min-width: 34px; text-align: center; }
-  .grade-aplus { background: rgba(0,200,83,.18);  color: #00c853; border: 1px solid #00c853; }
-  .grade-a     { background: rgba(100,221,23,.14); color: #64dd17; border: 1px solid #64dd17; }
-  .grade-b     { background: rgba(255,214,0,.12);  color: #ffd600; border: 1px solid #ffd600; }
-  .grade-c     { background: rgba(255,109,0,.10);  color: #ff6d00; border: 1px solid #ff6d00; }
-  .grade-none  { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-
-  .score-wrap { min-width: 100px; }
-  .score-bar-bg { background: var(--border); border-radius: 3px; height: 5px; width: 70px; margin-top: 4px; overflow: hidden; }
-  .score-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
-  .score-num { font-weight: bold; font-size: 13px; }
-
-  .dir-bullish { color: var(--green); font-weight: bold; }
-  .dir-bearish { color: var(--red);   font-weight: bold; }
-  .dir-neutral { color: var(--muted); }
-
-  .status-live  { color: var(--green); font-weight: bold; }
-  .status-watch { color: var(--yellow); }
-  .status-log   { color: var(--muted); }
-  .status-scan  { color: var(--muted); font-style: italic; }
-
-  .trend-up    { color: var(--green); }
-  .trend-down  { color: var(--red); }
-  .trend-range { color: var(--muted); }
-
-  .ict-pill { font-size: 11px; color: var(--purple);
-    background: rgba(170,0,255,.08); border: 1px solid rgba(170,0,255,.2);
-    padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
-  .ict-empty { color: var(--muted); font-size: 11px; }
-
-  .price-cell { font-size: 12px; color: var(--muted); }
-  .time-cell  { font-size: 11px; color: var(--muted); }
-
-  /* Expanded detail row */
-  .detail-row { display: none; background: var(--bg3); }
-  .detail-row td { padding: 0; }
-  .detail-inner { padding: 16px 20px 16px 48px; }
-
-  .trade-box {
-    display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 12px; margin-bottom: 14px;
+  tbody tr {
+    border-bottom: 1px solid var(--navy-border);
+    transition: background 0.15s;
+    cursor: pointer;
   }
-  .trade-level {
-    background: var(--bg2); border: 1px solid var(--border);
-    border-radius: 6px; padding: 10px 14px;
+
+  tbody tr:hover { background: var(--navy-mid); }
+
+  /* Grade-colored rows */
+  tbody tr.row-aplus { background: rgba(0,230,118,.04); }
+  tbody tr.row-aplus:hover { background: rgba(0,230,118,.08); }
+  tbody tr.row-a     { background: rgba(77,159,255,.03); }
+  tbody tr.row-a:hover { background: rgba(77,159,255,.07); }
+  tbody tr.row-blocked { background: rgba(255,68,68,.03); }
+  tbody tr.row-spike   { background: rgba(224,64,251,.04); }
+
+  td { padding: 12px 14px; vertical-align: middle; }
+
+  /* ── PAIR CELL ───────────────────────────── */
+  .pair-cell {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: 1px;
   }
-  .trade-level .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
-  .trade-level .value { font-size: 14px; font-weight: bold; }
-  .trade-level .pips  { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  .entry-level .value { color: var(--blue); }
-  .sl-level    .value { color: var(--red); }
-  .tp1-level   .value { color: var(--green); }
-  .tp2-level   .value { color: #00e676; }
 
-  .flags-section { margin-top: 10px; }
-  .flag-item { color: var(--muted); font-size: 12px; line-height: 2; }
+  /* ── GRADE ───────────────────────────────── */
+  .grade {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 10px;
+    border-radius: 5px;
+    font-weight: 700;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    min-width: 38px;
+    letter-spacing: .5px;
+  }
+  .grade-aplus { background: var(--aplus-bg); color: var(--green);       border: 1px solid var(--aplus-border); box-shadow: 0 0 12px rgba(0,230,118,.2); }
+  .grade-a     { background: var(--a-bg);     color: var(--blue-bright); border: 1px solid var(--a-border); }
+  .grade-b     { background: var(--b-bg);     color: var(--yellow);      border: 1px solid var(--b-border); }
+  .grade-c     { background: var(--c-bg);     color: var(--orange);      border: 1px solid var(--c-border); }
+  .grade-none  { background: transparent;     color: var(--text-dim);    border: 1px solid var(--navy-border); }
 
-  .footer { text-align: center; color: var(--muted); font-size: 11px;
-    padding: 24px; border-top: 1px solid var(--border); margin-top: 12px; }
+  /* ── SCORE ───────────────────────────────── */
+  .score-wrap { min-width: 90px; }
+  .score-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .score-bar-bg {
+    background: var(--navy-border);
+    border-radius: 2px;
+    height: 3px;
+    width: 72px;
+    margin-top: 5px;
+    overflow: hidden;
+  }
+  .score-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width .5s ease;
+  }
 
-  @keyframes flash { 0%,100%{background:transparent} 50%{background:rgba(0,200,83,.15)} }
-  .new-signal { animation: flash 1s ease-in-out 2; }
+  /* ── DIRECTION ───────────────────────────── */
+  .direction-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 5px 12px;
+    border-radius: 5px;
+    min-width: 100px;
+    justify-content: center;
+  }
+  .dir-bull {
+    background: var(--green-glow);
+    color: var(--green);
+    border: 1px solid rgba(0,230,118,.3);
+  }
+  .dir-bear {
+    background: var(--red-glow);
+    color: var(--red);
+    border: 1px solid rgba(255,68,68,.3);
+  }
+  .dir-none {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--navy-border);
+  }
+
+  /* ── TREND CELLS ─────────────────────────── */
+  .trend-up    { color: var(--green);       font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .trend-down  { color: var(--red);         font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .trend-range { color: var(--text-muted);  font-weight: 400; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+  /* ── ICT PILL ────────────────────────────── */
+  .ict-pill {
+    font-size: 11px;
+    color: var(--purple);
+    background: var(--purple-dim);
+    border: 1px solid rgba(224,64,251,.25);
+    padding: 3px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .ict-conflict {
+    color: var(--red);
+    background: rgba(255,68,68,.1);
+    border-color: rgba(255,68,68,.3);
+  }
+  .ict-empty { color: var(--text-dim); font-size: 11px; }
+
+  /* ── STATUS ──────────────────────────────── */
+  .status-live  { color: var(--green);  font-weight: 700; font-size: 12px; }
+  .status-watch { color: var(--yellow); font-size: 12px; }
+  .status-log   { color: var(--text-muted); font-size: 12px; }
+  .status-scan  { color: var(--text-dim);   font-size: 12px; font-style: italic; }
+  .status-blocked { color: var(--red); font-size: 12px; }
+  .status-spike   { color: var(--purple); font-size: 12px; font-weight: 700; }
+
+  /* ── WARNING BADGES ──────────────────────── */
+  .warn-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: 5px;
+    vertical-align: middle;
+  }
+  .warn-counter  { background: rgba(255,68,68,.15);   color: var(--red);    border: 1px solid rgba(255,68,68,.3); }
+  .warn-ict      { background: rgba(255,68,68,.1);    color: var(--red);    border: 1px solid rgba(255,68,68,.25); }
+  .warn-news     { background: rgba(255,68,68,.12);   color: var(--red);    border: 1px solid rgba(255,68,68,.3); }
+  .warn-caution  { background: rgba(255,215,64,.1);   color: var(--yellow); border: 1px solid rgba(255,215,64,.3); }
+  .warn-spike    { background: rgba(224,64,251,.12);  color: var(--purple); border: 1px solid rgba(224,64,251,.3); }
+
+  /* ── EXPANDED DETAIL ROW ─────────────────── */
+  .detail-row { display: none; }
+  .detail-row td { padding: 0; background: var(--navy-darkest); }
+  .detail-inner {
+    padding: 20px 24px 20px 52px;
+    border-left: 3px solid var(--navy-border);
+    margin-left: 12px;
+  }
+
+  .trade-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .trade-card {
+    background: var(--navy-mid);
+    border: 1px solid var(--navy-border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    transition: border-color .2s;
+  }
+  .trade-card:hover { border-color: var(--navy-light); }
+
+  .trade-card .tc-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .trade-card .tc-value {
+    font-size: 17px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+  }
+  .trade-card .tc-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .tc-entry .tc-value { color: var(--blue-bright); }
+  .tc-sl    .tc-value { color: var(--red); }
+  .tc-tp1   .tc-value { color: var(--green-dim); }
+  .tc-tp2   .tc-value { color: var(--green); }
+
+  .flags-list { margin-top: 4px; }
+  .flag-item {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.9;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .grade-meaning {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    background: var(--navy-mid);
+    border-radius: 4px;
+    border-left: 3px solid var(--navy-border);
+  }
+
+  /* ── PRICE / TIME ────────────────────────── */
+  .price-cell {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .time-cell {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* ── FOOTER ──────────────────────────────── */
+  .footer {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 20px;
+    border-top: 1px solid var(--navy-border);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: .5px;
+  }
+  .footer span { color: var(--text-muted); }
+
+  /* ── ANIMATIONS ──────────────────────────── */
+  @keyframes flash-green { 0%,100%{background:transparent} 50%{background:rgba(0,230,118,.1)} }
+  @keyframes flash-red   { 0%,100%{background:transparent} 50%{background:rgba(255,68,68,.08)} }
+  .new-signal-bull { animation: flash-green 1.2s ease-in-out 2; }
+  .new-signal-bear { animation: flash-red   1.2s ease-in-out 2; }
+
+  /* Responsive */
+  @media (max-width: 1200px) {
+    .trade-grid { grid-template-columns: repeat(2, 1fr); }
+    td, th { padding: 10px 10px; }
+  }
 </style>
 </head>
 <body>
 
+<!-- HEADER -->
 <div class="header">
-  <div class="header-title">⚡ FOREX <span>SCANNER</span></div>
-  <div class="header-meta">
-    <span><span class="pulse"></span>LIVE</span>
-    <span id="clock">—</span>
-    <span>Refresh: {{ refresh }}s</span>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div class="logo-text">FOREX <span>SCANNER</span></div>
+  </div>
+  <div class="header-right">
+    <div class="live-badge"><div class="pulse"></div>LIVE</div>
+    <div class="clock" id="clock">00:00:00 UTC</div>
+    <div class="session-badge" id="session-badge">—</div>
+    <div style="font-size:11px;color:var(--text-muted)">↻ {{ refresh }}s</div>
   </div>
 </div>
 
-<div class="stats-bar">
-  <div class="stat">Pairs: <span id="stat-pairs">{{ pairs|length }}</span></div>
-  <div class="stat">Alerts: <span id="stat-alerts" class="alert-count">0</span></div>
-  <div class="stat">Updated: <span id="stat-updated">—</span></div>
-  <div class="stat">Session: <span id="stat-session">—</span></div>
+<!-- NEWS TICKER -->
+<div id="news-bar">
+  <div class="news-label">📰 NEWS</div>
+  <div class="news-items" id="news-items">
+    <div class="no-news">Loading calendar...</div>
+  </div>
 </div>
 
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat">Pairs <span class="stat-value" id="stat-pairs">{{ pairs|length }}</span></div>
+  <div class="stat-divider">·</div>
+  <div class="stat">Alerts <span class="stat-value alerts" id="stat-alerts">0</span></div>
+  <div class="stat-divider">·</div>
+  <div class="stat">Updated <span class="stat-value" id="stat-updated">—</span></div>
+  <div class="stat-divider">·</div>
+  <div class="stat">Blocked <span class="stat-value" id="stat-blocked" style="color:var(--red)">0</span></div>
+</div>
+
+<!-- MAIN TABLE -->
 <div class="container">
 <table id="signal-table">
   <thead>
@@ -155,25 +600,30 @@
       <th>M5</th>
       <th>ICT</th>
       <th>Price</th>
-      <th>Updated</th>
+      <th>Time</th>
     </tr>
   </thead>
   <tbody id="signal-body">
-    <tr><td colspan="12" style="text-align:center;padding:40px;color:#666;">
-      Waiting for scanner data...
-    </td></tr>
+    <tr>
+      <td colspan="12" style="text-align:center;padding:60px;color:var(--text-dim)">
+        Waiting for scanner data...
+      </td>
+    </tr>
   </tbody>
 </table>
 </div>
 
 <div class="footer">
-  Slack: A+ and A only &nbsp;|&nbsp; Dashboard: all grades &nbsp;|&nbsp;
-  Click row for Entry / SL / TP1 / TP2 &nbsp;|&nbsp; Refreshes every {{ refresh }}s
+  <span>Slack:</span> A+ and A only &nbsp;·&nbsp;
+  <span>Dashboard:</span> all grades &nbsp;·&nbsp;
+  Click row for Entry / SL / TP1 / TP2 &nbsp;·&nbsp;
+  Refreshes every {{ refresh }}s
 </div>
 
 <script>
 const REFRESH_MS = {{ refresh }} * 1000;
 let prevSignals  = {};
+let newsData     = {};
 
 function gradeClass(g) {
   if (g==="A+") return "grade-aplus";
@@ -182,20 +632,31 @@ function gradeClass(g) {
   if (g==="C")  return "grade-c";
   return "grade-none";
 }
+
 function scoreColor(s) {
-  if (s>=82) return "#00c853";
-  if (s>=68) return "#64dd17";
-  if (s>=54) return "#ffd600";
-  if (s>=40) return "#ff6d00";
-  return "#444";
+  if (s>=82) return "var(--green)";
+  if (s>=68) return "var(--blue-bright)";
+  if (s>=54) return "var(--yellow)";
+  if (s>=40) return "var(--orange)";
+  return "var(--text-dim)";
 }
-function dirClass(d) {
-  if (!d) return "dir-neutral";
+
+function rowClass(s) {
+  if (s.news_blocked) return "row-blocked";
+  if (s.spike_watch)  return "row-spike";
+  if (s.grade==="A+") return "row-aplus";
+  if (s.grade==="A")  return "row-a";
+  return "";
+}
+
+function dirHtml(d) {
+  if (!d || d==="—" || d==="none") return `<span class="direction-cell dir-none">—</span>`;
   d = d.toLowerCase();
-  if (d==="bullish") return "dir-bullish";
-  if (d==="bearish") return "dir-bearish";
-  return "dir-neutral";
+  if (d==="bullish") return `<span class="direction-cell dir-bull">▲ BULL</span>`;
+  if (d==="bearish") return `<span class="direction-cell dir-bear">▼ BEAR</span>`;
+  return `<span class="direction-cell dir-none">${d.toUpperCase()}</span>`;
 }
+
 function trendClass(t) {
   if (!t||t==="—") return "trend-range";
   t = t.toLowerCase();
@@ -203,80 +664,123 @@ function trendClass(t) {
   if (t.includes("down")) return "trend-down";
   return "trend-range";
 }
+
 function trendLabel(t) {
   if (!t||t==="—") return "—";
   t = t.toLowerCase();
-  if (t==="uptrend")        return "↑ UP";
-  if (t==="downtrend")      return "↓ DN";
-  if (t==="weak_uptrend")   return "↑ weak";
-  if (t==="weak_downtrend") return "↓ weak";
-  if (t==="ranging")        return "→ RNG";
-  return t;
+  const map = {
+    "uptrend":        "↑ UP",
+    "downtrend":      "↓ DN",
+    "weak_uptrend":   "↑ weak",
+    "weak_downtrend": "↓ weak",
+    "ranging":        "→ RNG",
+  };
+  return map[t] || t;
 }
-function statusLabel(s) {
-  if (s.should_alert)                     return '<span class="status-live">⚡ LIVE</span>';
-  if (s.score>=54)                        return '<span class="status-watch">🔍 Watch</span>';
-  if (s.score>=40)                        return '<span class="status-log">📋 Logged</span>';
-  if (s.setup_type==="scanning...")       return '<span class="status-scan">scanning...</span>';
-  return '<span class="status-scan">—</span>';
+
+function statusHtml(s) {
+  if (s.news_blocked) return `<span class="status-blocked">🚫 NEWS BLOCK</span>`;
+  if (s.spike_watch)  return `<span class="status-spike">⚡ SPIKE WATCH</span>`;
+  if (s.should_alert) return `<span class="status-live">⚡ LIVE</span>`;
+  if (s.score>=54)    return `<span class="status-watch">🔍 Watch</span>`;
+  if (s.score>=40)    return `<span class="status-log">📋 Logged</span>`;
+  if (s.setup_type==="scanning...") return `<span class="status-scan">scanning...</span>`;
+  return `<span class="status-scan">—</span>`;
 }
+
+function warnBadges(s) {
+  let badges = "";
+  if (s.ict_conflict)  badges += `<span class="warn-badge warn-ict">ICT CONFLICT</span>`;
+  if (s.against_trend) badges += `<span class="warn-badge warn-counter">COUNTER</span>`;
+  if (s.news_caution)  badges += `<span class="warn-badge warn-caution">NEWS</span>`;
+  if (s.spike_watch)   badges += `<span class="warn-badge warn-spike">SPIKE</span>`;
+  return badges;
+}
+
+function ictHtml(s) {
+  if (!s.ict_summary) return `<span class="ict-empty">—</span>`;
+  const cls = s.ict_conflict ? "ict-pill ict-conflict" : "ict-pill";
+  return `<span class="${cls}">${s.ict_summary}</span>`;
+}
+
 function formatPrice(p, pair) {
   if (!p||p===0) return "—";
   if (pair&&pair.includes("JPY")) return p.toFixed(3);
-  if (pair&&pair.includes("XAU")) return p.toFixed(2);
-  if (pair&&pair.includes("XAG")) return p.toFixed(3);
+  if (pair&&(pair.includes("XAU")||pair.includes("XAG"))) return p.toFixed(2);
   return p.toFixed(5);
 }
 
 function buildTradeLevels(s) {
   const tl = s.trade_levels;
-  if (!tl || !tl.entry_price) return "";
+  if (!tl || !tl.entry_price) return `<div style="color:var(--text-dim);font-size:12px">No trade levels — score too low or no direction</div>`;
 
   return `
-    <div class="trade-box">
-      <div class="trade-level entry-level">
-        <div class="label">Entry</div>
-        <div class="value">${tl.entry_price}</div>
-        <div class="pips">at zone/OB</div>
+    <div class="trade-grid">
+      <div class="trade-card tc-entry">
+        <div class="tc-label">Entry</div>
+        <div class="tc-value">${tl.entry_price}</div>
+        <div class="tc-sub">at zone / OB</div>
       </div>
-      <div class="trade-level sl-level">
-        <div class="label">Stop Loss</div>
-        <div class="value">${tl.sl_price}</div>
-        <div class="pips">${tl.sl_pips} pips risk</div>
+      <div class="trade-card tc-sl">
+        <div class="tc-label">Stop Loss</div>
+        <div class="tc-value">${tl.sl_price}</div>
+        <div class="tc-sub">${tl.sl_pips} pips risk</div>
       </div>
-      <div class="trade-level tp1-level">
-        <div class="label">TP1 — ${tl.rr1||'1:2'}</div>
-        <div class="value">${tl.tp1_price}</div>
-        <div class="pips">${tl.tp1_pips} pips</div>
+      <div class="trade-card tc-tp1">
+        <div class="tc-label">TP1 — ${tl.rr1||'1:2'}</div>
+        <div class="tc-value">${tl.tp1_price}</div>
+        <div class="tc-sub">${tl.tp1_pips} pips</div>
       </div>
-      <div class="trade-level tp2-level">
-        <div class="label">TP2 — ${tl.rr2||'1:3'}</div>
-        <div class="value">${tl.tp2_price}</div>
-        <div class="pips">${tl.tp2_pips} pips</div>
+      <div class="trade-card tc-tp2">
+        <div class="tc-label">TP2 — ${tl.rr2||'1:3'}</div>
+        <div class="tc-value">${tl.tp2_price}</div>
+        <div class="tc-sub">${tl.tp2_pips} pips</div>
       </div>
     </div>
   `;
 }
 
 function buildRow(s) {
-  const isNew   = prevSignals[s.pair] && prevSignals[s.pair].score !== s.score;
-  const isAlert = s.should_alert;
-  const rowClass = [isAlert?"alert-row":"", isNew?"new-signal":""].filter(Boolean).join(" ");
-  const detailId = `detail-${s.pair.replace("/","_")}`;
+  const prev     = prevSignals[s.pair];
+  const isNew    = prev && prev.direction !== s.direction;
+  const animCls  = isNew ? (s.direction==="bullish" ? "new-signal-bull" : "new-signal-bear") : "";
+  const rClass   = [rowClass(s), animCls].filter(Boolean).join(" ");
+  const detailId = `detail-${s.pair.replace("/","_").replace("_","x")}`;
 
   const flagsHtml = s.flags && s.flags.length
     ? s.flags.map(f=>`<div class="flag-item">${f}</div>`).join("")
-    : '<div class="flag-item" style="color:#444">No flags</div>';
+    : `<div class="flag-item" style="color:var(--text-dim)">No flags</div>`;
 
   const gradeMeaning = s.grade_meaning
-    ? `<div style="font-size:11px;color:#888;margin-top:4px">${s.grade_meaning}</div>` : "";
+    ? `<div class="grade-meaning">${s.grade_meaning}</div>` : "";
 
-  const detailHtml = `
+  const pairDisplay = s.pair.replace("_","/");
+
+  const mainRow = `
+    <tr class="${rClass}" onclick="toggleDetail('${detailId}')">
+      <td class="pair-cell">${pairDisplay}${warnBadges(s)}</td>
+      <td><span class="grade ${gradeClass(s.grade)}">${s.grade||"—"}</span></td>
+      <td class="score-wrap">
+        <div class="score-num" style="color:${scoreColor(s.score)}">${s.score||0}</div>
+        <div class="score-bar-bg">
+          <div class="score-bar-fill" style="width:${s.score||0}%;background:${scoreColor(s.score)}"></div>
+        </div>
+      </td>
+      <td>${dirHtml(s.direction)}</td>
+      <td>${statusHtml(s)}</td>
+      <td style="font-size:12px;color:var(--text-muted)">${(s.setup_type||"").replace(/_/g," ")}</td>
+      <td class="${trendClass(s.h1_trend)}">${trendLabel(s.h1_trend)}</td>
+      <td class="${trendClass(s.m15_trend)}">${trendLabel(s.m15_trend)}</td>
+      <td class="${trendClass(s.m5_trend)}">${trendLabel(s.m5_trend)}</td>
+      <td>${ictHtml(s)}</td>
+      <td class="price-cell">${formatPrice(s.current_price, s.pair)}</td>
+      <td class="time-cell">${s.updated_at||"—"}</td>
+    </tr>
     <tr id="${detailId}" class="detail-row">
       <td colspan="12">
         <div class="detail-inner">
           ${buildTradeLevels(s)}
-          <div class="flags-section">
+          <div class="flags-list">
             ${gradeMeaning}
             ${flagsHtml}
           </div>
@@ -285,35 +789,60 @@ function buildRow(s) {
     </tr>
   `;
 
-  const mainRow = `
-    <tr class="${rowClass}" onclick="toggleDetail('${detailId}')">
-      <td class="pair-cell">${s.pair.replace("_","/")}</td>
-      <td><span class="grade ${gradeClass(s.grade)}">${s.grade||"—"}</span></td>
-      <td class="score-wrap">
-        <div class="score-num" style="color:${scoreColor(s.score)}">${s.score||0}</div>
-        <div class="score-bar-bg">
-          <div class="score-bar-fill" style="width:${s.score}%;background:${scoreColor(s.score)}"></div>
-        </div>
-      </td>
-      <td class="${dirClass(s.direction)}">${s.direction?s.direction.toUpperCase():"—"}</td>
-      <td>${statusLabel(s)}</td>
-      <td style="font-size:12px;color:#aaa">${(s.setup_type||"").replace(/_/g," ")}</td>
-      <td class="${trendClass(s.h1_trend)}">${trendLabel(s.h1_trend)}</td>
-      <td class="${trendClass(s.m15_trend)}">${trendLabel(s.m15_trend)}</td>
-      <td class="${trendClass(s.m5_trend)}">${trendLabel(s.m5_trend)}</td>
-      <td>${s.ict_summary?`<span class="ict-pill">${s.ict_summary}</span>`:'<span class="ict-empty">—</span>'}</td>
-      <td class="price-cell">${formatPrice(s.current_price, s.pair)}</td>
-      <td class="time-cell">${s.updated_at||"—"}</td>
-    </tr>
-    ${detailHtml}
-  `;
-
   return mainRow;
 }
 
 function toggleDetail(id) {
   const row = document.getElementById(id);
   if (row) row.style.display = row.style.display==="table-row" ? "none" : "table-row";
+}
+
+function renderNews(news) {
+  if (!news || !news.upcoming || news.upcoming.length===0) {
+    document.getElementById("news-items").innerHTML = `<div class="no-news">No high/medium impact news in next 3 hours</div>`;
+    document.getElementById("news-bar").className = ""; 
+    return;
+  }
+
+  const bar = document.getElementById("news-bar");
+  const hasHigh   = news.upcoming.some(e=>e.impact==="HIGH"  && !e.past && e.mins_away<=60);
+  const hasMedium = news.upcoming.some(e=>e.impact==="MEDIUM" && !e.past && e.mins_away<=30);
+
+  bar.className = hasHigh ? "news-alert" : (hasMedium ? "news-caution" : "");
+
+  const html = news.upcoming.map(e => {
+    const impactHtml = e.impact==="HIGH"
+      ? `<span class="news-impact-high">HIGH</span>`
+      : `<span class="news-impact-medium">MED</span>`;
+
+    let countdownCls, countdownTxt;
+    if (e.past) {
+      countdownCls = "past";
+      countdownTxt = `${Math.abs(e.mins_away)}m ago`;
+    } else if (e.mins_away<=15) {
+      countdownCls = "soon";
+      countdownTxt = `${e.mins_away}m`;
+    } else if (e.mins_away<=60) {
+      countdownCls = "close";
+      countdownTxt = `${e.mins_away}m`;
+    } else {
+      countdownCls = "far";
+      countdownTxt = `${Math.floor(e.mins_away/60)}h${e.mins_away%60>0?` ${e.mins_away%60}m`:""}`;
+    }
+
+    return `
+      <div class="news-item">
+        ${impactHtml}
+        <span class="news-currency">${e.currency}</span>
+        <span class="news-event">${e.event}</span>
+        <span class="news-time">${e.time}</span>
+        <span class="news-countdown ${countdownCls}">${countdownTxt}</span>
+      </div>
+    `;
+  }).join("");
+
+  document.getElementById("news-items").innerHTML = html;
+  document.getElementById("stat-blocked").textContent = news.blocking ? news.blocking.length : 0;
 }
 
 async function fetchAndRender() {
@@ -327,9 +856,13 @@ async function fetchAndRender() {
     const signals = data.signals||[];
     if (signals.length>0) {
       const s = signals.find(x=>x.session&&x.session!=="—");
-      document.getElementById("stat-session").textContent =
-        s ? s.session.replace("_"," ").toUpperCase() : "—";
+      const session = s ? s.session.replace("_"," ").toUpperCase() : "—";
+      document.getElementById("session-badge").textContent = session;
+      document.getElementById("stat-session") && (document.getElementById("stat-session").textContent = session);
     }
+
+    // Render news
+    if (data.news) renderNews(data.news);
 
     document.getElementById("signal-body").innerHTML = signals.map(buildRow).join("");
     prevSignals = {};
@@ -340,10 +873,9 @@ async function fetchAndRender() {
 
 function updateClock() {
   const now = new Date();
-  const h   = String(now.getUTCHours()).padStart(2,"0");
-  const m   = String(now.getUTCMinutes()).padStart(2,"0");
-  const s   = String(now.getUTCSeconds()).padStart(2,"0");
-  document.getElementById("clock").textContent = `${h}:${m}:${s} UTC`;
+  const pad = n => String(n).padStart(2,"0");
+  document.getElementById("clock").textContent =
+    `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())} UTC`;
 }
 
 fetchAndRender();

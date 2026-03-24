@@ -1,7 +1,11 @@
 """
 dashboard/app.py — Local web dashboard at http://localhost:5000
-Auto-refreshes every 30 seconds.
-Shows all 11 pairs with Entry/SL/TP1/TP2 on click.
+
+UPDATES:
+- News data wired into /api/signals response
+- /api/news endpoint for live news ticker
+- Post-news spike alerts
+- Session timer in response
 """
 
 import logging
@@ -38,6 +42,11 @@ def update_dashboard(pair: str, scored: dict, confluence: dict, ict: dict = None
             "should_alert":  scored.get("should_alert", False),
             "grade_meaning": scored.get("grade_meaning", ""),
             "ict_summary":   _ict_summary(ict) if ict else "",
+            "ict_conflict":  scored.get("ict_conflict", False),
+            "against_trend": scored.get("against_h1_trend", False),
+            "news_blocked":  scored.get("hard_blocked", False),
+            "news_caution":  scored.get("news_check", {}).get("caution", False),
+            "spike_watch":   scored.get("news_check", {}).get("spike_watch", False),
             "updated_at":    datetime.now(timezone.utc).strftime("%H:%M:%S"),
             "breakdown":     scored.get("breakdown", {}),
         }
@@ -78,7 +87,6 @@ def api_signals():
     with _store_lock:
         data = list(_signal_store.values())
 
-    # Fill missing pairs
     active = {s["pair"] for s in data}
     for pair in PAIRS:
         if pair not in active:
@@ -90,18 +98,39 @@ def api_signals():
                 "session": "—", "flags": [], "top_zone": None,
                 "entry_pattern": None, "trade_levels": {},
                 "should_alert": False, "grade_meaning": "",
-                "ict_summary": "", "updated_at": "—", "breakdown": {},
+                "ict_summary": "", "ict_conflict": False,
+                "against_trend": False, "news_blocked": False,
+                "news_caution": False, "spike_watch": False,
+                "updated_at": "—", "breakdown": {},
             })
 
     grade_order = {"A+": 0, "A": 1, "B": 2, "C": 3, "—": 4}
     data.sort(key=lambda x: (grade_order.get(x["grade"], 4), -x["score"]))
+
+    # Get news data
+    news_data = {}
+    try:
+        from filters.news import get_news_dashboard_data
+        news_data = get_news_dashboard_data(PAIRS)
+    except Exception as e:
+        logger.warning(f"News dashboard data failed: {e}")
 
     return jsonify({
         "signals":     data,
         "updated_at":  datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "total_pairs": len(PAIRS),
         "alert_count": sum(1 for s in data if s.get("should_alert")),
+        "news":        news_data,
     })
+
+
+@app.route("/api/news")
+def api_news():
+    try:
+        from filters.news import get_news_dashboard_data
+        return jsonify(get_news_dashboard_data(PAIRS))
+    except Exception as e:
+        return jsonify({"error": str(e), "upcoming": [], "blocking": [], "caution": []}), 500
 
 
 @app.route("/api/signal/<pair>")

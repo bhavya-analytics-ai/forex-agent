@@ -1,14 +1,20 @@
 """
 scorer.py — Signal scoring + complete trade plan
 
-Every signal now includes:
-  entry_price  — exact entry level
-  sl_price     — stop loss (above/below OB or swing)
-  tp1_price    — 1:2 risk/reward (scalp)
-  tp2_price    — 1:3 risk/reward (swing)
-  sl_pips      — risk in pips
-  tp1_pips     — reward pips TP1
-  tp2_pips     — reward pips TP2
+FIXES IN THIS VERSION:
+1. ICT CONFLICT PENALTY — if ICT MSS/ChoCH says bullish but signal is
+   bearish (or vice versa), that's a -30 penalty. Previously this was
+   just a cosmetic flag on the dashboard. Now it actually affects score.
+
+2. DIRECTION SANITY CHECK — if H1 trend strongly disagrees with signal
+   direction, cap the grade at B maximum. No more A+ signals against trend.
+
+3. ZONE CONFLICT FLAG — if zone type contradicts H1 trend, add warning
+   to flags so trader sees it clearly.
+
+4. SCORE CAP LOGIC — removed the possibility of 100% scores. Max realistic
+   score is ~85 for a genuine A+ setup. 100% meant the scorer wasn't
+   penalizing anything — now it does.
 """
 
 import logging
@@ -22,30 +28,19 @@ WEIGHTS = SCORING["weights"]
 
 
 def calculate_trade_levels(confluence: dict, pair: str, direction: str, ict: dict) -> dict:
-    """
-    Calculate entry, SL, TP1, TP2.
-
-    Entry  — current price at zone/OB
-    SL     — below OB low (bullish) or above OB high (bearish)
-             fallback: swing high/low + ATR buffer
-    TP1    — 1:2 from entry
-    TP2    — 1:3 from entry
-    """
     pip   = pip_size(pair)
     h1    = confluence.get("h1", {})
-
     entry = confluence.get("current_price", 0)
+
     if not entry:
         return {}
 
-    # ATR fallback per pair type
     atr_defaults = {
-        "XAU_USD": 2.0,   # $2 ATR default for gold
-        "XAG_USD": 0.10,  # $0.10 ATR default for silver
+        "XAU_USD": 2.0,
+        "XAG_USD": 0.10,
     }
     atr = atr_defaults.get(pair, 20 * pip)
 
-    # --- SL ---
     sl_price = None
     top_ob   = ict.get("top_ob") if ict else None
 
@@ -66,14 +61,12 @@ def calculate_trade_levels(confluence: dict, pair: str, direction: str, ict: dic
             if last_high:
                 sl_price = last_high + atr * 0.5
 
-    # Final fallback
     if sl_price is None:
         default_sl = {"XAU_USD": 200 * pip, "XAG_USD": 200 * pip}.get(pair, 25 * pip)
         sl_price   = entry - default_sl if direction == "bullish" else entry + default_sl
 
-    # --- Sanity check SL ---
-    sl_dist   = abs(entry - sl_price)
-    sl_pips   = sl_dist / pip
+    sl_dist = abs(entry - sl_price)
+    sl_pips = sl_dist / pip
 
     min_sl = {"XAU_USD": 200, "XAG_USD": 150}.get(pair, 8)
     max_sl = {"XAU_USD": 1000, "XAG_USD": 800}.get(pair, 60)
@@ -88,7 +81,6 @@ def calculate_trade_levels(confluence: dict, pair: str, direction: str, ict: dic
         sl_pips  = max_sl
         sl_price = entry - sl_dist if direction == "bullish" else entry + sl_dist
 
-    # --- TP ---
     if direction == "bullish":
         tp1_price = entry + sl_dist * 2
         tp2_price = entry + sl_dist * 3
@@ -96,7 +88,6 @@ def calculate_trade_levels(confluence: dict, pair: str, direction: str, ict: dic
         tp1_price = entry - sl_dist * 2
         tp2_price = entry - sl_dist * 3
 
-    # Decimal places per pair
     decimals = 3 if "JPY" in pair else (2 if pair == "XAU_USD" else (3 if pair == "XAG_USD" else 5))
 
     return {
@@ -132,6 +123,8 @@ def score_signal(confluence: dict, pair: str) -> dict:
     pullback_depth = h1_structure.get("pullback_depth", 0)
     active_zones   = h1.get("active_zones", [])
     ict            = confluence.get("ict", {})
+    ict_conflict   = confluence.get("ict_conflict", False)
+    zone_warnings  = confluence.get("zone_warnings", [])
 
     entry_pattern = confluence.get("entry_pattern")
     news_check    = is_news_safe(pair)
@@ -143,7 +136,11 @@ def score_signal(confluence: dict, pair: str) -> dict:
     except Exception:
         kz_ctx = {"in_killzone": True, "pair_favored": True, "score_modifier": 1.0, "note": ""}
 
-    # Pattern conflict
+    # Add zone conflict warnings to flags
+    for warning in zone_warnings:
+        add_flag(warning)
+
+    # Pattern conflict check
     pattern_direction = entry_pattern.get("direction") if entry_pattern else None
     pattern_conflict  = (
         entry_pattern is not None
@@ -152,6 +149,24 @@ def score_signal(confluence: dict, pair: str) -> dict:
     )
     if pattern_conflict:
         add_flag(f"❌ CONFLICT: M5 {pattern_direction} candle vs {direction} signal — skip this")
+
+    # H1 trend vs signal direction check
+    h1_trend     = h1_structure.get("trend", "ranging")
+    h1_strength  = h1_structure.get("strength", 1)
+    h1_direction = "bullish" if "up" in h1_trend else ("bearish" if "down" in h1_trend else "neutral")
+    against_h1_trend = (
+        h1_direction != "neutral"
+        and direction not in ["none", "neutral"]
+        and h1_direction != direction
+        and h1_strength >= 2
+    )
+    if against_h1_trend:
+        add_flag(f"⚠️ COUNTER-TREND: Signal is {direction} but H1 trend is {h1_trend} — high risk")
+
+    # ICT conflict flag
+    if ict_conflict:
+        ict_dir = ict.get("ict_direction", "")
+        add_flag(f"🚨 ICT CONFLICT: MSS/ChoCH says {ict_dir} but signal is {direction} — do not enter")
 
     # 1. Zone (25)
     if active_zones:
@@ -201,7 +216,7 @@ def score_signal(confluence: dict, pair: str) -> dict:
 
     # 6. Quality Bonus (+15)
     quality_bonus = 0
-    if not pattern_conflict and active_zones:
+    if not pattern_conflict and active_zones and not against_h1_trend:
         if   setup_quality == "A+": quality_bonus = 15
         elif setup_quality == "A":  quality_bonus = 10
         elif setup_quality == "B":  quality_bonus = 4
@@ -213,7 +228,7 @@ def score_signal(confluence: dict, pair: str) -> dict:
 
     # 7. FVG Bonus (+10)
     fvg_bonus = 0
-    if not pattern_conflict:
+    if not pattern_conflict and not ict_conflict:
         if confluence.get("has_fvg_overlap"):   fvg_bonus = 10
         elif confluence.get("active_fvgs"):     fvg_bonus = 4
 
@@ -222,7 +237,7 @@ def score_signal(confluence: dict, pair: str) -> dict:
 
     # 8. ICT Bonus (+30)
     ict_bonus = 0
-    if not pattern_conflict and ict:
+    if not pattern_conflict and not ict_conflict and ict:
         if ict.get("has_ob"):
             ict_bonus += 8
             ob = ict.get("top_ob", {})
@@ -242,7 +257,7 @@ def score_signal(confluence: dict, pair: str) -> dict:
             sweep = ict.get("recent_sweep") or {}
             if sweep.get("bias", "") == direction:
                 ict_bonus += 7
-                add_flag(sweep.get("description", "💧 Liquidity sweep"))
+                add_flag(sweep.get("description", "💧 Liquidity sweep aligned"))
             else:
                 add_flag(f"💧 Sweep bias doesn't match signal direction")
 
@@ -258,22 +273,39 @@ def score_signal(confluence: dict, pair: str) -> dict:
     score_breakdown["ict"] = ict_bonus
     total += ict_bonus
 
-    # Penalties
+    # ── PENALTIES ──────────────────────────────────────────────
+
+    # Pattern conflict
     if pattern_conflict:
         total -= 25
         score_breakdown["conflict_penalty"] = -25
 
+    # No zone
     if not active_zones:
         total -= 12
         score_breakdown["no_zone_penalty"] = -12
 
+    # M5 consolidating
     m5_consol = m5.get("consolidation", {})
     if m5_consol.get("consolidating"):
         total -= 15
         score_breakdown["consolidation_penalty"] = -15
         add_flag(f"⚠️ M5 consolidating — wait for directional candle")
 
-    final_score = max(min(total, 100), 0)
+    # FIX: ICT conflict penalty — this used to be cosmetic only
+    # Now it actually tanks the score. MSS/ChoCH contradicting signal = skip.
+    if ict_conflict:
+        total -= 30
+        score_breakdown["ict_conflict_penalty"] = -30
+
+    # FIX: Counter-trend penalty — signal against strong H1 trend
+    # A+ setups should NEVER go against a strength-3 H1 trend
+    if against_h1_trend:
+        penalty = 20 if h1_strength == 3 else 10
+        total  -= penalty
+        score_breakdown["counter_trend_penalty"] = -penalty
+
+    final_score = max(min(total, 95), 0)  # Cap at 95 — 100% confidence doesn't exist
 
     kz_modifier = kz_ctx.get("score_modifier", 1.0)
     if kz_modifier < 1.0:
@@ -284,8 +316,14 @@ def score_signal(confluence: dict, pair: str) -> dict:
     has_confirmation = bool(entry_pattern) and not pattern_conflict
     has_zone         = bool(active_zones)
 
-    if pattern_conflict:                        grade = "C"
-    elif not has_confirmation and not has_zone: grade = "C"
+    # Hard overrides — these situations can never be A or A+
+    if pattern_conflict or ict_conflict:
+        grade = "C"
+    elif against_h1_trend and h1_strength == 3:
+        grade = "C"  # Never take A/A+ against a strong H1 trend
+        add_flag("🚫 Strong counter-trend — grade capped at C")
+    elif not has_confirmation and not has_zone:
+        grade = "C"
     elif not has_confirmation:
         grade = "B" if final_score >= 55 else "C"
         add_flag("⏳ Waiting for M5 entry candle")
@@ -296,6 +334,10 @@ def score_signal(confluence: dict, pair: str) -> dict:
         elif final_score >= 65: grade = "B"
         else:                   grade = "C"
         add_flag("⚠️ Structure C — choppy, lower your size")
+    elif against_h1_trend:
+        # Can trade counter-trend but max grade is B
+        grade = "B" if final_score >= 54 else "C"
+        add_flag("⚠️ Counter-trend setup — grade capped at B, use tight SL")
     else:
         if   final_score >= 82: grade = "A+"
         elif final_score >= 68: grade = "A"
@@ -313,10 +355,16 @@ def score_signal(confluence: dict, pair: str) -> dict:
         "C":  "SKIP — conflicting or weak signals",
     }.get(grade, "")
 
-    # Trade levels
     trade_levels = {}
     if direction != "none" and final_score >= 40:
         trade_levels = calculate_trade_levels(confluence, pair, direction, ict)
+
+    # Get h1/m15/m5 trend labels for dashboard
+    h1_trend_label  = h1.get("structure", {}).get("trend", "—")
+    m15_structure   = confluence.get("m15", {}).get("structure", {})
+    m5_structure    = confluence.get("m5",  {}).get("structure", {})
+    m15_trend_label = m15_structure.get("trend", "—")
+    m5_trend_label  = m5_structure.get("trend",  "—")
 
     result = {
         "pair":             pair,
@@ -326,6 +374,8 @@ def score_signal(confluence: dict, pair: str) -> dict:
         "flags":            flags,
         "breakdown":        score_breakdown,
         "pattern_conflict": pattern_conflict,
+        "ict_conflict":     ict_conflict,
+        "against_h1_trend": against_h1_trend,
         "fvg_bonus":        fvg_bonus,
         "ict_bonus":        ict_bonus,
         "has_fvg_overlap":  confluence.get("has_fvg_overlap", False),
@@ -336,19 +386,23 @@ def score_signal(confluence: dict, pair: str) -> dict:
         "kz_ctx":           kz_ctx,
         "top_zone":         top_zone,
         "trade_levels":     trade_levels,
-        "should_alert":     final_score >= SCORING["min_score_alert"] and news_check["safe"],
+        "should_alert":     final_score >= SCORING["min_score_alert"] and news_check["safe"] and not ict_conflict,
         "should_log":       final_score >= SCORING["min_score_log"],
         "direction":        direction,
         "setup_type":       confluence.get("setup_type", "unknown"),
         "entry_pattern":    entry_pattern,
         "current_price":    confluence.get("current_price", 0),
+        "h1_trend":         h1_trend_label,
+        "m15_trend":        m15_trend_label,
+        "m5_trend":         m5_trend_label,
     }
 
     logger.info(
         f"{pair} | {final_score}/100 {grade} | "
         f"Zone:{zone_score} TF:{tf_score} Pat:{candle_score} "
         f"Sess:{session_score} News:{news_score} Qual:{quality_bonus} "
-        f"FVG:{fvg_bonus} ICT:{ict_bonus} | Alert:{result['should_alert']}"
+        f"FVG:{fvg_bonus} ICT:{ict_bonus} | "
+        f"Conflicts: pattern={pattern_conflict} ict={ict_conflict} counter_trend={against_h1_trend}"
     )
 
     return result
