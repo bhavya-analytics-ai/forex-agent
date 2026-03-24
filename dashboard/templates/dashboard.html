@@ -697,6 +697,26 @@ function warnBadges(s) {
   return badges;
 }
 
+function setupTypeHtml(s) {
+  const t = s.setup_type || '';
+  if (t.startsWith('pullback')) {
+    const dir = t.includes('long') ? 'LONG' : 'SHORT';
+    return '<span style="color:var(--yellow);font-size:11px">↩ PULLBACK ' + dir + '</span>';
+  }
+  if (t.startsWith('breakout_retest')) {
+    return '<span style="color:var(--purple);font-size:11px;font-weight:700">⚡ BO RETEST</span>';
+  }
+  if (t.startsWith('breakout')) {
+    const dir = t.includes('bull') ? '▲' : '▼';
+    return '<span style="color:var(--purple);font-size:11px">🚀 BREAKOUT ' + dir + '</span>';
+  }
+  if (t.startsWith('reversal')) {
+    const dir = t.includes('bull') ? 'BULL' : 'BEAR';
+    return '<span style="color:var(--green);font-size:11px;font-weight:700">🔄 REVERSAL ' + dir + '</span>';
+  }
+  return '<span style="color:var(--text-muted);font-size:12px">' + t.replace(/_/g,' ') + '</span>';
+}
+
 function ictHtml(s) {
   if (!s.ict_summary) return `<span class="ict-empty">—</span>`;
   const cls = s.ict_conflict ? "ict-pill ict-conflict" : "ict-pill";

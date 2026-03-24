@@ -126,6 +126,14 @@ def score_signal(confluence: dict, pair: str) -> dict:
     ict_conflict   = confluence.get("ict_conflict", False)
     zone_warnings  = confluence.get("zone_warnings", [])
 
+    # New signal type flags from confluence
+    signal_type   = confluence.get("signal_type", "trend_follow")
+    conf_pullback = confluence.get("is_pullback", False)
+    conf_breakout = confluence.get("is_breakout", False)
+    conf_retest   = confluence.get("is_retest", False)
+    h1_mss_fired  = confluence.get("h1_mss_fired", False)
+    breakout_data = confluence.get("breakout", {})
+
     entry_pattern = confluence.get("entry_pattern")
     news_check    = is_news_safe(pair)
     session_ctx   = get_session_context(pair)
@@ -139,6 +147,18 @@ def score_signal(confluence: dict, pair: str) -> dict:
     # Add zone conflict warnings to flags
     for warning in zone_warnings:
         add_flag(warning)
+
+    # Signal type flags
+    if conf_pullback:
+        add_flag(f"📉 PULLBACK ENTRY in H1 {direction} trend — M15/M5 retracing. Wait for M5 rejection candle.")
+    if conf_breakout and breakout_data.get("detected"):
+        atr_ratio   = breakout_data.get("atr_ratio", 0)
+        if conf_retest:
+            add_flag(f"⚡ BREAKOUT RETEST — {atr_ratio}x ATR impulse, price at FVG. Enter {direction}.")
+        else:
+            add_flag(f"🚀 BREAKOUT STAGE 1 — {atr_ratio}x ATR impulse breaking structure. Watch for FVG retest or enter M1 aggressive.")
+    if h1_mss_fired:
+        add_flag(f"🔄 H1 MSS CONFIRMED — trend officially reversing to {direction}. High conviction.")
 
     # Pattern conflict check
     pattern_direction = entry_pattern.get("direction") if entry_pattern else None
@@ -154,11 +174,17 @@ def score_signal(confluence: dict, pair: str) -> dict:
     h1_trend     = h1_structure.get("trend", "ranging")
     h1_strength  = h1_structure.get("strength", 1)
     h1_direction = "bullish" if "up" in h1_trend else ("bearish" if "down" in h1_trend else "neutral")
+    # Against H1 trend check
+    # IMPORTANT: pullback setups are NOT counter-trend — direction IS H1 trend
+    # Only flag as counter-trend if it is genuinely going against H1
     against_h1_trend = (
         h1_direction != "neutral"
         and direction not in ["none", "neutral"]
         and h1_direction != direction
         and h1_strength >= 2
+        and not conf_pullback   # pullback signal = H1 direction, never counter-trend
+        and not conf_breakout   # breakout = new trend forming, not counter-trend
+        and not h1_mss_fired    # MSS reversal = intentional direction change
     )
     if against_h1_trend:
         add_flag(f"⚠️ COUNTER-TREND: Signal is {direction} but H1 trend is {h1_trend} — high risk")
@@ -214,7 +240,7 @@ def score_signal(confluence: dict, pair: str) -> dict:
     score_breakdown["news"] = news_score
     total += news_score
 
-    # 6. Quality Bonus (+15)
+    # 6. Quality Bonus (+15) + Setup Type Bonus
     quality_bonus = 0
     if not pattern_conflict and active_zones and not against_h1_trend:
         if   setup_quality == "A+": quality_bonus = 15
@@ -222,6 +248,24 @@ def score_signal(confluence: dict, pair: str) -> dict:
         elif setup_quality == "B":  quality_bonus = 4
         if is_pullback and 0.35 <= pullback_depth <= 0.65:
             quality_bonus += 5
+
+    # Pullback bonus — clean pullback entry in strong trend is high quality
+    if conf_pullback and h1_strength >= 2:
+        quality_bonus += 8
+
+    # Breakout bonus — strong impulse = high conviction
+    if conf_breakout and breakout_data.get("detected"):
+        atr_ratio = breakout_data.get("atr_ratio", 0)
+        if conf_retest:
+            quality_bonus += 12  # Retest = highest quality breakout entry
+        elif atr_ratio >= 2.5:
+            quality_bonus += 8   # Strong impulse even without retest
+        else:
+            quality_bonus += 4
+
+    # H1 MSS reversal bonus
+    if h1_mss_fired:
+        quality_bonus += 15  # MSS = highest conviction setup
 
     score_breakdown["quality_bonus"] = quality_bonus
     total += quality_bonus
