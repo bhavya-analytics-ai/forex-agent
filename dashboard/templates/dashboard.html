@@ -250,6 +250,84 @@
     font-style: italic;
   }
 
+  /* ── NEWS PANEL ─────────────────────────── */
+  #news-panel {
+    margin: 16px 28px 0;
+    background: var(--navy-dark);
+    border: 1px solid var(--navy-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .news-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--navy-mid);
+    border-bottom: 1px solid var(--navy-border);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .news-panel-header:hover { background: var(--navy-light); }
+
+  .news-panel-toggle { font-size: 10px; color: var(--text-muted); }
+
+  .news-panel-body {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+
+  .news-panel-body.collapsed { display: none; }
+
+  .news-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: 6px;
+    background: var(--navy-darkest);
+    border: 1px solid var(--navy-border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    white-space: nowrap;
+    transition: border-color .15s;
+  }
+
+  .news-card:hover { border-color: var(--navy-glow); }
+  .news-card.past  { opacity: .45; }
+
+  .nc-impact {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: .06em;
+  }
+
+  .nc-impact.high   { background: rgba(255,68,68,.2);   color: var(--red);         border: 1px solid rgba(255,68,68,.4); }
+  .nc-impact.medium { background: rgba(255,215,64,.15); color: var(--yellow);      border: 1px solid rgba(255,215,64,.3); }
+  .nc-impact.low    { background: rgba(74,111,165,.15); color: var(--text-muted);  border: 1px solid rgba(74,111,165,.25); }
+
+  .nc-currency { color: var(--blue-bright); font-weight: 600; min-width: 28px; }
+  .nc-time     { color: var(--text-muted);  font-size: 11px; }
+  .nc-title    { color: var(--text-primary); }
+
+  .news-panel-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-style: italic;
+    padding: 4px 0;
+  }
+
   /* ── STATS BAR ───────────────────────────── */
   .stats-bar {
     background: var(--navy-dark);
@@ -439,6 +517,7 @@
   .warn-counter  { background: rgba(255,68,68,.15);   color: var(--red);    border: 1px solid rgba(255,68,68,.3); }
   .warn-ict      { background: rgba(255,68,68,.1);    color: var(--red);    border: 1px solid rgba(255,68,68,.25); }
   .warn-news     { background: rgba(255,68,68,.12);   color: var(--red);    border: 1px solid rgba(255,68,68,.3); }
+  .warn-early    { background: rgba(255,214,0,.12);   color: #ffd600;       border: 1px solid rgba(255,214,0,.3); }
   .warn-caution  { background: rgba(255,215,64,.1);   color: var(--yellow); border: 1px solid rgba(255,215,64,.3); }
   .warn-spike    { background: rgba(224,64,251,.12);  color: var(--purple); border: 1px solid rgba(224,64,251,.3); }
 
@@ -584,6 +663,17 @@
   <div class="stat">Blocked <span class="stat-value" id="stat-blocked" style="color:var(--red)">0</span></div>
 </div>
 
+<!-- NEWS PANEL -->
+<div id="news-panel">
+  <div class="news-panel-header" onclick="toggleNewsPanel()">
+    <span>📰 UPCOMING NEWS — next 6 hours</span>
+    <span class="news-panel-toggle" id="news-panel-toggle">▼ collapse</span>
+  </div>
+  <div class="news-panel-body" id="news-panel-body">
+    <div class="news-panel-empty">Loading...</div>
+  </div>
+</div>
+
 <!-- MAIN TABLE -->
 <div class="container">
 <table id="signal-table">
@@ -694,6 +784,7 @@ function warnBadges(s) {
   if (s.against_trend) badges += `<span class="warn-badge warn-counter">COUNTER</span>`;
   if (s.news_caution)  badges += `<span class="warn-badge warn-caution">NEWS</span>`;
   if (s.spike_watch)   badges += `<span class="warn-badge warn-spike">SPIKE</span>`;
+  if (s.early_entry)   badges += `<span class="warn-badge warn-early">⚡ EARLY</span>`;
   return badges;
 }
 
@@ -863,6 +954,42 @@ function renderNews(news) {
 
   document.getElementById("news-items").innerHTML = html;
   document.getElementById("stat-blocked").textContent = news.blocking ? news.blocking.length : 0;
+
+  // Render the full news panel (6-hour view)
+  renderNewsPanel(news.panel_events || []);
+}
+
+let _newsPanelCollapsed = false;
+
+function toggleNewsPanel() {
+  _newsPanelCollapsed = !_newsPanelCollapsed;
+  document.getElementById("news-panel-body").classList.toggle("collapsed", _newsPanelCollapsed);
+  document.getElementById("news-panel-toggle").textContent = _newsPanelCollapsed ? "▶ expand" : "▼ collapse";
+}
+
+function renderNewsPanel(events) {
+  const body = document.getElementById("news-panel-body");
+  if (!events || events.length === 0) {
+    body.innerHTML = `<div class="news-panel-empty">No events in next 6 hours</div>`;
+    return;
+  }
+
+  const cards = events.map(e => {
+    const impactCls = e.impact === "HIGH" ? "high" : (e.impact === "MEDIUM" ? "medium" : "low");
+    const pastCls   = e.past ? "past" : "";
+    const timeLabel = e.past
+      ? `<span class="nc-time">${e.time} ✓</span>`
+      : `<span class="nc-time">${e.time}</span>`;
+    return `
+      <div class="news-card ${pastCls}">
+        <span class="nc-impact ${impactCls}">${e.impact}</span>
+        <span class="nc-currency">${e.currency}</span>
+        <span class="nc-title">${e.title}</span>
+        ${timeLabel}
+      </div>`;
+  }).join("");
+
+  body.innerHTML = cards;
 }
 
 async function fetchAndRender() {

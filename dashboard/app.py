@@ -49,6 +49,8 @@ def update_dashboard(pair: str, scored: dict, confluence: dict, ict: dict = None
             "spike_watch":   scored.get("news_check", {}).get("spike_watch", False),
             "updated_at":    datetime.now(timezone.utc).strftime("%H:%M:%S"),
             "breakdown":     scored.get("breakdown", {}),
+            "early_entry":   scored.get("early_entry", False),
+            "entry_type":    scored.get("entry_type", "confirmed"),
         }
 
 
@@ -127,10 +129,12 @@ def api_signals():
 @app.route("/api/news")
 def api_news():
     try:
-        from filters.news import get_news_dashboard_data
-        return jsonify(get_news_dashboard_data(PAIRS))
+        from filters.news import get_news_dashboard_data, get_upcoming_news
+        data = get_news_dashboard_data(PAIRS)
+        data["panel_events"] = get_upcoming_news(hours_ahead=6)
+        return jsonify(data)
     except Exception as e:
-        return jsonify({"error": str(e), "upcoming": [], "blocking": [], "caution": []}), 500
+        return jsonify({"error": str(e), "upcoming": [], "blocking": [], "caution": [], "panel_events": []}), 500
 
 
 @app.route("/api/signal/<pair>")

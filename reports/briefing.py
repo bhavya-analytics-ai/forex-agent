@@ -33,6 +33,13 @@ def scan_pair(pair: str, return_confluence: bool = False):
         confluence = check_confluence(candles, pair)
         scored     = score_signal(confluence, pair)
 
+        # Decision layer — hard filters + TP/SL override
+        try:
+            from filters.decision_layer import apply_decision_layer
+            scored = apply_decision_layer(scored, confluence, pair)
+        except Exception as e:
+            logger.warning(f"Decision layer error for {pair}: {e}")
+
         # Attach trend context for display
         scored["h1_trend"]  = confluence["h1"]["structure"].get("trend", "—")
         scored["m15_trend"] = confluence["m15"]["structure"].get("trend", "—")

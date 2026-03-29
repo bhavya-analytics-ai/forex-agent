@@ -1,154 +1,220 @@
-# Forex Scanner v4 — ICT Edition
+# Forex Scanner v5 — ICT Edition
 
 Price action scanner for OANDA practice account.
 Top-down analysis: H1 structure → M15 confirm → M5/M1 trigger.
-ICT/Smart Money concepts built in.
+ICT/Smart Money concepts + execution decision layer built in.
 
-**Current status: Paper trading. H1 trend detection working correctly.
-Pullback vs reversal detection added. Breakout detection added.
-Do NOT trust signals blindly yet — validate against chart before every trade.**
+**Status: Paper trading. Core logic validated. Execution layer active.
+Do NOT trade scanner-only signals — always validate against your chart first.**
+
+---
+
+## What's New in v5
+
+v4 told you direction. v5 tells you **when and how to enter**.
+
+Added on top of v4 (nothing broken):
+- `filters/decision_layer.py` — hard filters, TP/SL override, gold mode, early entry
+- `core/liquidity.py` — structure-based SL/TP using real swing levels
+- Breakout pressure + acceptance confirmation (catches consolidation before the move)
+- Gold-specific execution path (separate logic, doesn't affect other pairs)
+- Early entry mode (fires before M5 confirmation when pressure is building)
+- News panel fix — ForexFactory date format was breaking parsing, fixed
+
+---
+
+## Architecture
+
+```
+OANDA API
+    ↓
+core/fetcher.py        — candle data (H1/M15/M5/M1)
+    ↓
+core/confluence.py     — multi-TF engine, pullback/breakout/reversal detection
+core/structure.py      — swing highs/lows, trend strength
+core/ict.py            — OB, MSS, ChoCH, FVG, premium/discount
+core/zones.py          — S/R zones (ATR-based)
+    ↓
+alerts/scorer.py       — scoring (0–95), grading (A+/A/B/C)
+    ↓
+filters/decision_layer.py  — execution filters + TP/SL override  ← NEW
+    ↓
+dashboard/app.py       — Flask dashboard at localhost:5000
+alerts/slack.py        — Slack alerts
+alerts/logger.py       — CSV signal log
+```
 
 ---
 
 ## Pairs
-USD_JPY, GBP_JPY, EUR_JPY, CHF_JPY, CAD_JPY, NZD_JPY,
-GBP_USD, EUR_USD, EUR_GBP, XAU_USD, XAG_USD
+
+```
+USD_JPY  GBP_JPY  EUR_JPY  CHF_JPY  CAD_JPY  NZD_JPY
+GBP_USD  EUR_USD  EUR_GBP
+XAU_USD  XAG_USD
+```
 
 ## Sessions
-Tokyo (00:00–06:00 UTC), London (07:00–12:00 UTC), New York (13:00–22:00 UTC)
+
+| Session | UTC | Best Pairs |
+|---------|-----|-----------|
+| Tokyo | 00:00–06:00 | JPY pairs |
+| London | 07:00–12:00 | GBP/EUR |
+| New York | 13:00–22:00 | Gold, USD |
 
 ---
 
-## What Was Fixed (v3 → v4)
+## Decision Layer (v5)
 
-### Core Logic Fixes
-- **H1 trend detection** — was reading only 4 swing points (too short). Now uses 6 swings
-  with recency weighting. H1 candle count increased from 200 → 400 so scanner sees full
-  trend history, not just recent 2 weeks.
-- **Zone override removed** — zones used to flip direction (resistance = bearish always).
-  Now zones only CONFIRM the trend, never override it. Zone vs trend conflict is flagged
-  as a warning instead.
-- **H1 is the boss** — weighted vote system: H1 = 2 votes, M15 = 1, M5 = 1.
-  Lower TFs can no longer override H1 by themselves.
-- **ICT MSS wired into direction** — MSS/ChoCH detection now actually affects the final
-  direction signal. Before it was decorative tags that did nothing.
-- **ChoCH fix** — was firing on every candle because it just checked if price was above
-  any recent high. Now correctly detects a FRESH break only (prev close below, current
-  close above the level).
-- **Premium/Discount fix** — now uses the most recent paired swing high+low from the same
-  leg. Before it used independent highs and lows which gave wrong ranges (especially gold).
-- **Gold pip size fix** — was 0.1, now correctly 0.01. Was causing SL/TP to be 10x too
-  wide on all gold signals.
-- **ICT conflict penalty** — if MSS says bullish but signal is bearish, score gets -30
-  penalty. Before this was just a cosmetic badge that did nothing.
-- **Signal stability** — signals lock for 15 pips before re-evaluating. Stops the 30s
-  flip-flop where signal changes every refresh.
+Applied after scoring, before output. Hard filters first, then TP/SL, then entry mode.
 
-### Pullback vs Reversal (NEW)
-The most important fix. Previously M15/M5 going bearish inside an H1 uptrend
-would flip the signal to BEARISH. That's wrong — it's just a pullback.
+### Hard Filters (blocks trade entirely)
+| Filter | Condition |
+|--------|-----------|
+| Mid-range | Price 40–60% of HTF range AND weak structure |
+| HTF zone | Strong opposing zone within ATR×0.5 (dynamic) |
+| TF conflict | H1/M15/M5 biases not aligned (skipped for pullbacks) |
+| Choppy | Ranging + strength 1 |
+| Multi-conflict | 2+ mismatches (trend + zone + sweep) |
+| RR < 1.0 | TP doesn't justify SL |
 
-**New rule: H1 trend is LAW. Only H1 MSS can change it.**
+Momentum override: if breakout ATR ratio ≥ 1.5, mid-range and HTF zone filters skipped.
 
-- H1 uptrend + M15/M5 bearish + no H1 MSS = **PULLBACK** → signal stays BULLISH,
-  flagged as entry opportunity
-- H1 uptrend + H1 MSS fires bearish = **REVERSAL** → signal flips BEARISH
-- H1 trend memory persists across scan cycles — doesn't reset every 30s
+### TP/SL Override
+- **SL**: M5 swing → M15 swing → OB edge → ATR fallback. Capped at ATR×2.
+- **TP1**: Nearest liquidity ≥ ATR×0.5 away with RR ≥ 1.5. Closest always wins.
+- **TP2**: Next real level after TP1. Not a fixed multiplier.
 
-### Breakout Detection (NEW)
-Two-stage alert system for breakout setups:
+### Decision Priority
+1. Decision layer filters
+2. RR validity (≥ 1.5)
+3. Setup type validity
+4. Score — info only, does NOT block trades
 
-- **Stage 1** — M15 impulse candle 2x+ ATR breaks recent swing structure.
-  Alert fires: "BREAKOUT FIRING — watch for retest or enter M1 aggressive"
-- **Stage 2** — Price pulls back to FVG left by impulse candle.
-  Alert fires: "BREAKOUT RETEST — price at FVG, enter now"
+A Grade C setup that passes filters + RR check shows as **"VALID SETUP — lower confidence"** instead of SKIP.
 
-Breakout overrides H1 trend only during killzones (institutional moves).
-Outside killzones: flagged as WATCH only.
+### Early Entry Mode
+Fires when full M5 confirmation is absent but pressure is building.
 
-### News Filter (NEW)
-- ForexFactory JSON feed (free, no API key needed)
-- HIGH impact news: blocks signals 60 min before, 30 min after
-- MEDIUM impact: caution flag only, doesn't block
-- Post-news spike detection: flags ICT reversal opportunity after news candle
-- News countdown ticker on dashboard
+Conditions:
+- H1 aligned with direction (mandatory)
+- M15 OR M5 OR momentum (any one sufficient)
+- Not choppy (strength ≥ 2 or non-ranging phase)
+- No strong conflict
+- Not extreme premium/discount (> 85% or < 15%)
 
-### Dashboard Redesign (NEW)
-- Blue/navy professional theme, much easier to read
-- News ticker at top with countdown to next high-impact event
-- Red banner when news within 30 mins
-- Bigger clearer BULL/BEAR direction display
-- Color-coded rows by grade (A+ = green, A = blue, B = yellow, C = orange)
-- Session timer in header
-- ICT CONFLICT badge on signals that contradict MSS/ChoCH
-- Setup type column shows: PULLBACK LONG/SHORT, BREAKOUT ▲/▼, BO RETEST, REVERSAL
+Output: `early_entry = True`, `entry_type = "anticipation"`, ⚡ EARLY badge on dashboard.
+Grade unchanged — early entry is timing info, not quality info.
 
 ---
 
-## Setup Types (what the dashboard shows)
+## Gold Mode (XAU_USD only)
+
+Completely separate execution path inside decision layer. Other pairs unaffected.
+
+### Trend
+Dual lookback using H1 structure:
+- Long-term: dominant trend (6 swings)
+- Short-term: current phase (trending / pullback / ranging)
+- If both agree → `trend_strength = "strong"`
+
+### Zone Classification
+Zones reclassified relative to H1 trend direction (not just price position).
+
+### Breakout Pipeline
+| Stage | Condition | Action |
+|-------|-----------|--------|
+| Breakout pressure | Compression near level (small bodies, tightening range) | Mark `breakout_preparation` |
+| Early breakout | ATR expansion OR consecutive candles | Aggressive entry allowed |
+| Breakout confirmed | Price holds above/below level, no return inside | Upgrade setup |
+| Breakout failed | Price returns inside level | Warn fakeout, revert to reaction |
+
+Breakout strength = `ATR_ratio × consecutive_candles`
+
+| Strength | Action |
+|----------|--------|
+| HIGH | Immediate entry if: near level + confirmed/early + close in top 70% |
+| MEDIUM | Wait for 1 confirmation candle |
+| LOW | Skip continuation trade |
+
+### Gold SL (Adaptive)
+- **Normal mode**: M5 swing → M15 swing → OB → ATR×1.0
+- **Momentum mode**: Skip M5 (too tight) → M15 → OB → ATR×1.5 + ATR×0.3 buffer
+- Cap: ATR×2 always
+
+### Gold TP
+- TP1: Nearest valid liquidity (distance ≥ ATR×0.5, RR ≥ 1.2). Closest wins — far H1 swing can't beat a closer M15 level.
+- TP2: Next real level after TP1. Not a fixed multiplier.
+
+### Sanity Warnings (warn only, never block)
+- Target unrealistically far vs structure range
+- Late entry — move already largely happened
+- Price mid-range with no breakout
+- Weak or transitioning trend
+- Multiple conflicting signals
+
+---
+
+## Setup Types
 
 | Setup | Meaning | Action |
 |-------|---------|--------|
-| ↩ PULLBACK LONG | M15/M5 retracing in H1 uptrend | Wait for M5 rejection candle, enter long |
-| ↩ PULLBACK SHORT | M15/M5 retracing in H1 downtrend | Wait for M5 rejection candle, enter short |
-| 🚀 BREAKOUT ▲/▼ | Stage 1 — M15 impulse broke structure | Watch for FVG retest OR enter M1 aggressive |
-| ⚡ BO RETEST | Stage 2 — price back at FVG/OB | Enter now, SL below FVG |
-| 🔄 REVERSAL | H1 MSS confirmed, trend changing | High conviction, enter on M5 confirmation |
-| sr flip | S/R flip zone | Standard zone setup |
-| zone tap | Price at key zone | Standard zone setup |
+| ↩ PULLBACK LONG/SHORT | M15/M5 retracing in H1 trend | Wait for M5 rejection, enter with trend |
+| 🚀 BREAKOUT ▲/▼ | M15 impulse breaks structure | Watch for FVG retest or M1 aggressive |
+| ⚡ BO RETEST | Price back at FVG after breakout | Enter now, SL below FVG |
+| ⚡ BREAKOUT PRESSURE | Consolidation at key level | Prepare, watch for expansion |
+| ⚡ EARLY BREAKOUT | ATR expansion candle detected | Aggressive entry, pre-confirmation |
+| 🔄 REVERSAL | H1 MSS confirmed | High conviction, enter on M5 confirm |
+| sr flip / zone tap | S/R zone setup | Standard zone entry |
 
 ---
 
-## Alert Grades
+## Grading
 
-| Grade | Meaning | Action |
-|-------|---------|--------|
-| A+ | Zone + structure + candle + ICT all aligned | Strong entry |
-| A  | Solid confluence, 1 element missing | Take if chart looks right |
-| B  | Watch only, missing confirmation | Wait |
-| C  | Conflicting or weak signals | Skip |
+| Grade | Score | Meaning | Action |
+|-------|-------|---------|--------|
+| A+ | 82+ | Full alignment — zone + structure + candle | Strong entry |
+| A | 68+ | Solid confluence, 1 element missing | Take if chart agrees |
+| B | 54+ | Watch only, missing confirmation | Wait |
+| C | <54 | Weak or conflicting | Skip — unless DL overrides |
 
-**Score is capped at 95 — 100% confidence doesn't exist in trading.**
+**Score capped at 95. 100% confidence doesn't exist.**
+A+ capped to A outside killzones.
 
 ---
 
 ## Score Breakdown
 
-| Component | Max Points | What It Checks |
-|-----------|-----------|----------------|
+| Component | Max | What It Checks |
+|-----------|-----|----------------|
 | Zone | 25 | H1 zone quality and touches |
 | TF Confluence | 25 | H1 + M15 + M5 weighted vote |
 | Pattern | 20 | M5 candle (pin bar, engulf, etc) |
-| Session | 15 | Right session for this pair |
+| Session | 15 | Correct session for pair |
 | News | 10 | No high-impact news nearby |
 | Quality Bonus | +15 | Pullback in confirmed trend |
-| Pullback Bonus | +8 | Clean pullback entry in strong H1 trend |
-| Breakout Bonus | +4 to +12 | Breakout strength (retest = highest) |
-| MSS Reversal Bonus | +15 | H1 MSS confirmed |
+| Pullback Bonus | +8 | Clean pullback entry |
+| Breakout Bonus | +4 to +12 | Breakout strength |
+| MSS Reversal | +15 | H1 MSS confirmed |
 | FVG Bonus | +10 | Fair value gap at zone |
-| ICT Bonus | +30 | OB, MSS, ChoCH, sweep, premium/discount |
+| ICT Bonus | +30 | OB, MSS, ChoCH, sweep, P/D zone |
 
-**Penalties:**
-- Pattern conflict: -25
-- No zone: -12
-- M5 consolidating: -15
-- ICT conflict (MSS contradicts signal): -30
-- Counter-trend (against strong H1): -20
+**Penalties**: Pattern conflict −25 | No zone −12 | M5 consolidating −15 | ICT conflict −30 | Counter-trend −20
 
 ---
 
 ## ICT Concepts
 
-| Concept | What It Means |
-|---------|--------------|
-| Order Block (OB) | Last bearish candle before bullish impulse (and vice versa) |
+| Concept | Meaning |
+|---------|---------|
+| OB | Last bearish candle before bullish impulse (and vice versa) |
 | Breaker Block | OB that got broken, now flipped polarity |
 | Liquidity Sweep | Wick above swing high closes back below = stops taken |
-| MSS | Market Structure Shift — trend officially changing (H1 MSS = highest signal) |
-| ChoCH | Change of Character — first break of short-term high/low, precedes MSS |
-| FVG | Fair Value Gap — imbalance left by impulse candle, price often retests it |
-| Premium Zone | Price above 60% of current swing range — sell bias |
-| Discount Zone | Price below 40% of current swing range — buy bias |
+| MSS | Market Structure Shift — H1 MSS = trend officially changing |
+| ChoCH | Change of Character — first break of short-term structure |
+| FVG | Fair Value Gap — imbalance left by impulse, price retests it |
+| Premium | Price above 60% of range — sell bias |
+| Discount | Price below 40% of range — buy bias |
 
 ---
 
@@ -159,110 +225,67 @@ Outside killzones: score dampened 50%, breakouts flagged WATCH only.
 | Killzone | UTC | Best Pairs |
 |----------|-----|-----------|
 | Asian | 01:00–05:00 | JPY pairs |
-| London Open | 07:00–10:00 | GBP/EUR pairs |
-| NY Open | 12:00–15:00 | Gold, USD pairs |
+| London Open | 07:00–10:00 | GBP/EUR |
+| NY Open | 12:00–15:00 | Gold, USD |
 | London Close | 15:00–17:00 | GBP/EUR reversals |
+
+---
+
+## News Filter
+
+Source: ForexFactory JSON (free, no API key).
+
+| Impact | Action |
+|--------|--------|
+| HIGH | Block signals 60 min before, 30 min after |
+| MEDIUM | Caution flag, don't block |
+| Post-news | Flag for ICT spike reversal setup |
 
 ---
 
 ## How To Run
 
-### One-time scan
 ```bash
+# One-time scan
 python main.py scan
-```
 
-### Live mode (background polling every 5 mins)
-```bash
+# Live mode (poll every 5 min + dashboard)
 python main.py live
-```
 
-### Stream mode (real-time tick feed)
-```bash
+# Live mode custom interval
+python main.py live 60
+
+# Real-time tick feed
 python main.py stream
-```
 
-### Pre-session briefings
-```bash
+# Pre-session briefings
 python main.py briefing tokyo
 python main.py briefing london
 python main.py briefing new_york
-```
 
-### Auto-scheduler
-```bash
+# Log a trade you took
+python main.py took GBP_JPY short
+
+# Performance stats
+python main.py stats
+
+# Auto-scheduler (briefings at session open)
 python scheduler.py
 ```
 
-### Log a trade you took
-```bash
-python main.py took GBP_JPY short
-python main.py took XAU_USD long
-```
-**Important:** Run this in a new terminal tab — don't stop the scanner.
-Wait for the scanner to log a signal first (few mins), then run this.
-
-### Performance stats
-```bash
-python main.py stats
-```
-
----
-
 ## Dashboard
+
 ```
 http://localhost:5000
 ```
-- Blue/navy theme, easy to read
-- News ticker top with countdown
-- Color coded rows by grade
+
+- Blue/navy theme
+- News ticker with countdown
+- Color-coded rows by grade
+- ⚡ EARLY badge for early entry setups
 - Click any row for Entry / SL / TP1 / TP2
 - ICT CONFLICT badge = do not trade
 - Refreshes every 30s
-
----
-
-## Paper Trading Status
-
-Currently paper trading to validate signals. Trust level:
-- ✅ H1 trend detection — working correctly
-- ✅ ICT conflict detection — working, blocks bad signals
-- ✅ News blocking — working via ForexFactory
-- 🔧 M15/M5 entry timing — improving, needs more validation
-- 🔧 Breakout detection — newly added, needs live testing
-- 🔧 ML pipeline — needs 50+ clean signals before training
-
-**Rule: Only trade when scanner agrees with YOUR chart read.
-Never trade scanner-only signals until trust is established.**
-
----
-
-## ML Pipeline
-
-### Auto-labeling
-15 minutes after every signal, system checks price and labels WIN/LOSS/NEUTRAL.
-
-### Manual backfill
-```bash
-python -m ml.outcome_labeler backfill
-```
-
-### Train model (after 50+ signals)
-```bash
-python -m ml.trainer
-```
-
-### Performance report
-```bash
-python -m ml.trainer report
-```
-
----
-
-## Known Issues / Still To Fix
-- ML outcome labeler timezone warning (harmless, doesn't stop scanner)
-- M1 aggressive breakout entry not fully implemented yet
-- Stream mode breakout detection needs testing in live market
 
 ---
 
@@ -270,40 +293,80 @@ python -m ml.trainer report
 
 ```
 forex-agent/
-├── config.py               # Pairs, sessions, scoring weights (H1: 400 candles)
 ├── main.py                 # Entry point — all run modes
+├── config.py               # Pairs, sessions, scoring weights
 ├── scheduler.py            # Auto-briefing scheduler
-├── .env                    # API keys (never commit)
+│
 ├── core/
-│   ├── confluence.py       # Multi-TF engine (pullback/breakout/reversal logic)
-│   ├── fetcher.py          # OANDA candle fetching (gold pip fixed: 0.01)
-│   ├── ict.py              # ICT concepts (ChoCH fixed, P/D range fixed)
-│   ├── streamer.py         # Live tick streaming
+│   ├── confluence.py       # Multi-TF engine (pullback/breakout/reversal)
+│   ├── fetcher.py          # OANDA candle fetching
+│   ├── ict.py              # ICT concepts
 │   ├── structure.py        # Market structure (6 swings, recency weighted)
-│   ├── zones.py            # S/R and supply/demand zones (ATR-based)
+│   ├── zones.py            # S/R zones (ATR-based)
 │   ├── candles.py          # Candlestick pattern detection
-│   └── fvg.py              # Fair value gap detection
+│   ├── fvg.py              # Fair value gap detection
+│   ├── streamer.py         # Live tick streaming
+│   └── liquidity.py        # Structure-based SL/TP ← NEW (v5)
+│
+├── filters/
+│   ├── decision_layer.py   # Execution filters + gold mode + early entry ← NEW (v5)
+│   ├── killzones.py        # ICT killzone filter
+│   ├── news.py             # ForexFactory news filter
+│   └── session.py          # Session detection
+│
 ├── alerts/
-│   ├── scorer.py           # Signal scoring (ICT conflict penalty, setup bonuses)
+│   ├── scorer.py           # Signal scoring
 │   ├── logger.py           # CSV signal logger
 │   └── slack.py            # Slack alerts
-├── filters/
-│   ├── killzones.py        # ICT killzone filter
-│   ├── news.py             # ForexFactory news (HIGH block, MEDIUM warn)
-│   └── session.py          # Session detection
-├── reports/
-│   └── briefing.py         # Pre-session briefings
+│
 ├── dashboard/
-│   ├── app.py              # Flask dashboard (news wired in)
+│   ├── app.py              # Flask dashboard
 │   └── templates/
-│       └── dashboard.html  # Blue/navy UI with news ticker
+│       └── dashboard.html  # Blue/navy UI
+│
+├── reports/
+│   └── briefing.py         # Pre-session briefings + scan pipeline
+│
 ├── ml/
 │   ├── outcome_labeler.py  # Auto WIN/LOSS labeler
-│   └── trainer.py          # Model trainer
+│   └── trainer.py          # Model trainer (needs 50+ signals)
+│
 └── logs/
-    ├── signals.csv         # Fresh log (started clean after v4 fixes)
-    ├── signals_backup.csv  # Old data from v3 (before fixes, don't train on this)
-    └── app.log             # App logs
+    ├── signals.csv         # Clean signal log (v5+)
+    └── app.log
+```
+
+---
+
+## Paper Trading Status
+
+| Component | Status |
+|-----------|--------|
+| H1 trend detection | ✅ Working |
+| ICT conflict detection | ✅ Working |
+| News blocking | ✅ Working |
+| Decision layer filters | ✅ Working |
+| Gold execution mode | ✅ Working |
+| Early entry mode | ✅ Working |
+| M15/M5 entry timing | 🔧 Improving |
+| Breakout retest detection | 🔧 Needs live testing |
+| ML pipeline | 🔧 Needs 50+ clean signals |
+
+**Rule: Only trade when scanner agrees with YOUR chart read. Never trade scanner-only.**
+
+---
+
+## ML Pipeline
+
+```bash
+# Auto-label outcomes (runs automatically every scan cycle)
+python -m ml.outcome_labeler backfill
+
+# Train model (after 50+ labeled signals)
+python -m ml.trainer
+
+# Performance report
+python -m ml.trainer report
 ```
 
 ---
@@ -318,14 +381,11 @@ pip install flask scikit-learn oandapyV20 requests pandas python-dotenv
 OANDA_API_KEY=your_key
 OANDA_ACCOUNT_ID=your_account
 OANDA_ENVIRONMENT=practice
-SLACK_WEBHOOK_URL=your_webhook
+SLACK_WEBHOOK_URL=your_webhook  # optional
 
-# 3. Create logs folder
-mkdir logs
-
-# 4. Test
+# 3. Test
 python main.py scan
 
-# 5. Run
-python main.py stream
+# 4. Run
+python main.py live
 ```

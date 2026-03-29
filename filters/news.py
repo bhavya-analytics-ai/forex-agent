@@ -73,19 +73,15 @@ def fetch_forexfactory_calendar() -> pd.DataFrame:
                 if time_str.lower() in ["all day", "tentative", ""]:
                     continue
 
-                dt_str   = f"{date_str} {time_str.upper()}"
+                # Format is ISO 8601 with timezone offset: 2026-03-23T08:45:00-04:00
+                # Strip the tz offset and treat the local time as EST/EDT, convert to UTC
                 dt_local = None
-
-                for fmt in [
-                    "%m/%d/%Y %I:%M%p",
-                    "%m/%d/%Y %I%p",
-                    "%Y-%m-%dT%H:%M:%S",
-                ]:
-                    try:
-                        dt_local = datetime.strptime(dt_str, fmt)
-                        break
-                    except ValueError:
-                        continue
+                try:
+                    # Remove tz offset (+HH:MM or -HH:MM) at the end
+                    clean = date_str[:19]  # keep "2026-03-23T08:45:00"
+                    dt_local = datetime.strptime(clean, "%Y-%m-%dT%H:%M:%S")
+                except ValueError:
+                    pass
 
                 if dt_local is None:
                     continue
@@ -374,6 +370,53 @@ def get_news_dashboard_data(pairs: list = None) -> dict:
         "caution":   caution,
         "next_high": next_high,
     }
+
+
+def get_upcoming_news(hours_ahead: int = 6) -> list:
+    """
+    Returns all HIGH/MEDIUM/LOW events within the next N hours.
+    Formatted for the dashboard news panel.
+
+    Returns list of:
+    {
+        "currency": "USD",
+        "impact":   "HIGH",
+        "title":    "CPI",
+        "time":     "08:30 UTC",
+        "mins_away": 45,
+        "past":     False,
+    }
+    """
+    df  = fetch_forexfactory_calendar()
+    now = datetime.utcnow()
+
+    if df.empty:
+        return []
+
+    window_end   = now + timedelta(hours=hours_ahead)
+    window_start = now - timedelta(minutes=30)
+
+    mask = (
+        df["impact"].isin(["HIGH", "MEDIUM", "LOW"]) &
+        (df["time"] >= window_start) &
+        (df["time"] <= window_end)
+    )
+
+    filtered = df[mask].sort_values("time")
+
+    events = []
+    for _, row in filtered.iterrows():
+        mins_away = int((row["time"] - now).total_seconds() / 60)
+        events.append({
+            "currency":  row["currency"],
+            "impact":    row["impact"],
+            "title":     row["event"],
+            "time":      row["time"].strftime("%H:%M UTC"),
+            "mins_away": mins_away,
+            "past":      mins_away < 0,
+        })
+
+    return events
 
 
 def get_session_news_summary(session: str) -> list:
