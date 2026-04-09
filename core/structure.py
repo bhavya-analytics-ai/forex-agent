@@ -24,20 +24,23 @@ logger = logging.getLogger(__name__)
 def get_lookback_for_tf(df: pd.DataFrame) -> int:
     """
     Adaptive lookback based on candle count.
-    H1 (200 candles) → 10
-    M15 (100 candles) → 6
-    M5 (60 candles)  → 4
-    M1 (60 candles)  → 3
+    H1 (200 candles) → 5
+    M15 (100 candles) → 4
+    M5 (60 candles)  → 3
+    M1 (60 candles)  → 2
+
+    Reduced from 10/6/4/3 — previous values were too strict,
+    causing recent swings (last 10 bars) to be invisible to the system.
     """
     n = len(df)
     if n >= 150:
-        return 10
+        return 5
     elif n >= 80:
-        return 6
-    elif n >= 50:
         return 4
-    else:
+    elif n >= 50:
         return 3
+    else:
+        return 2
 
 
 def find_swing_highs(df: pd.DataFrame) -> pd.Series:
@@ -133,7 +136,7 @@ def detect_dominant_trend(df: pd.DataFrame) -> dict:
 
         for i in range(1, len(values)):
             # Last comparison (most recent) gets weight 2, older get weight 1
-            weight = 2 if i == len(values) - 2 else 1
+            weight = 2 if i == len(values) - 1 else 1
             total_weight += weight
 
             if direction == "up" and values[i] > values[i - 1]:

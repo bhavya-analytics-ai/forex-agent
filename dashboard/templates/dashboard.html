@@ -644,6 +644,27 @@
   </div>
 </div>
 
+<!-- NEWS SNIPER BANNER (hidden by default) -->
+<div id="news-sniper-banner" style="display:none; background:#1a0a00; border-bottom:2px solid #ff4444; padding:10px 28px; display:none; align-items:center; justify-content:space-between;">
+  <div style="display:flex; align-items:center; gap:12px;">
+    <span style="background:#ff4444; color:#fff; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; letter-spacing:2px; padding:4px 10px; border-radius:4px; animation:pulse 1s infinite;">⚡ NEWS SNIPER ACTIVE</span>
+    <span style="color:#ff9100; font-size:12px; font-family:'JetBrains Mono',monospace;" id="sniper-source-label">AUTO</span>
+    <span style="color:#aaa; font-size:11px;">M1 CHoCH mode — spike reversal entries only</span>
+  </div>
+  <button onclick="toggleMode()" id="mode-toggle-btn"
+    style="background:rgba(255,68,68,.15); border:1px solid rgba(255,68,68,.4); color:#ff4444; padding:5px 14px; border-radius:4px; cursor:pointer; font-size:11px; font-family:'JetBrains Mono',monospace; font-weight:700; letter-spacing:1px;">
+    SWITCH TO NORMAL
+  </button>
+</div>
+
+<!-- NORMAL MODE BAR (shown when normal) -->
+<div id="normal-mode-bar" style="background:var(--navy-dark); border-bottom:1px solid var(--navy-border); padding:6px 28px; display:flex; align-items:center; justify-content:flex-end;">
+  <button onclick="toggleMode()" id="mode-toggle-btn-normal"
+    style="background:rgba(255,68,68,.08); border:1px solid rgba(255,68,68,.25); color:#ff6666; padding:4px 12px; border-radius:4px; cursor:pointer; font-size:10px; font-family:'JetBrains Mono',monospace; font-weight:600; letter-spacing:1px;">
+    ⚡ ACTIVATE NEWS SNIPER
+  </button>
+</div>
+
 <!-- NEWS TICKER -->
 <div id="news-bar">
   <div class="news-label">📰 NEWS</div>
@@ -1011,11 +1032,60 @@ async function fetchAndRender() {
     // Render news
     if (data.news) renderNews(data.news);
 
+    // Render mode banner
+    if (data.mode) renderModeBanner(data.mode);
+
     document.getElementById("signal-body").innerHTML = signals.map(buildRow).join("");
     prevSignals = {};
     signals.forEach(s=>prevSignals[s.pair]=s);
 
   } catch(e) { console.warn("Fetch error:", e); }
+}
+
+// ── MODE BANNER ───────────────────────────────────────────────────────────────
+
+function renderModeBanner(mode) {
+  const isNews    = mode.mode === "news_sniper";
+  const banner    = document.getElementById("news-sniper-banner");
+  const normalBar = document.getElementById("normal-mode-bar");
+  const srcLabel  = document.getElementById("sniper-source-label");
+
+  if (isNews) {
+    banner.style.display    = "flex";
+    normalBar.style.display = "none";
+    if (srcLabel) srcLabel.textContent = mode.is_manual ? "MANUAL" : "AUTO";
+  } else {
+    banner.style.display    = "none";
+    normalBar.style.display = "flex";
+  }
+}
+
+async function toggleMode() {
+  try {
+    const modeRes  = await fetch("/api/mode");
+    const modeData = await modeRes.json();
+    const current  = modeData.mode;
+
+    // If manual override active → clear it (back to auto)
+    // If no override → set opposite mode
+    let body;
+    if (modeData.is_manual) {
+      body = { mode: null };  // clear override
+    } else {
+      body = { mode: current === "news_sniper" ? "normal" : "news_sniper" };
+    }
+
+    await fetch("/api/mode/toggle", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(body),
+    });
+
+    // Immediately re-fetch to update banner
+    fetchSignals();
+  } catch(e) {
+    console.warn("Mode toggle failed:", e);
+  }
 }
 
 function updateClock() {
