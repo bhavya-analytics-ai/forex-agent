@@ -11,7 +11,7 @@ UPDATES:
 import logging
 import threading
 from datetime import datetime, timezone
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from config import DASHBOARD_CONFIG, PAIRS
 
 logger = logging.getLogger(__name__)
@@ -109,13 +109,22 @@ def api_signals():
     grade_order = {"A+": 0, "A": 1, "B": 2, "C": 3, "—": 4}
     data.sort(key=lambda x: (grade_order.get(x["grade"], 4), -x["score"]))
 
-    # Get news data
+    # Get news data (includes panel_events fix)
     news_data = {}
     try:
-        from filters.news import get_news_dashboard_data
-        news_data = get_news_dashboard_data(PAIRS)
+        from filters.news import get_news_dashboard_data, get_upcoming_news
+        news_data                  = get_news_dashboard_data(PAIRS)
+        news_data["panel_events"]  = get_upcoming_news(hours_ahead=6)
     except Exception as e:
         logger.warning(f"News dashboard data failed: {e}")
+
+    # Get active strategy mode
+    mode_info = {}
+    try:
+        from filters.mode_manager import get_mode_info
+        mode_info = get_mode_info()
+    except Exception as e:
+        logger.warning(f"Mode info failed: {e}")
 
     return jsonify({
         "signals":     data,
@@ -123,6 +132,7 @@ def api_signals():
         "total_pairs": len(PAIRS),
         "alert_count": sum(1 for s in data if s.get("should_alert")),
         "news":        news_data,
+        "mode":        mode_info,
     })
 
 
@@ -144,6 +154,37 @@ def api_signal_detail(pair: str):
     if not signal:
         return jsonify({"error": f"No data for {pair}"}), 404
     return jsonify(signal)
+
+
+@app.route("/api/mode", methods=["GET"])
+def api_mode():
+    """Get current strategy mode."""
+    try:
+        from filters.mode_manager import get_mode_info
+        return jsonify(get_mode_info())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mode/toggle", methods=["POST"])
+def api_mode_toggle():
+    """
+    Toggle strategy mode manually.
+    POST body: {"mode": "news_sniper"} or {"mode": "normal"} or {"mode": null} to clear override.
+    """
+    try:
+        from filters.mode_manager import set_manual_mode, clear_manual_override, get_mode_info
+        body = request.get_json(silent=True) or {}
+        mode = body.get("mode")
+
+        if mode is None:
+            clear_manual_override()
+        else:
+            set_manual_mode(mode)
+
+        return jsonify({"ok": True, "mode": get_mode_info()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 def start_dashboard():

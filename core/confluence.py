@@ -64,6 +64,15 @@ def _set_h1_memory(pair: str, trend: str, direction: str, price: float):
     }
 
 
+def _lock_threshold(pair: str) -> int:
+    """Pair-aware lock threshold in pips. Gold moves $15-30/hr so needs a wide lock."""
+    if pair == "XAU_USD":
+        return 200
+    if pair == "XAG_USD":
+        return 100
+    return 20
+
+
 def _is_signal_locked(pair: str, current_price: float) -> bool:
     lock = _signal_lock.get(pair)
     if not lock:
@@ -71,7 +80,7 @@ def _is_signal_locked(pair: str, current_price: float) -> bool:
     pip          = pip_size(pair)
     locked_price = lock.get("entry_price", current_price)
     move_pips    = abs(current_price - locked_price) / pip
-    if move_pips > 15:
+    if move_pips > _lock_threshold(pair):
         _signal_lock.pop(pair, None)
         return False
     return True
@@ -129,7 +138,7 @@ def detect_m15_breakout(candles: dict, pair: str, h1_bias: str) -> dict:
         body   = abs(candle["close"] - candle["open"])
         total  = candle["high"] - candle["low"]
 
-        if total == 0 or body / atr_m15 < 1.8:
+        if total == 0 or body / atr_m15 < 1.3:
             continue
 
         close_pct = (candle["close"] - candle["low"]) / total
@@ -352,8 +361,7 @@ def check_confluence(candles: dict, pair: str) -> dict:
     m5_bias  = m5["bias"]
 
     m15_against = m15_bias != h1_bias and h1_bias != "neutral" and m15_bias != "neutral"
-    m5_against  = m5_bias  != h1_bias and h1_bias != "neutral" and m5_bias  != "neutral"
-    is_pullback = (m15_against or m5_against) and not is_breakout
+    is_pullback = m15_against and not is_breakout
 
     # ── STEP 4: FINAL DIRECTION + SIGNAL TYPE ────────────────────
     direction   = h1_bias
