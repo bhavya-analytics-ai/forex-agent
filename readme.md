@@ -3,13 +3,20 @@
 
 ---
 
-## CHANGELOG
+## GIT LOG
 
-| Version | Date | What changed |
-|---------|------|-------------|
-| v6 | 2026-04-09 | Bayesian scorer (P(win)+EV), news sniper mode, strategy silos (gold/forex/news), mode_manager auto-detect + dashboard toggle, decision_layer collapsed 1164→22 lines, sweep→CHoCH linked sequence, structure/confluence bug fixes |
-| v5 | 2024-03-24 | Execution layer — decision_layer, gold mode, early entry, structure-based SL/TP, ForexFactory news fix |
-| v4 | 2024-03-23 | ICT concepts (OB, MSS, CHoCH, FVG, premium/discount), smarter scoring, pattern conflict detection |
+```
+901fbb2 merge: v6 worktree — Bayesian scorer, news sniper, strategy silos
+283f711 feat: v6 — Bayesian scorer, news sniper mode, strategy silos
+fafd657 feat: v5 execution layer — decision layer, gold mode, early entry
+c4b30d3 yeah
+be047a1 remove .DS_Store
+431b8ae Inside local
+20f7196 24 Mar 12.26pm push
+244b7e0 Latest update mar 23 8.48
+26e4146 updated run.md
+13d6262 Gold nd jpy breakout not good
+```
 
 **Status: Paper trading. Core logic validated. Do NOT trade scanner-only signals — always validate against your chart first.**
 
