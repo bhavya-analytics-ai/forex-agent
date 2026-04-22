@@ -322,6 +322,42 @@ def get_agent_signal(signal_id: str) -> dict | None:
 
 # ── PERFORMANCE SUMMARY ───────────────────────────────────────────────────────
 
+def save_note(signal_id: str, note: str, kind: str = "manual"):
+    """Append a note to manual_trades or agent_signals. kind: 'manual' | 'agent'"""
+    conn  = _get_conn()
+    table = "manual_trades" if kind == "manual" else "agent_signals"
+    row   = conn.execute(f"SELECT notes FROM {table} WHERE signal_id=?", (signal_id,)).fetchone()
+    if row is None:
+        return False
+    existing = row["notes"] or ""
+    from datetime import datetime, timezone
+    ts  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    new = f"{existing}\n[{ts}] {note}".strip()
+    with _write_lock:
+        conn.execute(f"UPDATE {table} SET notes=? WHERE signal_id=?", (new, signal_id))
+        conn.commit()
+    return True
+
+
+def update_agent_signal_levels(signal_id: str, user_sl: float | None, user_tp1: float | None):
+    """Update user SL/TP on an agent signal (without changing taken status)."""
+    conn = _get_conn()
+    row  = conn.execute(
+        "SELECT sl_price, tp1_price FROM agent_signals WHERE signal_id=?", (signal_id,)
+    ).fetchone()
+    if not row:
+        return False
+    actual_sl  = user_sl  if user_sl  is not None else row["sl_price"]
+    actual_tp1 = user_tp1 if user_tp1 is not None else row["tp1_price"]
+    with _write_lock:
+        conn.execute("""
+            UPDATE agent_signals SET user_sl=?, user_tp1=?, actual_sl=?, actual_tp1=?
+            WHERE signal_id=?
+        """, (user_sl, user_tp1, actual_sl, actual_tp1, signal_id))
+        conn.commit()
+    return True
+
+
 def get_performance_summary_db() -> dict:
     conn = _get_conn()
 

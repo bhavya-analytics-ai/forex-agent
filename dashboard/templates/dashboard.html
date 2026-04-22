@@ -1077,6 +1077,10 @@
     <div style="margin-bottom:10px;">
       <button onclick="resetToAutoLevels()" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:var(--text-muted);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:10px;font-family:'JetBrains Mono',monospace;">↺ Reset to auto levels</button>
     </div>
+    <div class="modal-field">
+      <label class="modal-label">NOTES <span style="font-weight:400;color:var(--text-muted);font-size:9px;">optional</span></label>
+      <input class="modal-input" id="el-notes" type="text" placeholder="e.g. moved to breakeven after NY open" />
+    </div>
     <div class="modal-feedback" id="el-feedback"></div>
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeEditLevelsModal()">Cancel</button>
@@ -1109,10 +1113,29 @@
       <label class="modal-label">YOUR TP1 <span style="font-weight:400;color:var(--text-muted);font-size:9px;">optional — leave blank to use scanner's</span></label>
       <input class="modal-input" id="ti-user-tp1" type="number" step="0.00001" placeholder="your actual take profit price" />
     </div>
+    <div class="modal-field">
+      <label class="modal-label">NOTES <span style="font-weight:400;color:var(--text-muted);font-size:9px;">optional</span></label>
+      <input class="modal-input" id="ti-notes" type="text" placeholder="e.g. entered on M5 OB rejection" />
+    </div>
     <div class="modal-feedback" id="ti-feedback"></div>
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeTookItModal()">Cancel</button>
       <button class="modal-submit" onclick="submitTookIt()">CONFIRM TOOK IT</button>
+    </div>
+  </div>
+</div>
+
+<!-- NOTE MODAL (shared for all rows) -->
+<div class="modal-overlay" id="note-modal">
+  <div class="modal-box" style="width:320px;">
+    <div class="modal-title">ADD NOTE — <span id="note-pair-label" style="color:var(--blue-bright)"></span></div>
+    <div class="modal-field">
+      <textarea class="modal-input" id="note-text" rows="3" placeholder="Write your note here..." style="resize:vertical;font-family:'JetBrains Mono',monospace;font-size:11px;"></textarea>
+    </div>
+    <div class="modal-feedback" id="note-feedback"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeNoteModal()">Cancel</button>
+      <button class="modal-submit" onclick="submitNote()">SAVE NOTE</button>
     </div>
   </div>
 </div>
@@ -1785,17 +1808,46 @@ function renderPerformance(perf, recentSignals) {
       ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);">@ <b style="color:var(--text-primary)">${livePrice}</b></span>`
       : `<span style="font-size:10px;color:var(--text-muted);">—</span>`;
 
+    // Inline SL/TP for taken agent signals
+    const agentInlineHtml = isTaken ? `
+      <div style="display:flex;align-items:center;gap:6px;margin-top:4px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:4px;border:1px solid rgba(255,255,255,.05);">
+        <span style="font-size:9px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">
+          Scanner SL:<b style="color:var(--red);margin-left:3px;">${s.sl_price||"—"}</b>
+          &nbsp;TP:<b style="color:var(--green);margin-left:3px;">${s.tp1_price||"—"}</b>
+        </span>
+        <span style="font-size:9px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-left:8px;">Your SL:</span>
+        <input type="number" step="0.00001" id="asl-${s.signal_id}" value="${s.user_sl||''}"
+          style="width:80px;background:rgba(255,68,68,.06);border:1px solid rgba(255,68,68,.25);color:var(--red);
+                 font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 5px;border-radius:3px;outline:none;"
+          placeholder="your SL" />
+        <span style="font-size:9px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">TP:</span>
+        <input type="number" step="0.00001" id="atp-${s.signal_id}" value="${s.user_tp1||''}"
+          style="width:80px;background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.25);color:var(--green);
+                 font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 5px;border-radius:3px;outline:none;"
+          placeholder="your TP" />
+        <button onclick="saveAgentLevels('${s.signal_id}')"
+          style="background:rgba(77,159,255,.12);border:1px solid rgba(77,159,255,.3);color:var(--blue-bright);
+                 font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 8px;border-radius:3px;cursor:pointer;">Save</button>
+        <span id="alfb-${s.signal_id}" style="font-size:9px;color:var(--green);font-family:'JetBrains Mono',monospace;"></span>
+      </div>` : "";
+
     return `
-      <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 60px 60px 1fr 80px auto auto;">
-        <span class="perf-log-time">${(s.timestamp_utc||"").slice(0,10)} ${time}</span>
-        <span class="perf-log-pair">${(s.pair||"").replace("_","/")}</span>
-        <span class="${dirCls}">${dirSym} ${(s.direction||"").slice(0,4).toUpperCase()}</span>
-        <span class="perf-log-grade">${s.grade||"—"}</span>
-        <span style="color:var(--text-muted)">${s.score||"—"}</span>
-        <span style="color:var(--text-muted);font-size:10px;">${(s.setup_type||"").replace(/_/g," ")}</span>
-        ${livePriceHtml}
-        ${takenBadge}
-        ${outcomeHtml}
+      <div style="margin-bottom:4px;">
+        <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 60px 60px 1fr 80px auto auto auto;">
+          <span class="perf-log-time">${(s.timestamp_utc||"").slice(0,10)} ${time}</span>
+          <span class="perf-log-pair">${(s.pair||"").replace("_","/")}</span>
+          <span class="${dirCls}">${dirSym} ${(s.direction||"").slice(0,4).toUpperCase()}</span>
+          <span class="perf-log-grade">${s.grade||"—"}</span>
+          <span style="color:var(--text-muted)">${s.score||"—"}</span>
+          <span style="color:var(--text-muted);font-size:10px;">${(s.setup_type||"").replace(/_/g," ")}</span>
+          ${livePriceHtml}
+          ${takenBadge}
+          ${outcomeHtml}
+          <button onclick="openNoteModal('${s.signal_id}','${s.pair||''}','agent')"
+            style="background:none;border:1px solid rgba(255,255,255,.1);color:var(--text-muted);
+                   font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 6px;border-radius:3px;cursor:pointer;white-space:nowrap;">+ note</button>
+        </div>
+        ${agentInlineHtml}
       </div>`;
   }).join("");
 }
@@ -1913,6 +1965,72 @@ async function submitManualTrade() {
     fb.textContent = "Failed to connect.";
     fb.className   = "modal-feedback err";
   }
+}
+
+// ── NOTE MODAL (shared) ───────────────────────────────────────────────────────
+
+let _noteSignalId = null;
+let _noteKind     = "manual";
+
+function openNoteModal(signalId, pair, kind) {
+  _noteSignalId = signalId;
+  _noteKind     = kind || "manual";
+  document.getElementById("note-pair-label").textContent = (pair||"").replace("_","/");
+  document.getElementById("note-text").value     = "";
+  document.getElementById("note-feedback").textContent = "";
+  document.getElementById("note-feedback").className   = "modal-feedback";
+  document.getElementById("note-modal").classList.add("open");
+}
+
+function closeNoteModal() {
+  document.getElementById("note-modal").classList.remove("open");
+  _noteSignalId = null;
+}
+
+document.getElementById("note-modal").addEventListener("click", function(e) {
+  if (e.target === this) closeNoteModal();
+});
+
+async function submitNote() {
+  const note = document.getElementById("note-text").value.trim();
+  const fb   = document.getElementById("note-feedback");
+  if (!note) { fb.textContent = "Write something first."; fb.className = "modal-feedback err"; return; }
+  fb.textContent = "Saving..."; fb.className = "modal-feedback";
+  try {
+    const resp = await fetch("/api/save_note", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ signal_id: _noteSignalId, note, kind: _noteKind }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      fb.textContent = "✓ Note saved"; fb.className = "modal-feedback ok";
+      setTimeout(() => closeNoteModal(), 900);
+    } else {
+      fb.textContent = data.error || "error"; fb.className = "modal-feedback err";
+    }
+  } catch(e) { fb.textContent = "failed"; fb.className = "modal-feedback err"; }
+}
+
+async function saveAgentLevels(signalId) {
+  const sl  = parseFloat(document.getElementById(`asl-${signalId}`).value);
+  const tp1 = parseFloat(document.getElementById(`atp-${signalId}`).value);
+  const fb  = document.getElementById(`alfb-${signalId}`);
+  if ((!sl || isNaN(sl)) && (!tp1 || isNaN(tp1))) {
+    fb.textContent = "enter levels"; fb.style.color = "var(--red)"; return;
+  }
+  fb.textContent = "saving..."; fb.style.color = "var(--text-muted)";
+  try {
+    const body = { signal_id: signalId };
+    if (!isNaN(sl))  body.user_sl  = sl;
+    if (!isNaN(tp1)) body.user_tp1 = tp1;
+    const resp = await fetch("/api/update_agent_levels", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.ok) { fb.textContent = "✓ saved"; fb.style.color = "var(--green)"; setTimeout(()=>{fb.textContent=""},2000); }
+    else { fb.textContent = data.error||"error"; fb.style.color = "var(--red)"; }
+  } catch(e) { fb.textContent = "failed"; fb.style.color = "var(--red)"; }
 }
 
 // ── INLINE SL/TP SAVE ─────────────────────────────────────────────────────────
@@ -2084,6 +2202,7 @@ document.getElementById("took-it-modal").addEventListener("click", function(e) {
 async function submitTookIt() {
   const userSl  = document.getElementById("ti-user-sl").value.trim();
   const userTp1 = document.getElementById("ti-user-tp1").value.trim();
+  const tiNotes = document.getElementById("ti-notes").value.trim();
   const fb      = document.getElementById("ti-feedback");
 
   fb.textContent = "Saving...";
@@ -2093,6 +2212,7 @@ async function submitTookIt() {
     const body = { signal_id: _tookItSignalId };
     if (userSl)  body.user_sl  = parseFloat(userSl);
     if (userTp1) body.user_tp1 = parseFloat(userTp1);
+    if (tiNotes) body.notes    = tiNotes;
 
     const resp = await fetch("/api/mark_taken", {
       method:  "POST",
@@ -2178,6 +2298,7 @@ async function submitEditLevels() {
   const sl     = parseFloat(document.getElementById("el-sl").value);
   const tp1    = parseFloat(document.getElementById("el-tp1").value);
   const reason = document.getElementById("el-reason").value;
+  const notes  = document.getElementById("el-notes").value.trim();
   const fb     = document.getElementById("el-feedback");
 
   if (!sl || isNaN(sl)) {
@@ -2198,7 +2319,7 @@ async function submitEditLevels() {
     const resp = await fetch("/api/update_trade_levels", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ signal_id: _editSignalId, sl_price: sl, tp1_price: tp1, reason }),
+      body:    JSON.stringify({ signal_id: _editSignalId, sl_price: sl, tp1_price: tp1, reason, notes }),
     });
     const data = await resp.json();
 
@@ -2309,7 +2430,7 @@ function renderManualTrades(trades) {
 
     return `
       <div style="margin-bottom:6px;">
-        <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 1fr auto;">
+        <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 1fr auto auto;">
           <span class="perf-log-time">${(t.timestamp_utc||"").slice(0,10)} ${time}</span>
           <span class="perf-log-pair">${(t.pair||"").replace("_","/")}</span>
           <span class="${dirCls}">${dirSym} ${(t.direction||"").slice(0,4).toUpperCase()}</span>
@@ -2322,6 +2443,9 @@ function renderManualTrades(trades) {
             &nbsp;·&nbsp; <span style="color:var(--text-muted)">${t.setup_type||"manual"}</span>
           </span>
           ${statusHtml}
+          <button onclick="openNoteModal('${t.signal_id}','${t.pair||''}','manual')"
+            style="background:none;border:1px solid rgba(255,255,255,.1);color:var(--text-muted);
+                   font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 6px;border-radius:3px;cursor:pointer;white-space:nowrap;">+ note</button>
         </div>
         ${inlineEditHtml}
         ${postMortem}

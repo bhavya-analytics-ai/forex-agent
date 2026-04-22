@@ -255,19 +255,20 @@ def api_mark_taken():
         signal_id = body.get("signal_id", "").strip()
         user_sl   = body.get("user_sl")
         user_tp1  = body.get("user_tp1")
+        notes     = body.get("notes", "").strip()
 
         if not signal_id:
             return jsonify({"ok": False, "error": "signal_id required"}), 400
 
-        # CSV mark
         mark_taken_by_id(signal_id)
-
-        # SQLite: save user levels + set actual levels
         update_agent_signal_took_it(
             signal_id,
             float(user_sl)  if user_sl  not in (None, "") else None,
             float(user_tp1) if user_tp1 not in (None, "") else None,
         )
+        if notes:
+            from db.database import save_note
+            save_note(signal_id, notes, "agent")
         return jsonify({"ok": True, "signal_id": signal_id})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -411,6 +412,7 @@ def api_update_trade_levels():
         sl_price  = body.get("sl_price")
         tp1_price = body.get("tp1_price")
         reason    = body.get("reason", "").strip()
+        notes     = body.get("notes", "").strip()
 
         if not signal_id:
             return jsonify({"ok": False, "error": "signal_id required"}), 400
@@ -419,6 +421,9 @@ def api_update_trade_levels():
 
         ok, err = update_trade_levels(signal_id, float(sl_price), float(tp1_price), reason)
         if ok:
+            if notes:
+                from db.database import save_note
+                save_note(signal_id, notes, "manual")
             return jsonify({"ok": True, "signal_id": signal_id, "sl_price": sl_price, "tp1_price": tp1_price})
         return jsonify({"ok": False, "error": err}), 400
     except Exception as e:
@@ -455,6 +460,44 @@ def api_recent_manual_trades():
         return jsonify({"trades": trades})
     except Exception as e:
         return jsonify({"trades": [], "error": str(e)}), 500
+
+
+@app.route("/api/save_note", methods=["POST"])
+def api_save_note():
+    """Append a note to any signal. Body: { signal_id, note, kind: 'manual'|'agent' }"""
+    try:
+        from db.database import save_note
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        note      = body.get("note", "").strip()
+        kind      = body.get("kind", "manual")
+        if not signal_id or not note:
+            return jsonify({"ok": False, "error": "signal_id and note required"}), 400
+        ok = save_note(signal_id, note, kind)
+        return jsonify({"ok": ok})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/update_agent_levels", methods=["POST"])
+def api_update_agent_levels():
+    """Update user SL/TP on an agent signal. Body: { signal_id, user_sl, user_tp1 }"""
+    try:
+        from db.database import update_agent_signal_levels
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        user_sl   = body.get("user_sl")
+        user_tp1  = body.get("user_tp1")
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        ok = update_agent_signal_levels(
+            signal_id,
+            float(user_sl)  if user_sl  not in (None, "") else None,
+            float(user_tp1) if user_tp1 not in (None, "") else None,
+        )
+        return jsonify({"ok": ok})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 def start_dashboard():
