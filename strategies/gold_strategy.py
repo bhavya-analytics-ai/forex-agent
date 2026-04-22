@@ -17,6 +17,7 @@ Silver (XAG_USD): same logic, different ATR floor.
 """
 
 import logging
+from datetime import datetime, timezone, timedelta
 from core.fetcher import pip_size
 
 logger = logging.getLogger(__name__)
@@ -308,9 +309,147 @@ def _calculate_tp(confluence: dict, direction: str, price: float, sl: float, atr
     return round(tp1, 2), round(tp2, 2), tp1_label
 
 
+# ── KILLZONE FILTER ───────────────────────────────────────────────────────────
+
+def _is_killzone() -> tuple:
+    """
+    Returns (in_killzone: bool, killzone_name: str).
+
+    London Kill Zone : 02:00–05:00 EST  (06:00–09:00 UTC summer / 07:00–10:00 UTC winter)
+    New York Kill Zone: 07:00–10:00 EST  (11:00–14:00 UTC summer / 12:00–15:00 UTC winter)
+
+    EST offset: UTC-4 in summer (Mar–Nov), UTC-5 in winter.
+    Applied ONLY to Unicorn ENTER_NOW — base gold sniper runs any session.
+    """
+    now_utc = datetime.now(timezone.utc)
+    month   = now_utc.month
+    offset  = 4 if 3 <= month <= 11 else 5          # EDT=4, EST=5
+
+    # Convert to EST
+    now_est = now_utc - timedelta(hours=offset)
+    h, m    = now_est.hour, now_est.minute
+    t       = h * 60 + m                             # minutes since midnight EST
+
+    LONDON_START = 2  * 60       #  2:00 EST
+    LONDON_END   = 5  * 60       #  5:00 EST
+    NY_START     = 7  * 60       #  7:00 EST
+    NY_END       = 10 * 60       # 10:00 EST
+
+    if LONDON_START <= t < LONDON_END:
+        return True, "London Kill Zone"
+    if NY_START <= t < NY_END:
+        return True, "New York Kill Zone"
+
+    return False, ""
+
+
+# ── UNICORN DETECTOR ──────────────────────────────────────────────────────────
+
+def _detect_unicorn(df_m5, df_m1, direction: str, price: float, atr: float) -> dict:
+    """
+    Unicorn Model: FVG overlapping with a Breaker Block on M5/M1.
+
+    Bullish: bullish FVG inside bullish Breaker Block (broken bearish OB = now support)
+    Bearish: bearish FVG inside bearish Breaker Block (broken bullish OB = now resistance)
+
+    M1 FVG inside M5 Breaker = valid — catches fast reversals.
+    M5 candle CLOSE in direction = hard lock for ENTER_NOW. Wicks don't count.
+    """
+    try:
+        from core.fvg import detect_fvgs
+        from core.ict import find_breaker_blocks
+
+        if df_m5 is None or len(df_m5) < 10:
+            return {"detected": False}
+
+        # FVGs: M5 first, then M1 if available (M1 FVG + M5 Breaker = valid unicorn)
+        fvgs = detect_fvgs(df_m5)
+        if df_m1 is not None and len(df_m1) >= 10:
+            fvgs += detect_fvgs(df_m1)
+
+        # Breaker Blocks on M5
+        breakers = find_breaker_blocks(df_m5)
+
+        # Filter to matching direction only
+        fvgs     = [f for f in fvgs     if f["type"] == direction]
+        breakers = [b for b in breakers if b["type"] == direction]
+
+        if not fvgs or not breakers:
+            return {"detected": False}
+
+        # Find best overlapping pair (largest overlap wins)
+        best = None
+        for fvg in fvgs:
+            for breaker in breakers:
+                ol_top    = min(fvg["top"],    breaker["high"])
+                ol_bottom = max(fvg["bottom"], breaker["low"])
+
+                if ol_top <= ol_bottom:
+                    continue  # no overlap
+
+                ol_mid  = (ol_top + ol_bottom) / 2
+                ol_size = ol_top - ol_bottom
+
+                # Touching = price inside or within ATR*0.1 of zone
+                touch_buf   = atr * 0.1
+                touching    = (ol_bottom - touch_buf) <= price <= (ol_top + touch_buf)
+                approaching = abs(price - ol_mid) <= atr * 0.5
+
+                if not touching and not approaching:
+                    continue
+
+                if best is None or ol_size > best["ol_size"]:
+                    best = {
+                        "fvg":       fvg,
+                        "breaker":   breaker,
+                        "ol_top":    ol_top,
+                        "ol_bottom": ol_bottom,
+                        "ol_mid":    ol_mid,
+                        "ol_size":   ol_size,
+                        "touching":  touching,
+                    }
+
+        if best is None:
+            return {"detected": False}
+
+        # M5 hard lock — candle must CLOSE in direction, not just wick into zone
+        last_m5    = df_m5.iloc[-1]
+        m5_confirm = (
+            last_m5["close"] > last_m5["open"] if direction == "bullish"
+            else last_m5["close"] < last_m5["open"]
+        )
+
+        if best["touching"] and m5_confirm:
+            entry_state = "ENTER_NOW"
+            desc = f"🦄 UNICORN {direction.upper()} — FVG+Breaker overlap confirmed, M5 closed in direction"
+        elif best["touching"]:
+            entry_state = "WAIT_RETEST"
+            desc = f"🦄 UNICORN TOUCH — price in zone, waiting M5 close {direction.upper()}"
+        else:
+            entry_state = "WAIT_RETEST"
+            desc = f"🦄 UNICORN APPROACHING — FVG+Breaker zone at {round(best['ol_mid'], 2)}"
+
+        return {
+            "detected":       True,
+            "type":           direction,
+            "overlap_top":    round(best["ol_top"],    2),
+            "overlap_bottom": round(best["ol_bottom"], 2),
+            "overlap_mid":    round(best["ol_mid"],    2),
+            "overlap_size":   best["ol_size"],
+            "touching":       best["touching"],
+            "m5_confirmed":   m5_confirm,
+            "entry_state":    entry_state,
+            "description":    desc,
+        }
+
+    except Exception as e:
+        logger.debug(f"Unicorn detection error: {e}")
+        return {"detected": False}
+
+
 # ── MAIN ENTRY POINT ──────────────────────────────────────────────────────────
 
-def apply_gold_strategy(scored: dict, confluence: dict, pair: str) -> dict:
+def apply_gold_strategy(scored: dict, confluence: dict, pair: str, candles: dict = None) -> dict:
     """
     Main entry point for XAU_USD and XAG_USD.
 
@@ -384,10 +523,53 @@ def apply_gold_strategy(scored: dict, confluence: dict, pair: str) -> dict:
     rr1 = f"1:{round(tp1_pips / sl_pips, 1)}"
     rr2 = f"1:{round(tp2_pips / sl_pips, 1)}"
 
+    # ── UNICORN DETECTION ─────────────────────────────────────────────────────
+    df_m5 = (candles or {}).get("M5")
+    df_m1 = (candles or {}).get("M1")
+    unicorn = _detect_unicorn(df_m5, df_m1, direction, price, atr)
+
+    if unicorn["detected"]:
+        # Re-run Bayesian posterior with unicorn condition
+        from alerts.scorer import calculate_posterior, calculate_ev, STANDARD_LIKELIHOODS, BASE_RATES
+        conditions = dict(scored.get("conditions", {}))
+        conditions["unicorn_model"] = True
+        new_p_win = calculate_posterior("unicorn", conditions, STANDARD_LIKELIHOODS, BASE_RATES)
+        new_ev    = calculate_ev(new_p_win, rr_val)
+        scored["p_win"]      = new_p_win
+        scored["p_win_pct"]  = f"{round(new_p_win * 100)}% (unicorn)"
+        scored["ev"]         = new_ev
+        scored["score"]      = round(new_p_win * 100)
+        scored["setup_type"] = "🦄 UNICORN"
+        scored["unicorn"]    = unicorn
+
+        # Unicorn ENTER_NOW gated by killzone — outside London/NY = WAIT_RETEST only
+        if unicorn["entry_state"] == "ENTER_NOW":
+            in_kz, kz_name = _is_killzone()
+            if in_kz:
+                entry_state = "ENTER_NOW"
+                logger.info(f"{pair} | 🦄 UNICORN ENTER_NOW | {kz_name} ✓")
+            else:
+                entry_state = "WAIT_RETEST"
+                now_est_str = (
+                    datetime.now(timezone.utc) - timedelta(hours=(4 if 3 <= datetime.now(timezone.utc).month <= 11 else 5))
+                ).strftime("%H:%M EST")
+                logger.info(f"{pair} | 🦄 UNICORN → WAIT_RETEST | Outside killzone ({now_est_str})")
+                # Update unicorn description to reflect the downgrade
+                unicorn = dict(unicorn)
+                unicorn["description"] = (
+                    f"🦄 UNICORN READY — outside killzone ({now_est_str}), "
+                    f"wait for London (2–5am) or NY (7–10am) EST"
+                )
+                scored["unicorn"] = unicorn
+
+        logger.info(f"{pair} | 🦄 UNICORN | P(win)={new_p_win} EV={new_ev} | {unicorn['description']}")
+
     # ── FLAGS (max 5) ─────────────────────────────────────────────────────────
     flags = []
 
-    if entry_state == "ENTER_NOW":
+    if unicorn["detected"]:
+        flags.append(unicorn["description"])
+    elif entry_state == "ENTER_NOW":
         flags.append(f"✅ ENTER NOW — {sequence['reason']}")
     else:
         flags.append(f"⏳ WAIT RETEST — {sequence['reason']}")
@@ -413,7 +595,7 @@ def apply_gold_strategy(scored: dict, confluence: dict, pair: str) -> dict:
     scored.update({
         "dl_blocked":      False,
         "dl_block_reason": "",
-        "should_alert":    entry_state == "ENTER_NOW",
+        "should_alert":    entry_state == "ENTER_NOW" or (unicorn.get("detected") and unicorn.get("entry_state") == "ENTER_NOW"),
         "should_log":      True,
         "flags":           flags,
         "entry_state":     entry_state,

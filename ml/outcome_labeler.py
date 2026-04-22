@@ -46,7 +46,7 @@ def label_pending_signals() -> int:
         logger.warning("No signal log found.")
         return 0
 
-    df = pd.read_csv(LOG_PATH)
+    df = pd.read_csv(LOG_PATH, dtype=str)
 
     # Ensure columns exist
     for col in ["outcome", "outcome_pips", "tp1_price", "sl_price"]:
@@ -71,8 +71,9 @@ def label_pending_signals() -> int:
         if outcome is None:
             continue
 
-        df.loc[idx, "outcome"]      = outcome
-        df.loc[idx, "outcome_pips"] = pips
+        df.loc[idx, "outcome"]      = str(outcome)
+        df.loc[idx, "outcome_pips"] = str(pips)
+        df.loc[idx, "notes"]        = str(_build_post_mortem(row, outcome, pips))
         labeled += 1
         logger.info(f"  {row.get('signal_id','?')} → {outcome} ({pips:+.1f} pips)")
 
@@ -91,7 +92,7 @@ def _check_outcome(row) -> tuple:
     """
     pair      = str(row.get("pair", ""))
     direction = str(row.get("direction", "")).lower()
-    sig_time  = pd.to_datetime(row.get("timestamp_utc"))
+    sig_time  = pd.to_datetime(row.get("timestamp_utc"), utc=True)
 
     if not pair or not direction or direction == "none":
         return None, 0
@@ -152,20 +153,65 @@ def _check_outcome(row) -> tuple:
                 return "LOSS", -pips
 
         else:
-            # Neither hit — neutral
-            if direction == "bullish":
-                best = after["high"].max() - entry_px
-                worst = entry_px - after["low"].min()
-            else:
-                best = entry_px - after["low"].min()
-                worst = after["high"].max() - entry_px
-
-            net_pips = round((best - worst) / pip, 1)
-            return "NEUTRAL", net_pips
+            # Neither hit yet — keep monitoring (return None so labeler skips)
+            return None, 0
 
     except Exception as e:
         logger.warning(f"Could not check outcome for {row.get('signal_id','?')}: {e}")
         return None, 0
+
+
+def _build_post_mortem(row, outcome: str, pips: float) -> str:
+    """
+    Build a plain-English note explaining what went right or wrong.
+    Reads condition columns from the signal row.
+    """
+    direction  = str(row.get("direction", "")).lower()
+    setup_type = str(row.get("setup_type", "")).strip()
+    pair       = str(row.get("pair", ""))
+
+    # Read which conditions were true at signal time
+    conditions_present = []
+    conditions_missing = []
+
+    condition_labels = {
+        "score_zone":    "zone quality",
+        "score_tf":      "timeframe alignment",
+        "score_pattern": "entry pattern",
+        "score_session": "session timing",
+        "score_news":    "news filter",
+        "score_fvg":     "FVG present",
+        "score_ict":     "ICT confluence",
+    }
+
+    for col, label in condition_labels.items():
+        val = row.get(col, 0)
+        try:
+            val = float(val)
+        except (TypeError, ValueError):
+            val = 0
+        if val > 0:
+            conditions_present.append(label)
+        else:
+            conditions_missing.append(label)
+
+    present_str = ", ".join(conditions_present) if conditions_present else "none"
+    missing_str = ", ".join(conditions_missing) if conditions_missing else "none"
+
+    if outcome == "WIN":
+        return (
+            f"WIN +{abs(pips):.1f}p | {pair} {direction} | setup: {setup_type} | "
+            f"What worked: {present_str}"
+        )
+    elif outcome == "LOSS":
+        return (
+            f"LOSS {pips:.1f}p | {pair} {direction} | setup: {setup_type} | "
+            f"What worked: {present_str} | "
+            f"What was missing: {missing_str} | "
+            f"Review: check if entry was too early or zone was weak"
+        )
+    else:
+        return f"NEUTRAL | {pair} {direction} | {setup_type} | neither TP nor SL hit"
 
 
 def _fallback_levels(pair: str, direction: str, entry: float, pip: float) -> tuple:

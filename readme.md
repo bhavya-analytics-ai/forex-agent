@@ -267,6 +267,18 @@ http://localhost:5000
 - Mode toggle button — switch between Normal and News Sniper manually
 - Refreshes every 30 seconds
 
+**+ LOG TRADE button (stats bar)**
+Log a trade you took manually on TradingView or paper trading. Select pair, direction, entry price (auto-filled from scanner). System calculates SL/TP and starts monitoring M5 candles indefinitely until TP or SL is hit.
+
+**Performance panel (collapsible)**
+Two tabs:
+- AGENT SIGNALS — every ENTER_NOW the scanner fired, with WIN/LOSS/TOOK IT buttons
+- MY MANUAL TRADES — trades you logged manually, shows Entry/SL/TP1/RR and ● MONITORING status
+- Stats: Signals Today, Total Labeled, Win Rate, Avg Pips, 🦄 Unicorn Win Rate, Bayesian Status (EST → LIVE at N=50)
+
+**Close ✕ button**
+On any open manual trade — auto-calculates pips from live market price vs your entry. One click to close WIN or LOSS. Stops the monitor thread and writes outcome + post-mortem note to CSV.
+
 ---
 
 ## HOW TO RUN
@@ -346,11 +358,18 @@ forex-agent/
 │   └── briefing.py             # Pre-session briefings + scan pipeline
 │
 ├── ml/
-│   ├── outcome_labeler.py      # Auto WIN/LOSS labeler
+│   ├── outcome_labeler.py      # Auto WIN/LOSS labeler (runs every 5 min as background thread)
+│   ├── manual_trade_logger.py  # Manual trade logger — monitors TP/SL indefinitely
 │   └── trainer.py              # Base rate updater (needs 50+ signals)
 │
+├── filters/
+│   └── news_vibe.py            # NewsData.io headlines (Market Vibe panel)
+│
 └── logs/
-    ├── signals.csv             # Clean signal log (v5+)
+    ├── agent_signals.csv       # Agent ENTER_NOW signals (auto-logged)
+    ├── manual_trades.csv       # Your manually logged trades
+    ├── signals_backup.csv      # Original signal log backup
+    ├── signals_backup_1.csv    # Pre-Phase4 signal log backup
     └── app.log
 ```
 
@@ -365,7 +384,7 @@ forex-agent/
 | Backend | Python + Flask | Free |
 | Dashboard | HTML/JS (localhost:5000) | Free |
 | Alerts | Slack webhooks | Free |
-| Signal log | CSV (signals.csv) | Free |
+| Signal log | CSV (agent_signals.csv + manual_trades.csv) | Free |
 | ML (future) | scikit-learn | Free |
 
 Total running cost: **$0/month** (OANDA practice account, no paid APIs).
@@ -402,15 +421,31 @@ Total running cost: **$0/month** (OANDA practice account, no paid APIs).
 - ✅ /api/mode GET + /api/mode/toggle POST endpoints
 - ✅ Same 3 entry states across all strategies: ENTER_NOW / WAIT_RETEST / SKIP
 
+### Phase 4 — Learning Engine
+- ✅ Unicorn Model — FVG + Breaker Block overlap, M5 hard lock, killzone-gated ENTER_NOW
+- ✅ Killzone filter — Unicorn ENTER_NOW only fires London (2–5am EST) / NY (7–10am EST), outside → WAIT_RETEST
+- ✅ ENTER_NOW-only logging — no WAIT_RETEST/SKIP noise in agent_signals.csv
+- ✅ Two separate CSVs — agent_signals.csv (scanner auto-log) + manual_trades.csv (your own trades)
+- ✅ Outcome labeler thread — runs every 5 min, auto-labels WIN/LOSS on M5 candles 15 min after signal
+- ✅ Post-mortem notes — WIN: what worked. LOSS: what was missing + review note. Written on every close.
+- ✅ Manual trade logger — log trades you take yourself, monitors TP/SL indefinitely, resumes on restart
+- ✅ Bayesian key mismatch fixed — "🦄 UNICORN" now maps to "unicorn" in base rates correctly
+- ✅ ForexFactory silent parse bug fixed — ISO 8601 datetime in "date" field now handled correctly
+- ✅ Dashboard: Performance panel — AGENT SIGNALS + MY MANUAL TRADES tabs, win rate / avg pips / unicorn rate / Bayesian status
+- ✅ Dashboard: + LOG TRADE button — modal with auto-filled entry price, pair/direction, setup type, notes
+- ✅ Dashboard: WIN/LOSS buttons — manually mark outcome on any ENTER_NOW signal
+- ✅ Dashboard: TOOK IT button — marks which agent signals you actually traded
+- ✅ Dashboard: Close ✕ button — manually close open manual trades, auto-calculates pips from live price
+
 ---
 
 ## WHAT'S NEXT
 
-1. **Phase 4 — Unicorn Model** — FVG + Breaker Block detection (high confluence, easy money if the sequence fires)
-2. **Phase 5 — Retest entries** — detect when price comes back to an already-confirmed OB after ENTER_NOW was missed
-3. **Phase 6 — ML base rates** — clean the signal log, auto-label win/loss, let the Bayesian priors update from real results. Needs 50+ signals first.
-4. **Merge to main** — worktree testing complete, merge stoic-swanson → main
-5. **Product prep** — clean config, multi-account support, onboarding doc for other ICT traders
+1. **Grade filter** — block Grade C signals from ENTER_NOW even if ICT sequence completes (threshold: A/A+ only, or include B — TBD)
+2. **Modal SL/TP** — LOG TRADE modal: pull agent's real ICT levels when source is scanner signal, user-defined SL when own analysis
+3. **50 labeled outcomes** — Bayesian status flips from EST → LIVE, priors replaced with real trade data
+4. **Phase 5 — Retest entries** — detect when price comes back to an already-confirmed OB after ENTER_NOW was missed
+5. **Phase 6 — Dynamic risk engine** — lot sizing based on account balance + volatility, paper trading sandbox
 
 ---
 

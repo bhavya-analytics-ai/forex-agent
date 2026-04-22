@@ -40,6 +40,8 @@ BASE_RATES = {
     "breakout_stage1":   0.42,   # Breakout stage 1, no retest yet
     "reversal":          0.50,   # H1 MSS confirmed reversal
     "ranging_weak":      0.35,   # Choppy / weak structure
+    "unicorn":           0.70,   # FVG + Breaker Block overlap — highest conviction prior
+                                 # TODO: Replace with data-backed rate after N=50 labeled unicorn outcomes
     "default":           0.45,   # Unknown setup type
 }
 
@@ -53,6 +55,8 @@ STANDARD_LIKELIHOODS = {
     "m5_confirmation":   {"yes": 1.30, "no": 0.75},
     "at_ob":             {"yes": 1.40, "no": 0.85},
     "fvg_overlap":       {"yes": 1.35, "no": 0.90},
+    "unicorn_model":     {"yes": 2.50, "no": 0.95},
+                         # TODO: Replace 2.50 with data-backed LR after N=50 labeled unicorn outcomes
     "sweep_present":     {"yes": 1.30, "no": 0.80},
     "choch_present":     {"yes": 1.25, "no": 0.82},
     "in_killzone":       {"yes": 1.20, "no": 0.85},
@@ -152,8 +156,22 @@ def _load_data_backed_rates() -> tuple:
         wins   = defaultdict(int)
         totals = defaultdict(int)
 
+        # Normalize CSV setup_type strings → BASE_RATES keys
+        _SETUP_TYPE_MAP = {
+            "🦄 unicorn":          "unicorn",
+            "unicorn":             "unicorn",
+            "sweep_choch_fvg":     "sweep_choch_fvg",
+            "breakout_retest":     "breakout_retest",
+            "pullback_trend":      "pullback_trend",
+            "trend_follow":        "trend_follow",
+            "breakout_stage1":     "breakout_stage1",
+            "reversal":            "reversal",
+            "ranging_weak":        "ranging_weak",
+        }
+
         for row in labeled:
-            st = row.get("setup_type", "default")
+            raw = row.get("setup_type", "default").strip().lower()
+            st  = _SETUP_TYPE_MAP.get(raw, "default")
             totals[st] += 1
             if row["outcome"] == "WIN":
                 wins[st] += 1
@@ -183,6 +201,8 @@ def _map_setup_type(confluence: dict, scored_setup: str) -> str:
     is_retest  = confluence.get("is_retest", False)
     h1_mss     = confluence.get("h1_mss_fired", False)
 
+    if scored_setup == "unicorn":
+        return "unicorn"
     if has_sweep and has_choch and has_fvg:
         return "sweep_choch_fvg"
     if h1_mss:

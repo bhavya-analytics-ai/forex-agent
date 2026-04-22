@@ -33,12 +33,13 @@ def scan_pair(pair: str, return_confluence: bool = False):
         confluence = check_confluence(candles, pair)
         scored     = score_signal(confluence, pair)
 
-        # Decision layer — hard filters + TP/SL override
+        # Strategy router — mode_manager picks normal or news sniper
         try:
-            from filters.decision_layer import apply_decision_layer
-            scored = apply_decision_layer(scored, confluence, pair)
+            from filters.mode_manager import apply_strategy, refresh_auto_mode
+            refresh_auto_mode()
+            scored = apply_strategy(scored, confluence, pair, candles)
         except Exception as e:
-            logger.warning(f"Decision layer error for {pair}: {e}")
+            logger.warning(f"Strategy error for {pair}: {e}")
 
         # Attach trend context for display
         scored["h1_trend"]  = confluence["h1"]["structure"].get("trend", "—")
@@ -48,8 +49,10 @@ def scan_pair(pair: str, return_confluence: bool = False):
         # Approaching warning — wire into result so main.py and dashboard can read it
         scored["approaching_warning"] = confluence.get("approaching_warning", "")
 
-        if scored["should_log"]:
-            log_signal(scored, confluence, alerted=scored["should_alert"])
+        signal_id = ""
+        if scored.get("entry_state") == "ENTER_NOW":
+            signal_id = log_signal(scored, confluence, alerted=scored["should_alert"])
+        scored["signal_id"] = signal_id   # empty string if not logged
 
         # Push to dashboard (non-blocking)
         try:

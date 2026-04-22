@@ -182,6 +182,26 @@ def mark_taken(pair: str) -> bool:
     return True
 
 
+def mark_taken_by_id(signal_id: str) -> bool:
+    """Mark a specific signal as taken=True by signal_id."""
+    import pandas as pd
+
+    if not os.path.exists(LOG_PATH):
+        return False
+
+    df   = pd.read_csv(LOG_PATH)
+    mask = df["signal_id"] == signal_id
+
+    if not mask.any():
+        logger.warning(f"Signal {signal_id} not found")
+        return False
+
+    df.loc[mask, "taken"] = True
+    df.to_csv(LOG_PATH, index=False)
+    logger.info(f"Marked {signal_id} as taken")
+    return True
+
+
 def update_outcome(signal_id: str, outcome: str, pips: float, notes: str = ""):
     """Update a signal with its outcome. outcome: WIN | LOSS | NEUTRAL"""
     import pandas as pd

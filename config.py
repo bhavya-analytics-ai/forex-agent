@@ -118,6 +118,10 @@ NEWS_CONFIG = {
     }
 }
 
+# --- NEWS API KEYS ---
+FINNHUB_API_KEY  = os.getenv("FINNHUB_API_KEY", "")
+NEWSDATA_API_KEY = os.getenv("NEWSDATA_API_KEY", "")
+
 # --- SLACK ---
 SLACK_CONFIG = {
     "webhook_url":     os.getenv("SLACK_WEBHOOK_URL", ""),
@@ -134,6 +138,7 @@ DASHBOARD_CONFIG = {
 
 # --- LOGGING ---
 LOG_CONFIG = {
-    "signal_log_path": "logs/signals.csv",
-    "app_log_path":    "logs/app.log",
+    "signal_log_path":  "logs/agent_signals.csv",   # agent ENTER_NOW signals
+    "manual_log_path":  "logs/manual_trades.csv",   # your manually logged trades
+    "app_log_path":     "logs/app.log",
 }

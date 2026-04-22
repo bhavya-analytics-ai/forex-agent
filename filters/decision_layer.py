@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 _GOLD_PAIRS = {"XAU_USD", "XAG_USD"}
 
 
-def apply_decision_layer(scored: dict, confluence: dict, pair: str) -> dict:
+def apply_decision_layer(scored: dict, confluence: dict, pair: str, candles: dict = None) -> dict:
     """
     Apply execution strategy for the given pair.
     Called after score_signal(), before logging/output.
     """
     if pair in _GOLD_PAIRS:
-        return apply_gold_strategy(scored, confluence, pair)
+        return apply_gold_strategy(scored, confluence, pair, candles)
     return apply_forex_strategy(scored, confluence, pair)

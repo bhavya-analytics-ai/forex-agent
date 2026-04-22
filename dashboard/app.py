@@ -10,12 +10,21 @@ UPDATES:
 
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 from flask import Flask, render_template, jsonify, request
 from config import DASHBOARD_CONFIG, PAIRS
 
 logger = logging.getLogger(__name__)
 app    = Flask(__name__, template_folder="templates")
+
+
+def _sanitize(obj):
+    """Recursively convert numpy types to JSON-serializable Python types."""
+    if isinstance(obj, dict):  return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):  return [_sanitize(v) for v in obj]
+    if hasattr(obj, "item"):   return obj.item()  # numpy scalar → Python native
+    return obj
 
 _signal_store = {}
 _store_lock   = threading.Lock()
@@ -51,6 +60,8 @@ def update_dashboard(pair: str, scored: dict, confluence: dict, ict: dict = None
             "breakdown":     scored.get("breakdown", {}),
             "early_entry":   scored.get("early_entry", False),
             "entry_type":    scored.get("entry_type", "confirmed"),
+            "signal_id":     scored.get("signal_id", ""),
+            "entry_state":   scored.get("entry_state", ""),
         }
 
 
@@ -126,14 +137,14 @@ def api_signals():
     except Exception as e:
         logger.warning(f"Mode info failed: {e}")
 
-    return jsonify({
+    return jsonify(_sanitize({
         "signals":     data,
         "updated_at":  datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "total_pairs": len(PAIRS),
         "alert_count": sum(1 for s in data if s.get("should_alert")),
         "news":        news_data,
         "mode":        mode_info,
-    })
+    }))
 
 
 @app.route("/api/news")
@@ -153,7 +164,18 @@ def api_signal_detail(pair: str):
         signal = _signal_store.get(pair.upper())
     if not signal:
         return jsonify({"error": f"No data for {pair}"}), 404
-    return jsonify(signal)
+    return jsonify(_sanitize(signal))
+
+
+@app.route("/api/vibe")
+def api_vibe():
+    """Market Vibe headlines for a pair. Called on-demand from dashboard panel."""
+    pair = request.args.get("pair", "XAU_USD").upper()
+    try:
+        from filters.news_vibe import get_vibe_headlines
+        return jsonify(_sanitize(get_vibe_headlines(pair)))
+    except Exception as e:
+        return jsonify({"error": str(e), "headlines": [], "pair": pair}), 500
 
 
 @app.route("/api/mode", methods=["GET"])
@@ -187,8 +209,202 @@ def api_mode_toggle():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/recent_signals")
+def api_recent_signals():
+    """Returns last 20 ENTER_NOW signals from CSV for the performance panel."""
+    try:
+        import pandas as pd
+        from config import LOG_CONFIG
+        path = LOG_CONFIG["signal_log_path"]
+        if not __import__("os").path.exists(path):
+            return jsonify({"signals": []})
+        df = pd.read_csv(path)
+        cols = ["signal_id", "timestamp_utc", "pair", "direction",
+                "setup_type", "grade", "score", "entry_price",
+                "sl_pips", "tp1_pips", "outcome", "outcome_pips", "taken"]
+        for c in cols:
+            if c not in df.columns:
+                df[c] = ""
+        recent = df[cols].tail(20).iloc[::-1].fillna("").to_dict("records")
+        return jsonify({"signals": recent})
+    except Exception as e:
+        logger.error(f"recent_signals error: {e}")
+        return jsonify({"signals": [], "error": str(e)}), 500
+
+
+@app.route("/api/mark_taken", methods=["POST"])
+def api_mark_taken():
+    """Mark a signal as taken (you actually entered this trade)."""
+    try:
+        from alerts.logger import mark_taken_by_id
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        ok = mark_taken_by_id(signal_id)
+        return jsonify({"ok": ok, "signal_id": signal_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/mark_outcome", methods=["POST"])
+def api_mark_outcome():
+    """
+    Manually mark a signal outcome from the dashboard.
+    Body: { "signal_id": "XAU_USD_20260409_143022", "outcome": "WIN" | "LOSS", "notes": "" }
+    Calls update_outcome() in alerts/logger.py — no new logic, just an API wrapper.
+    """
+    try:
+        from alerts.logger import update_outcome
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        outcome   = body.get("outcome", "").upper().strip()
+        notes     = body.get("notes", "")
+
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        if outcome not in ("WIN", "LOSS", "NEUTRAL"):
+            return jsonify({"ok": False, "error": "outcome must be WIN, LOSS, or NEUTRAL"}), 400
+
+        update_outcome(signal_id, outcome, pips=0, notes=notes)
+        return jsonify({"ok": True, "signal_id": signal_id, "outcome": outcome})
+    except Exception as e:
+        logger.error(f"mark_outcome error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/performance")
+def api_performance():
+    """
+    Returns performance summary from signals.csv for the dashboard panel.
+    Uses existing get_performance_summary() — no new logic here.
+    """
+    try:
+        from alerts.logger import get_performance_summary
+        summary = get_performance_summary()
+        return jsonify(_sanitize(summary))
+    except Exception as e:
+        logger.error(f"performance endpoint error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ── OUTCOME LABELER BACKGROUND THREAD ────────────────────────────────────────
+
+def _run_outcome_labeler():
+    """
+    Background thread: runs outcome_labeler every 5 minutes.
+    Labels WIN/LOSS/NEUTRAL on signals that are 15+ min old.
+    Started once when dashboard launches.
+    """
+    logger.info("Outcome labeler thread started — checking every 5 minutes")
+    while True:
+        try:
+            from ml.outcome_labeler import label_pending_signals
+            labeled = label_pending_signals()
+            if labeled:
+                logger.info(f"Auto-labeler: {labeled} signal(s) labeled")
+        except Exception as e:
+            logger.warning(f"Outcome labeler error: {e}")
+        time.sleep(300)   # 5 minutes
+
+
+@app.route("/api/log_manual_trade", methods=["POST"])
+def api_log_manual_trade():
+    """
+    Log a trade you took manually on TradingView / paper trading.
+    Body: { "pair": "XAU_USD", "direction": "bullish", "entry_price": 2345.50,
+            "setup_type": "manual", "notes": "" }
+    Calculates SL/TP automatically, starts monitoring for TP/SL hit.
+    Saves to logs/manual_trades.csv (separate from agent signals).
+    """
+    try:
+        from ml.manual_trade_logger import log_manual_trade
+        body        = request.get_json(silent=True) or {}
+        pair        = body.get("pair", "").upper().strip()
+        direction   = body.get("direction", "").lower().strip()
+        entry_price = body.get("entry_price")
+        setup_type  = body.get("setup_type", "manual").strip()
+        notes       = body.get("notes", "")
+
+        if not pair:
+            return jsonify({"ok": False, "error": "pair required"}), 400
+        if direction not in ("bullish", "bearish"):
+            return jsonify({"ok": False, "error": "direction must be bullish or bearish"}), 400
+        if not entry_price:
+            return jsonify({"ok": False, "error": "entry_price required"}), 400
+
+        signal_id = log_manual_trade(pair, direction, float(entry_price), setup_type, notes)
+        return jsonify({"ok": True, "signal_id": signal_id, "pair": pair,
+                        "direction": direction, "entry_price": entry_price})
+    except Exception as e:
+        logger.error(f"log_manual_trade error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/close_manual_trade", methods=["POST"])
+def api_close_manual_trade():
+    """
+    Manually close a monitored trade from the dashboard.
+    Body: { "signal_id": "...", "outcome": "WIN"|"LOSS", "pips": 25.5, "notes": "" }
+    """
+    try:
+        from ml.manual_trade_logger import close_trade_manually
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        outcome   = body.get("outcome", "").upper().strip()
+        pips      = float(body.get("pips", 0))
+        notes     = body.get("notes", "")
+
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        if outcome not in ("WIN", "LOSS"):
+            return jsonify({"ok": False, "error": "outcome must be WIN or LOSS"}), 400
+
+        ok, err = close_trade_manually(signal_id, outcome, pips, notes)
+        if ok:
+            return jsonify({"ok": True, "signal_id": signal_id, "outcome": outcome, "pips": pips})
+        return jsonify({"ok": False, "error": err}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/recent_manual_trades")
+def api_recent_manual_trades():
+    """Returns last 20 manual trades from manual_trades.csv."""
+    try:
+        import pandas as pd
+        import os
+        from config import LOG_CONFIG
+        path = LOG_CONFIG["manual_log_path"]
+        if not os.path.exists(path):
+            return jsonify({"trades": []})
+        df   = pd.read_csv(path)
+        cols = ["signal_id", "timestamp_utc", "pair", "direction", "setup_type",
+                "entry_price", "sl_price", "tp1_price", "sl_pips", "tp1_pips",
+                "rr1", "outcome", "outcome_pips", "post_mortem", "notes"]
+        for c in cols:
+            if c not in df.columns:
+                df[c] = ""
+        trades = df[cols].tail(20).iloc[::-1].fillna("").to_dict("records")
+        return jsonify({"trades": trades})
+    except Exception as e:
+        return jsonify({"trades": [], "error": str(e)}), 500
+
+
 def start_dashboard():
     host = DASHBOARD_CONFIG.get("host", "127.0.0.1")
     port = DASHBOARD_CONFIG.get("port", 5000)
     logger.info(f"Dashboard at http://{host}:{port}")
+
+    # Resume monitors for any open manual trades from last session
+    try:
+        from ml.manual_trade_logger import resume_monitors_on_startup
+        resume_monitors_on_startup()
+    except Exception as e:
+        logger.warning(f"Could not resume manual trade monitors: {e}")
+
+    # Start outcome labeler in background — auto-labels agent signals after 15 min
+    labeler_thread = threading.Thread(target=_run_outcome_labeler, daemon=True, name="OutcomeLabeler")
+    labeler_thread.start()
+
     app.run(host=host, port=port, debug=False, use_reloader=False)

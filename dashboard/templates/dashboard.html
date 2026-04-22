@@ -328,6 +328,90 @@
     padding: 4px 0;
   }
 
+  /* ── MARKET VIBE PANEL ──────────────────── */
+  #vibe-panel {
+    margin: 8px 28px 0;
+    background: var(--navy-dark);
+    border: 1px solid var(--navy-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .vibe-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--navy-mid);
+    border-bottom: 1px solid var(--navy-border);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .vibe-panel-header:hover { background: var(--navy-light); }
+
+  .vibe-panel-body {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .vibe-panel-body.collapsed { display: none; }
+
+  .vibe-pair-select {
+    background: var(--navy-darkest);
+    border: 1px solid var(--navy-border);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .vibe-headline {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 5px;
+    background: var(--navy-darkest);
+    border: 1px solid var(--navy-border);
+    font-size: 12px;
+    transition: border-color .15s;
+  }
+
+  .vibe-headline:hover { border-color: var(--navy-glow); }
+
+  .vibe-source {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--blue-bright);
+    min-width: 80px;
+    white-space: nowrap;
+  }
+
+  .vibe-title { color: var(--text-primary); flex: 1; }
+  .vibe-title a { color: inherit; text-decoration: none; }
+  .vibe-title a:hover { color: var(--blue-bright); }
+
+  .vibe-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .vibe-sentiment-pos { color: #4caf50; font-size: 10px; }
+  .vibe-sentiment-neg { color: var(--red); font-size: 10px; }
+  .vibe-empty { color: var(--text-muted); font-size: 12px; font-style: italic; padding: 4px 0; }
+
   /* ── STATS BAR ───────────────────────────── */
   .stats-bar {
     background: var(--navy-dark);
@@ -626,6 +710,224 @@
     .trade-grid { grid-template-columns: repeat(2, 1fr); }
     td, th { padding: 10px 10px; }
   }
+
+  /* ── PERFORMANCE PANEL ───────────────────── */
+  #perf-panel {
+    margin: 0 28px 12px;
+    background: var(--navy-dark);
+    border: 1px solid var(--navy-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .perf-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px;
+    cursor: pointer;
+    user-select: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid transparent;
+    transition: border-color .2s;
+  }
+  .perf-panel-header:hover { border-bottom-color: var(--navy-border); }
+  .perf-panel-body { padding: 14px 16px; }
+  .perf-panel-body.collapsed { display: none; }
+
+  .perf-stats-row {
+    display: flex; gap: 28px; flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--navy-border);
+  }
+  .perf-stat { display: flex; flex-direction: column; gap: 3px; min-width: 80px; }
+  .perf-stat-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 1.5px;
+    color: var(--text-muted); font-family: 'JetBrains Mono', monospace;
+  }
+  .perf-stat-value {
+    font-size: 20px; font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-primary);
+  }
+  .perf-stat-sub { font-size: 10px; color: var(--text-muted); }
+  .perf-win  { color: var(--green); }
+  .perf-loss { color: var(--red); }
+  .perf-neutral { color: var(--text-secondary); }
+  .perf-note {
+    font-size: 10px; color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-style: italic;
+  }
+
+  /* Recent signals log in perf panel */
+  .perf-log-title {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    color: var(--text-muted); font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 8px;
+  }
+  .perf-log { display: flex; flex-direction: column; gap: 4px; }
+  .perf-log-row {
+    display: grid;
+    grid-template-columns: 110px 80px 60px 60px 60px 1fr auto;
+    gap: 8px; align-items: center;
+    padding: 6px 10px;
+    background: rgba(255,255,255,.02);
+    border: 1px solid var(--navy-border);
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .perf-log-pair { color: var(--blue-bright); font-weight: 700; }
+  .perf-log-dir-bull { color: var(--green); }
+  .perf-log-dir-bear { color: var(--red); }
+  .perf-log-grade { font-size: 10px; }
+  .perf-log-outcome-win  { color: var(--green); font-weight: 700; }
+  .perf-log-outcome-loss { color: var(--red); font-weight: 700; }
+  .perf-log-outcome-none { color: var(--text-muted); }
+  .perf-log-time { color: var(--text-muted); font-size: 10px; }
+
+  .outcome-btn {
+    padding: 2px 8px; border-radius: 3px; font-size: 10px;
+    font-weight: 700; font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 1px; cursor: pointer; border: 1px solid;
+    transition: all .15s;
+  }
+  .outcome-btn-win {
+    background: rgba(0,230,118,.08); border-color: rgba(0,230,118,.3);
+    color: var(--green);
+  }
+  .outcome-btn-win:hover  { background: rgba(0,230,118,.2); }
+  .outcome-btn-loss {
+    background: rgba(255,68,68,.08); border-color: rgba(255,68,68,.3);
+    color: var(--red);
+  }
+  .outcome-btn-loss:hover { background: rgba(255,68,68,.2); }
+  .outcome-marked {
+    font-size: 10px; font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 1px; padding: 2px 8px;
+  }
+
+  /* WIN/LOSS buttons in detail row */
+  .mark-outcome-row {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--navy-border);
+  }
+  .mark-outcome-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    color: var(--text-muted); font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ── LOG TRADE BUTTON ────────────────────── */
+  .log-trade-btn {
+    background: rgba(0,230,118,.1);
+    border: 1px solid rgba(0,230,118,.3);
+    color: var(--green);
+    padding: 5px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    letter-spacing: 1px;
+    transition: all .15s;
+  }
+  .log-trade-btn:hover { background: rgba(0,230,118,.2); }
+
+  /* ── MODAL ───────────────────────────────── */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.7);
+    z-index: 500;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--navy-dark);
+    border: 1px solid var(--navy-border);
+    border-radius: 10px;
+    padding: 24px 28px;
+    width: 380px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6);
+  }
+  .modal-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; font-weight: 700; letter-spacing: 2px;
+    color: var(--text-primary);
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--navy-border);
+    padding-bottom: 12px;
+  }
+  .modal-field { margin-bottom: 14px; }
+  .modal-label {
+    display: block;
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    color: var(--text-muted); font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 5px;
+  }
+  .modal-input, .modal-select {
+    width: 100%;
+    background: var(--navy-mid);
+    border: 1px solid var(--navy-border);
+    color: var(--text-primary);
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .modal-input:focus, .modal-select:focus { border-color: var(--blue-bright); }
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .modal-submit {
+    flex: 1;
+    background: rgba(0,230,118,.12);
+    border: 1px solid rgba(0,230,118,.35);
+    color: var(--green);
+    padding: 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; font-weight: 700; letter-spacing: 1px;
+  }
+  .modal-submit:hover { background: rgba(0,230,118,.22); }
+  .modal-cancel {
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--navy-border);
+    color: var(--text-muted);
+    padding: 9px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .modal-feedback {
+    font-size: 11px; font-family: 'JetBrains Mono', monospace;
+    margin-top: 10px; min-height: 16px;
+  }
+  .modal-feedback.ok   { color: var(--green); }
+  .modal-feedback.err  { color: var(--red); }
+
+  /* ── MANUAL TRADES TAB IN PERF PANEL ─────── */
+  .perf-tabs { display: flex; gap: 0; margin-bottom: 14px; }
+  .perf-tab {
+    padding: 5px 14px;
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    font-family: 'JetBrains Mono', monospace;
+    cursor: pointer;
+    border: 1px solid var(--navy-border);
+    color: var(--text-muted);
+    background: transparent;
+    transition: all .15s;
+  }
+  .perf-tab:first-child { border-radius: 4px 0 0 4px; }
+  .perf-tab:last-child  { border-radius: 0 4px 4px 0; border-left: none; }
+  .perf-tab.active      { background: rgba(77,159,255,.12); color: var(--blue-bright); border-color: rgba(77,159,255,.3); }
 </style>
 </head>
 <body>
@@ -641,6 +943,110 @@
     <div class="clock" id="clock">00:00:00 UTC</div>
     <div class="session-badge" id="session-badge">—</div>
     <div style="font-size:11px;color:var(--text-muted)">↻ {{ refresh }}s</div>
+  </div>
+</div>
+
+<!-- LOG TRADE MODAL -->
+<div class="modal-overlay" id="log-trade-modal">
+  <div class="modal-box">
+    <div class="modal-title">+ LOG MANUAL TRADE</div>
+    <div class="modal-field">
+      <label class="modal-label">PAIR</label>
+      <select class="modal-select" id="mt-pair" onchange="prefillEntryPrice()">
+        <option value="XAU_USD">XAU/USD (Gold)</option>
+        <option value="XAG_USD">XAG/USD (Silver)</option>
+        <option value="GBP_USD">GBP/USD</option>
+        <option value="EUR_USD">EUR/USD</option>
+        <option value="USD_JPY">USD/JPY</option>
+        <option value="GBP_JPY">GBP/JPY</option>
+        <option value="EUR_JPY">EUR/JPY</option>
+        <option value="EUR_GBP">EUR/GBP</option>
+        <option value="CAD_JPY">CAD/JPY</option>
+        <option value="CHF_JPY">CHF/JPY</option>
+        <option value="USD_CAD">USD/CAD</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">DIRECTION</label>
+      <select class="modal-select" id="mt-direction">
+        <option value="bullish">▲ BULLISH (Long)</option>
+        <option value="bearish">▼ BEARISH (Short)</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">SOURCE</label>
+      <select class="modal-select" id="mt-source" onchange="onSourceChange()">
+        <option value="scanner">Based on scanner signal (use agent's levels)</option>
+        <option value="analysis">My own analysis (I'll set my own SL)</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">ENTRY PRICE</label>
+      <input class="modal-input" id="mt-entry" type="number" step="0.00001"
+             placeholder="e.g. 2345.50" oninput="recalcTP()" />
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">STOP LOSS
+        <span id="mt-sl-hint" style="font-weight:400;color:var(--blue-bright);margin-left:6px;font-size:9px;">from agent</span>
+      </label>
+      <input class="modal-input" id="mt-sl" type="number" step="0.00001"
+             placeholder="Your SL price" oninput="recalcTP()" />
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div class="modal-field">
+        <label class="modal-label">TP1
+          <span id="mt-tp1-hint" style="font-weight:400;color:var(--green);margin-left:4px;font-size:9px;">auto</span>
+        </label>
+        <input class="modal-input" id="mt-tp1" type="number" step="0.00001" placeholder="TP1" readonly
+               style="color:var(--green);opacity:.8;" />
+      </div>
+      <div class="modal-field">
+        <label class="modal-label">RR</label>
+        <div class="modal-input" id="mt-rr" style="color:var(--yellow);line-height:1.8;">—</div>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">SETUP TYPE (optional)</label>
+      <input class="modal-input" id="mt-setup" type="text"
+             placeholder="e.g. OB retest, FVG tap, ICT sniper..." />
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">NOTES (optional)</label>
+      <input class="modal-input" id="mt-notes" type="text"
+             placeholder="e.g. saw sweep on M5, NY session..." />
+    </div>
+    <div class="modal-feedback" id="mt-feedback"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeLogModal()">Cancel</button>
+      <button class="modal-submit" onclick="submitManualTrade()">LOG TRADE + START MONITORING</button>
+    </div>
+  </div>
+</div>
+
+<!-- CLOSE TRADE MODAL -->
+<div class="modal-overlay" id="close-trade-modal">
+  <div class="modal-box" style="width:320px;">
+    <div class="modal-title">CLOSE TRADE — <span id="ct-pair-label" style="color:var(--blue-bright)"></span></div>
+    <div class="modal-field">
+      <label class="modal-label">RESULT</label>
+      <select class="modal-select" id="ct-outcome">
+        <option value="WIN">✓ WIN</option>
+        <option value="LOSS">✗ LOSS</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">PIPS <span style="font-weight:400;color:var(--blue-bright);font-size:9px;">auto-calculated — change if different</span></label>
+      <input class="modal-input" id="ct-pips" type="number" step="0.1" placeholder="auto-filled from market" />
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">NOTES (optional)</label>
+      <input class="modal-input" id="ct-notes" type="text" placeholder="e.g. closed early at resistance" />
+    </div>
+    <div class="modal-feedback" id="ct-feedback"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeCloseModal()">Cancel</button>
+      <button class="modal-submit" onclick="submitCloseTrade()">CLOSE TRADE</button>
+    </div>
   </div>
 </div>
 
@@ -682,6 +1088,8 @@
   <div class="stat">Updated <span class="stat-value" id="stat-updated">—</span></div>
   <div class="stat-divider">·</div>
   <div class="stat">Blocked <span class="stat-value" id="stat-blocked" style="color:var(--red)">0</span></div>
+  <div class="stat-divider">·</div>
+  <button class="log-trade-btn" onclick="openLogModal()">+ LOG TRADE</button>
 </div>
 
 <!-- NEWS PANEL -->
@@ -692,6 +1100,89 @@
   </div>
   <div class="news-panel-body" id="news-panel-body">
     <div class="news-panel-empty">Loading...</div>
+  </div>
+</div>
+
+<!-- MARKET VIBE PANEL -->
+<div id="vibe-panel">
+  <div class="vibe-panel-header" onclick="toggleVibePanel()">
+    <span>📡 MARKET VIBE — Headlines</span>
+    <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
+      <select id="vibe-pair-select" class="vibe-pair-select" onchange="fetchVibe()">
+        <option value="XAU_USD">XAU/USD</option>
+        <option value="XAG_USD">XAG/USD</option>
+        <option value="GBP_USD">GBP/USD</option>
+        <option value="EUR_USD">EUR/USD</option>
+        <option value="EUR_GBP">EUR/GBP</option>
+        <option value="USD_JPY">USD/JPY</option>
+        <option value="GBP_JPY">GBP/JPY</option>
+        <option value="EUR_JPY">EUR/JPY</option>
+      </select>
+      <span class="news-panel-toggle" id="vibe-panel-toggle">▶ expand</span>
+    </div>
+  </div>
+  <div class="vibe-panel-body collapsed" id="vibe-panel-body">
+    <div class="vibe-empty">Select a pair and expand to load headlines.</div>
+  </div>
+</div>
+
+<!-- PERFORMANCE PANEL -->
+<div id="perf-panel">
+  <div class="perf-panel-header" onclick="togglePerfPanel()">
+    <span>📊 PERFORMANCE — Signal Log &amp; Win Rate</span>
+    <span id="perf-panel-toggle" style="font-size:10px;color:var(--text-muted)">▶ expand</span>
+  </div>
+  <div class="perf-panel-body collapsed" id="perf-panel-body">
+    <!-- Stats summary -->
+    <div class="perf-stats-row" id="perf-stats-row">
+      <div class="perf-stat">
+        <div class="perf-stat-label">SIGNALS TODAY</div>
+        <div class="perf-stat-value" id="perf-today">—</div>
+        <div class="perf-stat-sub">ENTER_NOW only</div>
+      </div>
+      <div class="perf-stat">
+        <div class="perf-stat-label">TOTAL LABELED</div>
+        <div class="perf-stat-value" id="perf-total">—</div>
+        <div class="perf-stat-sub" id="perf-n-note">need 50 for auto-update</div>
+      </div>
+      <div class="perf-stat">
+        <div class="perf-stat-label">WIN RATE</div>
+        <div class="perf-stat-value perf-win" id="perf-winrate">—</div>
+        <div class="perf-stat-sub" id="perf-wl">— W / — L</div>
+      </div>
+      <div class="perf-stat">
+        <div class="perf-stat-label">AVG PIPS</div>
+        <div class="perf-stat-value" id="perf-avgpips">—</div>
+        <div class="perf-stat-sub">labeled outcomes</div>
+      </div>
+      <div class="perf-stat">
+        <div class="perf-stat-label">🦄 UNICORN</div>
+        <div class="perf-stat-value perf-win" id="perf-unicorn-rate">—</div>
+        <div class="perf-stat-sub" id="perf-unicorn-n">— outcomes</div>
+      </div>
+      <div class="perf-stat">
+        <div class="perf-stat-label">BAYESIAN</div>
+        <div class="perf-stat-value perf-neutral" id="perf-bayes-status">EST</div>
+        <div class="perf-stat-sub" id="perf-bayes-note">using priors</div>
+      </div>
+    </div>
+    <!-- Tabs: Agent / Manual -->
+    <div class="perf-tabs">
+      <button class="perf-tab active" id="tab-agent"  onclick="switchPerfTab('agent')">AGENT SIGNALS</button>
+      <button class="perf-tab"        id="tab-manual" onclick="switchPerfTab('manual')">MY MANUAL TRADES</button>
+    </div>
+    <div id="perf-agent-section">
+      <div class="perf-log-title">RECENT ENTER_NOW SIGNALS</div>
+      <div class="perf-log" id="perf-log-body">
+        <div style="color:var(--text-muted);font-size:11px;">Loading...</div>
+      </div>
+    </div>
+    <div id="perf-manual-section" style="display:none;">
+      <div class="perf-log-title">MY MANUAL TRADES</div>
+      <div class="perf-log" id="perf-manual-body">
+        <div style="color:var(--text-muted);font-size:11px;">Loading...</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -888,6 +1379,19 @@ function buildRow(s) {
 
   const pairDisplay = s.pair.replace("_","/");
 
+  // WIN/LOSS buttons — only for logged ENTER_NOW signals
+  const markHtml = s.signal_id ? `
+    <div class="mark-outcome-row">
+      <span class="mark-outcome-label">MARK OUTCOME:</span>
+      <button class="outcome-btn outcome-btn-win"
+        onclick="event.stopPropagation();markOutcome('${s.signal_id}','WIN',this)">✓ WIN</button>
+      <button class="outcome-btn outcome-btn-loss"
+        onclick="event.stopPropagation();markOutcome('${s.signal_id}','LOSS',this)">✗ LOSS</button>
+      <span style="font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">
+        ID: ${s.signal_id}
+      </span>
+    </div>` : "";
+
   const mainRow = `
     <tr class="${rClass}" onclick="toggleDetail('${detailId}')">
       <td class="pair-cell">${pairDisplay}${warnBadges(s)}</td>
@@ -916,6 +1420,7 @@ function buildRow(s) {
             ${gradeMeaning}
             ${flagsHtml}
           </div>
+          ${markHtml}
         </div>
       </td>
     </tr>
@@ -1095,10 +1600,469 @@ function updateClock() {
     `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())} UTC`;
 }
 
+// ── PERFORMANCE PANEL ─────────────────────────────────────────────────────────
+
+let _perfPanelCollapsed = true;
+
+function togglePerfPanel() {
+  _perfPanelCollapsed = !_perfPanelCollapsed;
+  document.getElementById("perf-panel-body").classList.toggle("collapsed", _perfPanelCollapsed);
+  document.getElementById("perf-panel-toggle").textContent = _perfPanelCollapsed ? "▶ expand" : "▼ collapse";
+  if (!_perfPanelCollapsed) fetchPerformance();
+}
+
+async function fetchPerformance() {
+  try {
+    const [perfResp, recentResp] = await Promise.all([
+      fetch("/api/performance"),
+      fetch("/api/recent_signals"),
+    ]);
+    const perf   = await perfResp.json();
+    const recent = await recentResp.json();
+    renderPerformance(perf, recent.signals || []);
+  } catch(e) {
+    console.warn("Performance fetch failed:", e);
+  }
+}
+
+function renderPerformance(perf, recentSignals) {
+  if (perf.error) {
+    document.getElementById("perf-stats-row").innerHTML =
+      `<div style="color:var(--text-muted);font-size:11px;">${perf.error}</div>`;
+    return;
+  }
+
+  // Count today's signals from recent list
+  const todayStr = new Date().toISOString().slice(0,10);
+  const todayCount = recentSignals.filter(s => (s.timestamp_utc||"").startsWith(todayStr)).length;
+
+  document.getElementById("perf-today").textContent   = todayCount;
+  document.getElementById("perf-total").textContent   = perf.completed || 0;
+  document.getElementById("perf-wl").textContent      = `${perf.wins||0} W / ${perf.losses||0} L`;
+  document.getElementById("perf-avgpips").textContent = perf.avg_pips != null ? perf.avg_pips : "—";
+
+  const wr = perf.win_rate != null ? perf.win_rate + "%" : "—";
+  const wrEl = document.getElementById("perf-winrate");
+  wrEl.textContent = wr;
+  wrEl.className = "perf-stat-value " + (
+    perf.win_rate >= 60 ? "perf-win" :
+    perf.win_rate >= 45 ? "perf-neutral" : "perf-loss"
+  );
+
+  // Unicorn win rate from by_grade or by_pair (stored under setup_type key if available)
+  const byGrade = perf.by_grade || {};
+  const unicornEl  = document.getElementById("perf-unicorn-rate");
+  const unicornN   = document.getElementById("perf-unicorn-n");
+  // Check recent signals for unicorn outcomes
+  const unicornSigs = recentSignals.filter(s => (s.setup_type||"").toLowerCase().includes("unicorn") && s.outcome);
+  if (unicornSigs.length > 0) {
+    const uWins = unicornSigs.filter(s => s.outcome === "WIN").length;
+    const uRate = Math.round(uWins / unicornSigs.length * 100);
+    unicornEl.textContent = uRate + "%";
+    unicornN.textContent  = `${unicornSigs.length} outcomes`;
+  } else {
+    unicornEl.textContent = "—";
+    unicornN.textContent  = "no data yet";
+  }
+
+  // Bayesian status — using estimated priors until N=50
+  const bayesEl   = document.getElementById("perf-bayes-status");
+  const bayesNote = document.getElementById("perf-bayes-note");
+  const n = perf.completed || 0;
+  if (n >= 50) {
+    bayesEl.textContent   = "LIVE";
+    bayesEl.className     = "perf-stat-value perf-win";
+    bayesNote.textContent = "data-backed rates active";
+  } else {
+    bayesEl.textContent   = "EST";
+    bayesEl.className     = "perf-stat-value perf-neutral";
+    bayesNote.textContent = `${50 - n} more to activate`;
+  }
+
+  // Render recent signal log
+  const logEl = document.getElementById("perf-log-body");
+  if (!recentSignals.length) {
+    logEl.innerHTML = `<div style="color:var(--text-muted);font-size:11px;padding:8px 0;">No ENTER_NOW signals logged yet.</div>`;
+    return;
+  }
+
+  logEl.innerHTML = recentSignals.map(s => {
+    const dirCls = s.direction === "bullish" ? "perf-log-dir-bull" : "perf-log-dir-bear";
+    const dirSym = s.direction === "bullish" ? "▲" : "▼";
+    const outCls = s.outcome === "WIN"  ? "perf-log-outcome-win"
+                 : s.outcome === "LOSS" ? "perf-log-outcome-loss" : "perf-log-outcome-none";
+    const outTxt = s.outcome || "—";
+    const time   = (s.timestamp_utc||"").slice(11,16) || "—";
+
+    const isTaken = s.taken === true || s.taken === "True" || s.taken === "true";
+    const takenBadge = isTaken
+      ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--blue-bright);font-weight:700;">TOOK IT</span>`
+      : `<button class="outcome-btn" id="taken-btn-${s.signal_id}"
+           style="background:rgba(77,159,255,.08);border-color:rgba(77,159,255,.3);color:var(--blue-bright);"
+           onclick="markTaken('${s.signal_id}',this)">TOOK IT?</button>`;
+
+    const outcomeHtml = (!s.outcome || s.outcome === "NEUTRAL" || s.outcome === "")
+      ? `<span>
+           <button class="outcome-btn outcome-btn-win" onclick="markOutcome('${s.signal_id}','WIN',this)">W</button>
+           <button class="outcome-btn outcome-btn-loss" onclick="markOutcome('${s.signal_id}','LOSS',this)">L</button>
+         </span>`
+      : `<span class="outcome-marked ${outCls}">${outTxt}</span>`;
+
+    return `
+      <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 60px 60px 1fr auto auto;">
+        <span class="perf-log-time">${(s.timestamp_utc||"").slice(0,10)} ${time}</span>
+        <span class="perf-log-pair">${(s.pair||"").replace("_","/")}</span>
+        <span class="${dirCls}">${dirSym} ${(s.direction||"").slice(0,4).toUpperCase()}</span>
+        <span class="perf-log-grade">${s.grade||"—"}</span>
+        <span style="color:var(--text-muted)">${s.score||"—"}</span>
+        <span style="color:var(--text-muted);font-size:10px;">${(s.setup_type||"").replace(/_/g," ")}</span>
+        ${takenBadge}
+        ${outcomeHtml}
+      </div>`;
+  }).join("");
+}
+
+async function markTaken(signalId, btn) {
+  if (!signalId) return;
+  try {
+    const resp = await fetch("/api/mark_taken", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: signalId }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      btn.outerHTML = `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--blue-bright);font-weight:700;">TOOK IT</span>`;
+    }
+  } catch(e) { console.warn("markTaken error:", e); }
+}
+
+async function markOutcome(signalId, outcome, btn) {
+  if (!signalId) return;
+  try {
+    const resp = await fetch("/api/mark_outcome", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: signalId, outcome }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // Replace buttons with outcome label
+      const container = btn.closest("span") || btn.parentElement;
+      const cls = outcome === "WIN" ? "perf-log-outcome-win" : "perf-log-outcome-loss";
+      container.innerHTML = `<span class="outcome-marked ${cls}">${outcome}</span>`;
+      // Refresh performance panel stats
+      if (!_perfPanelCollapsed) fetchPerformance();
+    } else {
+      console.warn("Mark outcome failed:", data.error);
+    }
+  } catch(e) {
+    console.warn("markOutcome error:", e);
+  }
+}
+
 fetchAndRender();
 setInterval(fetchAndRender, REFRESH_MS);
 setInterval(updateClock, 1000);
 updateClock();
+
+// ── MANUAL TRADE MODAL ────────────────────────────────────────────────────────
+
+function prefillEntryPrice() {
+  const pair   = document.getElementById("mt-pair").value;
+  const signal = prevSignals[pair];
+  if (signal && signal.current_price) {
+    document.getElementById("mt-entry").value = signal.current_price;
+  } else {
+    document.getElementById("mt-entry").value = "";
+  }
+}
+
+function openLogModal() {
+  document.getElementById("log-trade-modal").classList.add("open");
+  document.getElementById("mt-feedback").textContent = "";
+  document.getElementById("mt-notes").value = "";
+  document.getElementById("mt-setup").value = "";
+  prefillEntryPrice();  // auto-fill price for default selected pair
+}
+
+function closeLogModal() {
+  document.getElementById("log-trade-modal").classList.remove("open");
+}
+
+// Close modal if clicking outside
+document.getElementById("log-trade-modal").addEventListener("click", function(e) {
+  if (e.target === this) closeLogModal();
+});
+
+async function submitManualTrade() {
+  const pair      = document.getElementById("mt-pair").value;
+  const direction = document.getElementById("mt-direction").value;
+  const entry     = parseFloat(document.getElementById("mt-entry").value);
+  const setup     = document.getElementById("mt-setup").value.trim() || "manual";
+  const notes     = document.getElementById("mt-notes").value.trim();
+  const fb        = document.getElementById("mt-feedback");
+
+  if (!entry || isNaN(entry)) {
+    fb.textContent = "Enter a valid entry price.";
+    fb.className   = "modal-feedback err";
+    return;
+  }
+
+  fb.textContent = "Logging trade...";
+  fb.className   = "modal-feedback";
+
+  try {
+    const resp = await fetch("/api/log_manual_trade", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ pair, direction, entry_price: entry, setup_type: setup, notes }),
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      fb.textContent = `✓ Logged ${data.signal_id} — monitoring started`;
+      fb.className   = "modal-feedback ok";
+      setTimeout(() => {
+        closeLogModal();
+        if (!_perfPanelCollapsed) fetchPerformance();
+      }, 1800);
+    } else {
+      fb.textContent = "Error: " + (data.error || "unknown");
+      fb.className   = "modal-feedback err";
+    }
+  } catch(e) {
+    fb.textContent = "Failed to connect.";
+    fb.className   = "modal-feedback err";
+  }
+}
+
+// ── CLOSE TRADE MODAL ─────────────────────────────────────────────────────────
+
+let _closeSignalId = null;
+
+function _pipSize(pair) {
+  if (!pair) return 0.0001;
+  if (pair.includes("JPY")) return 0.01;
+  if (pair.includes("XAU"))  return 0.1;
+  if (pair.includes("XAG"))  return 0.01;
+  return 0.0001;
+}
+
+async function openCloseModal(signalId, pair, direction, entryPrice) {
+  _closeSignalId = signalId;
+  const displayPair = (pair || "").replace("_", "/");
+  document.getElementById("ct-pair-label").textContent = displayPair;
+  document.getElementById("ct-notes").value  = "";
+  document.getElementById("ct-pips").value   = "";
+  document.getElementById("ct-feedback").textContent = "Fetching current price...";
+  document.getElementById("ct-feedback").className   = "modal-feedback";
+  document.getElementById("close-trade-modal").classList.add("open");
+
+  try {
+    // Fetch live price directly from API
+    const resp      = await fetch(`/api/signal/${pair}`);
+    const data      = await resp.json();
+    const currentPx = data.current_price;
+    const pipSz     = _pipSize(pair);
+
+    if (currentPx && entryPrice && pipSz) {
+      const rawPips = direction === "bullish"
+        ? (currentPx - entryPrice) / pipSz
+        : (entryPrice - currentPx) / pipSz;
+      const pips = Math.round(rawPips * 10) / 10;
+
+      document.getElementById("ct-pips").value          = Math.abs(pips);
+      document.getElementById("ct-outcome").value        = pips >= 0 ? "WIN" : "LOSS";
+      document.getElementById("ct-feedback").textContent =
+        `Current: ${currentPx} | Entry: ${entryPrice} | P&L: ${pips >= 0 ? "+" : ""}${pips} pips`;
+      document.getElementById("ct-feedback").className   = `modal-feedback ${pips >= 0 ? "ok" : "err"}`;
+    } else {
+      document.getElementById("ct-feedback").textContent = "Could not fetch price — enter pips manually";
+      document.getElementById("ct-feedback").className   = "modal-feedback err";
+    }
+  } catch(e) {
+    document.getElementById("ct-feedback").textContent = "Price fetch failed — enter pips manually";
+    document.getElementById("ct-feedback").className   = "modal-feedback err";
+  }
+}
+
+function closeCloseModal() {
+  document.getElementById("close-trade-modal").classList.remove("open");
+  _closeSignalId = null;
+}
+
+document.getElementById("close-trade-modal").addEventListener("click", function(e) {
+  if (e.target === this) closeCloseModal();
+});
+
+async function submitCloseTrade() {
+  const outcome = document.getElementById("ct-outcome").value;
+  const pips    = parseFloat(document.getElementById("ct-pips").value);
+  const notes   = document.getElementById("ct-notes").value.trim();
+  const fb      = document.getElementById("ct-feedback");
+
+  if (!pips || isNaN(pips)) {
+    fb.textContent = "Enter how many pips.";
+    fb.className   = "modal-feedback err";
+    return;
+  }
+
+  fb.textContent = "Closing...";
+  fb.className   = "modal-feedback";
+
+  try {
+    const resp = await fetch("/api/close_manual_trade", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ signal_id: _closeSignalId, outcome, pips, notes }),
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      fb.textContent = `✓ Closed as ${outcome} (${pips > 0 ? "+" : ""}${pips} pips)`;
+      fb.className   = "modal-feedback ok";
+      setTimeout(() => {
+        closeCloseModal();
+        fetchManualTrades();
+      }, 1200);
+    } else {
+      fb.textContent = "Error: " + (data.error || "unknown");
+      fb.className   = "modal-feedback err";
+    }
+  } catch(e) {
+    fb.textContent = "Failed to connect.";
+    fb.className   = "modal-feedback err";
+  }
+}
+
+// ── PERF PANEL TABS ───────────────────────────────────────────────────────────
+
+let _currentPerfTab = "agent";
+
+function switchPerfTab(tab) {
+  _currentPerfTab = tab;
+  document.getElementById("perf-agent-section").style.display  = tab === "agent"  ? "" : "none";
+  document.getElementById("perf-manual-section").style.display = tab === "manual" ? "" : "none";
+  document.getElementById("tab-agent").classList.toggle("active",  tab === "agent");
+  document.getElementById("tab-manual").classList.toggle("active", tab === "manual");
+  if (tab === "manual") fetchManualTrades();
+}
+
+async function fetchManualTrades() {
+  try {
+    const resp   = await fetch("/api/recent_manual_trades");
+    const data   = await resp.json();
+    renderManualTrades(data.trades || []);
+  } catch(e) {
+    document.getElementById("perf-manual-body").innerHTML =
+      `<div style="color:var(--text-muted);font-size:11px;">Failed to load.</div>`;
+  }
+}
+
+function renderManualTrades(trades) {
+  const el = document.getElementById("perf-manual-body");
+  if (!trades.length) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:11px;padding:8px 0;">
+      No manual trades yet — click <strong style="color:var(--green)">+ LOG TRADE</strong> in the header to add one.</div>`;
+    return;
+  }
+
+  el.innerHTML = trades.map(t => {
+    const dirCls  = t.direction === "bullish" ? "perf-log-dir-bull" : "perf-log-dir-bear";
+    const dirSym  = t.direction === "bullish" ? "▲" : "▼";
+    const outCls  = t.outcome === "WIN"  ? "perf-log-outcome-win"
+                  : t.outcome === "LOSS" ? "perf-log-outcome-loss" : "perf-log-outcome-none";
+    const outTxt  = t.outcome || "watching...";
+    const time    = (t.timestamp_utc || "").slice(11, 16) || "—";
+    const postMortem = t.post_mortem
+      ? `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;padding:4px 8px;
+                     background:rgba(255,255,255,.02);border-radius:3px;font-family:'JetBrains Mono',monospace;">
+           ${t.post_mortem}</div>` : "";
+
+    const isOpen = !t.outcome || t.outcome === "";
+    const statusHtml = isOpen
+      ? `<span style="display:flex;align-items:center;gap:6px;">
+           <span style="color:var(--yellow);font-size:10px;font-family:'JetBrains Mono',monospace;">● MONITORING</span>
+           <button class="outcome-btn" style="background:rgba(255,68,68,.08);border-color:rgba(255,68,68,.3);color:var(--red);padding:2px 7px;"
+             onclick="openCloseModal('${t.signal_id}','${t.pair||''}','${t.direction||''}',${t.entry_price||0})">Close ✕</button>
+         </span>`
+      : `<span class="outcome-marked ${outCls}">${outTxt}</span>`;
+
+    return `
+      <div style="margin-bottom:6px;">
+        <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 1fr auto;">
+          <span class="perf-log-time">${(t.timestamp_utc||"").slice(0,10)} ${time}</span>
+          <span class="perf-log-pair">${(t.pair||"").replace("_","/")}</span>
+          <span class="${dirCls}">${dirSym} ${(t.direction||"").slice(0,4).toUpperCase()}</span>
+          <span style="color:var(--text-muted);font-size:10px;">
+            Entry: <b style="color:var(--text-primary)">${t.entry_price||"—"}</b>
+            &nbsp;·&nbsp; SL: <b style="color:var(--red)">${t.sl_price||"—"}</b>
+            &nbsp;·&nbsp; TP1: <b style="color:var(--green)">${t.tp1_price||"—"}</b>
+            &nbsp;·&nbsp; RR: <b style="color:var(--yellow)">${t.rr1||"1:2"}</b>
+            &nbsp;·&nbsp; <span style="color:var(--text-muted)">${t.setup_type||"manual"}</span>
+          </span>
+          ${statusHtml}
+        </div>
+        ${postMortem}
+      </div>`;
+  }).join("");
+}
+
+// ── MARKET VIBE PANEL ─────────────────────────────────────────────────────────
+
+let _vibePanelCollapsed = true;
+
+function toggleVibePanel() {
+  _vibePanelCollapsed = !_vibePanelCollapsed;
+  document.getElementById("vibe-panel-body").classList.toggle("collapsed", _vibePanelCollapsed);
+  document.getElementById("vibe-panel-toggle").textContent = _vibePanelCollapsed ? "▶ expand" : "▼ collapse";
+  if (!_vibePanelCollapsed) fetchVibe();
+}
+
+async function fetchVibe() {
+  const pair = document.getElementById("vibe-pair-select").value;
+  const body = document.getElementById("vibe-panel-body");
+  if (_vibePanelCollapsed) return;
+
+  body.innerHTML = `<div class="vibe-empty">Loading headlines for ${pair}...</div>`;
+  try {
+    const resp = await fetch(`/api/vibe?pair=${pair}`);
+    const data = await resp.json();
+
+    if (data.error) {
+      body.innerHTML = `<div class="vibe-empty">⚠️ ${data.error}</div>`;
+      return;
+    }
+
+    const headlines = data.headlines || [];
+    if (headlines.length === 0) {
+      body.innerHTML = `<div class="vibe-empty">No headlines found for ${pair}.</div>`;
+      return;
+    }
+
+    const staleNote = data.stale ? ` <span style="color:var(--text-muted);font-size:10px;">(stale cache)</span>` : "";
+    body.innerHTML = headlines.map(h => {
+      const sentCls = h.sentiment === "positive" ? "vibe-sentiment-pos"
+                    : h.sentiment === "negative" ? "vibe-sentiment-neg" : "";
+      const sentIcon = h.sentiment === "positive" ? "▲"
+                     : h.sentiment === "negative" ? "▼" : "";
+      return `
+        <div class="vibe-headline">
+          <span class="vibe-source">${h.source || "—"}</span>
+          <span class="vibe-title">
+            <a href="${h.link}" target="_blank" rel="noopener">${h.title}</a>
+          </span>
+          ${sentIcon ? `<span class="${sentCls}">${sentIcon}</span>` : ""}
+          <span class="vibe-time">${h.time}</span>
+        </div>`;
+    }).join("") + (data.stale ? `<div style="text-align:right;padding:4px 0;">${staleNote}</div>` : "");
+
+  } catch(e) {
+    body.innerHTML = `<div class="vibe-empty">Failed to load headlines.</div>`;
+    console.warn("Vibe fetch error:", e);
+  }
+}
 </script>
 </body>
 </html>

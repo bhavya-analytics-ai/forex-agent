@@ -156,4 +156,4 @@ def apply_strategy(scored: dict, confluence: dict, pair: str, candles: dict = No
         return apply_news_sniper(scored, confluence, pair, candles or {})
 
     from filters.decision_layer import apply_decision_layer
-    return apply_decision_layer(scored, confluence, pair)
+    return apply_decision_layer(scored, confluence, pair, candles)

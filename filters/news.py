@@ -21,16 +21,117 @@ FIXES & ADDITIONS:
    Post-news within 30 min → flag for spike setup opportunity
 """
 
+import os
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from config import NEWS_CONFIG
 
 logger = logging.getLogger(__name__)
 
-_news_cache   = {"data": None, "fetched_at": None}
-CACHE_MINUTES = 30
+_news_cache             = {"data": None, "fetched_at": None, "source": None}
+CACHE_MINUTES           = 60    # normal cache — refresh once per hour
+_CACHE_NEAR_EVENT_SECS  = 20    # adaptive: poll fast when HIGH event < 5 mins away
+_NEAR_EVENT_WINDOW_MINS = 5
+_CACHE_FAILURE_SECS     = 300   # on total failure: wait 5 min before retrying
+_finnhub_403            = False  # latched True if Finnhub returns 403 (paid-only endpoint)
+
+
+def _adaptive_ttl_seconds(cached_df) -> int:
+    """
+    Shorter TTL when a HIGH impact event is imminent (to catch actual vs forecast).
+    Returns failure backoff TTL if cache is empty (both sources failed last time).
+    """
+    if cached_df is None or cached_df.empty:
+        return _CACHE_FAILURE_SECS  # both failed — wait 5 min before retrying
+    now = datetime.utcnow()
+    try:
+        near = cached_df[
+            (cached_df["impact"] == "HIGH") &
+            (cached_df["time"] >= now - timedelta(minutes=1)) &
+            (cached_df["time"] <= now + timedelta(minutes=_NEAR_EVENT_WINDOW_MINS))
+        ]
+        if not near.empty:
+            return _CACHE_NEAR_EVENT_SECS
+    except Exception:
+        pass
+    return CACHE_MINUTES * 60
+
+
+def _fetch_finnhub_raw() -> pd.DataFrame:
+    """
+    Fetch economic calendar from Finnhub (primary source).
+    Returns empty DataFrame if key not set, 403 (paid-only), or fetch fails.
+    Includes actual vs forecast data when available.
+    """
+    global _finnhub_403
+
+    _EMPTY = pd.DataFrame(columns=["time", "currency", "impact", "event", "forecast", "previous", "actual"])
+
+    if _finnhub_403:
+        return _EMPTY   # already confirmed 403 — don't retry
+
+    api_key = os.getenv("FINNHUB_API_KEY", "")
+    if not api_key or api_key == "your_finnhub_key_here":
+        return _EMPTY
+
+    now       = datetime.utcnow()
+    from_date = now.strftime("%Y-%m-%d")
+    to_date   = (now + timedelta(days=2)).strftime("%Y-%m-%d")
+
+    try:
+        resp = requests.get(
+            "https://finnhub.io/api/v1/calendar/economic",
+            params={"from": from_date, "to": to_date, "token": api_key},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        events = []
+        for item in data.get("economicCalendar", []):
+            try:
+                raw_time = item.get("time", "")
+                if not raw_time:
+                    continue
+                dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+                impact_map = {"high": "HIGH", "medium": "MEDIUM", "low": "LOW"}
+                impact = impact_map.get(item.get("impact", "").lower(), "")
+                if not impact:
+                    continue
+
+                events.append({
+                    "time":     dt,
+                    "currency": item.get("currency", "").upper(),
+                    "impact":   impact,
+                    "event":    item.get("event", ""),
+                    "forecast": str(item.get("estimate", "")) if item.get("estimate") is not None else "",
+                    "previous": str(item.get("prev", ""))     if item.get("prev")     is not None else "",
+                    "actual":   str(item.get("actual", ""))   if item.get("actual")   is not None else "",
+                })
+            except Exception as e:
+                logger.debug(f"Finnhub parse: {e}")
+                continue
+
+        if not events:
+            return pd.DataFrame(columns=["time", "currency", "impact", "event", "forecast", "previous", "actual"])
+
+        df = pd.DataFrame(events).sort_values("time").reset_index(drop=True)
+        logger.info(f"Finnhub: {len(df)} calendar events ✓")
+        return df
+
+    except Exception as e:
+        if "403" in str(e):
+            _finnhub_403 = True
+            logger.warning("Finnhub 403 — economic calendar is a paid feature. Switching to ForexFactory only.")
+        else:
+            logger.warning(f"Finnhub calendar failed: {e}")
+        return _EMPTY
 
 
 def _est_offset() -> int:
@@ -45,14 +146,27 @@ def fetch_forexfactory_calendar() -> pd.DataFrame:
     global _news_cache
 
     now = datetime.utcnow()
+    ttl = _adaptive_ttl_seconds(_news_cache.get("data"))
 
     if (
         _news_cache["data"] is not None
         and _news_cache["fetched_at"] is not None
-        and (now - _news_cache["fetched_at"]).total_seconds() < CACHE_MINUTES * 60
+        and (now - _news_cache["fetched_at"]).total_seconds() < ttl
     ):
         return _news_cache["data"]
 
+    # Stamp fetched_at NOW so if both sources fail,
+    # the 11 pairs don't all retry on the same scan cycle
+    _news_cache["fetched_at"] = now
+
+    # ── PRIMARY: Finnhub ───────────────────────────────────────────────────────
+    df = _fetch_finnhub_raw()
+    if not df.empty:
+        _news_cache["data"]   = df
+        _news_cache["source"] = "finnhub"
+        return df
+
+    # ── FALLBACK: ForexFactory ─────────────────────────────────────────────────
     try:
         url     = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -68,25 +182,46 @@ def fetch_forexfactory_calendar() -> pd.DataFrame:
                 date_str = item.get("date", "").strip()
                 time_str = item.get("time", "").strip()
 
-                if not date_str or not time_str:
-                    continue
-                if time_str.lower() in ["all day", "tentative", ""]:
+                if not date_str:
                     continue
 
-                # Format is ISO 8601 with timezone offset: 2026-03-23T08:45:00-04:00
-                # Strip the tz offset and treat the local time as EST/EDT, convert to UTC
+                # Skip all-day / tentative entries (no fixed time)
+                if time_str.lower() in ["all day", "tentative"]:
+                    continue
+
+                # nfs.faireconomy.media embeds full datetime in "date" field:
+                #   "2026-03-23T08:45:00-04:00"  ← ISO 8601 with tz offset
+                # Older / fallback format may be just a date with separate "time" field.
+                dt_utc  = None
                 dt_local = None
-                try:
-                    # Remove tz offset (+HH:MM or -HH:MM) at the end
-                    clean = date_str[:19]  # keep "2026-03-23T08:45:00"
-                    dt_local = datetime.strptime(clean, "%Y-%m-%dT%H:%M:%S")
-                except ValueError:
-                    pass
 
-                if dt_local is None:
+                if "T" in date_str:
+                    # Full ISO 8601 datetime — parse and convert to UTC directly
+                    try:
+                        dt_aware = datetime.fromisoformat(date_str)
+                        dt_utc   = dt_aware.astimezone(timezone.utc).replace(tzinfo=None)
+                    except Exception:
+                        # Strip tz suffix and treat as EST
+                        clean    = date_str[:19]
+                        dt_local = datetime.strptime(clean, "%Y-%m-%dT%H:%M:%S")
+                        dt_utc   = dt_local + timedelta(hours=offset)
+                else:
+                    # Plain date + separate time field (legacy format)
+                    if not time_str:
+                        continue
+                    combined = f"{date_str} {time_str}"
+                    for fmt in ("%Y-%m-%d %I:%M%p", "%Y-%m-%d %H:%M", "%b %d, %Y %I:%M%p"):
+                        try:
+                            dt_local = datetime.strptime(combined, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if dt_local is None:
+                        continue
+                    dt_utc = dt_local + timedelta(hours=offset)
+
+                if dt_utc is None:
                     continue
-
-                dt_utc = dt_local + timedelta(hours=offset)
 
                 events.append({
                     "time":     dt_utc,
@@ -95,15 +230,15 @@ def fetch_forexfactory_calendar() -> pd.DataFrame:
                     "event":    item.get("title",   ""),
                     "forecast": item.get("forecast", ""),
                     "previous": item.get("previous", ""),
+                    "actual":   str(item.get("actual", "") or ""),
                 })
 
             except Exception as parse_err:
                 logger.debug(f"Skipped event: {parse_err}")
                 continue
 
-        df = pd.DataFrame(events) if events else pd.DataFrame(
-            columns=["time", "currency", "impact", "event", "forecast", "previous"]
-        )
+        _COLS = ["time", "currency", "impact", "event", "forecast", "previous", "actual"]
+        df = pd.DataFrame(events) if events else pd.DataFrame(columns=_COLS)
 
         if not df.empty:
             df = df[df["impact"].isin(["HIGH", "MEDIUM", "LOW"])]
@@ -111,7 +246,7 @@ def fetch_forexfactory_calendar() -> pd.DataFrame:
 
         _news_cache["data"]       = df
         _news_cache["fetched_at"] = now
-        logger.info(f"Fetched {len(df)} calendar events from ForexFactory")
+        logger.info(f"Fetched {len(df)} calendar events from ForexFactory ✓")
         return df
 
     except Exception as e:
@@ -120,7 +255,7 @@ def fetch_forexfactory_calendar() -> pd.DataFrame:
         if _news_cache["data"] is not None:
             logger.info("Using stale news cache as fallback")
             return _news_cache["data"]
-        return pd.DataFrame(columns=["time", "currency", "impact", "event", "forecast", "previous"])
+        return pd.DataFrame(columns=["time", "currency", "impact", "event", "forecast", "previous", "actual"])
 
 
 def get_upcoming_events(pair: str, minutes_ahead: int = 120) -> list:
@@ -414,6 +549,8 @@ def get_upcoming_news(hours_ahead: int = 6) -> list:
             "time":      row["time"].strftime("%H:%M UTC"),
             "mins_away": mins_away,
             "past":      mins_away < 0,
+            "forecast":  row.get("forecast", "") if hasattr(row, "get") else "",
+            "actual":    row.get("actual",   "") if hasattr(row, "get") else "",
         })
 
     return events
