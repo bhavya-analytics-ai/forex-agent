@@ -122,7 +122,7 @@ def _calculate_levels(pair: str, direction: str, entry: float) -> dict:
 def log_manual_trade(pair: str, direction: str, entry_price: float,
                      setup_type: str = "manual", notes: str = "") -> str:
     """
-    Log a manual trade. Calculates SL/TP, writes to manual_trades.csv,
+    Log a manual trade. Calculates SL/TP, writes to SQLite + CSV backup,
     starts background monitor for TP/SL hit.
     Returns signal_id.
     """
@@ -153,6 +153,14 @@ def log_manual_trade(pair: str, direction: str, entry_price: float,
         "notes":         notes,
     }
 
+    # Primary: SQLite
+    try:
+        from db.database import insert_manual_trade
+        insert_manual_trade(row)
+    except Exception as e:
+        logger.warning(f"SQLite write failed for {signal_id}: {e}")
+
+    # Backup: CSV
     path = _get_log_path()
     with open(path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=_MANUAL_COLUMNS)
@@ -280,6 +288,13 @@ def _close_trade(signal_id, pair, direction, entry, sl, tp1, pip, result):
         df.loc[mask, "post_mortem"]  = note
         df.to_csv(path, index=False)
 
+        # SQLite
+        try:
+            from db.database import update_manual_trade_outcome
+            update_manual_trade_outcome(signal_id, result, pips, note)
+        except Exception as e:
+            logger.warning(f"SQLite outcome update failed for {signal_id}: {e}")
+
         logger.info(f"Manual trade closed: {signal_id} → {result} ({pips:+.1f} pips)")
         logger.info(f"Post-mortem: {note}")
 
@@ -345,6 +360,13 @@ def close_trade_manually(signal_id: str, outcome: str, pips: float, notes: str =
         df.loc[mask, "post_mortem"]  = str(note)
         df.to_csv(path, index=False)
 
+        # SQLite
+        try:
+            from db.database import update_manual_trade_outcome
+            update_manual_trade_outcome(signal_id, outcome, final_pips, note)
+        except Exception as e:
+            logger.warning(f"SQLite manual close failed for {signal_id}: {e}")
+
         # Stop the monitor thread
         with _monitor_lock:
             _active_monitors.pop(signal_id, None)
@@ -355,6 +377,68 @@ def close_trade_manually(signal_id: str, outcome: str, pips: float, notes: str =
     except Exception as e:
         logger.warning(f"close_trade_manually error: {e}", exc_info=True)
         return False, str(e) or "Unknown error in close_trade_manually"
+
+
+def update_trade_levels(signal_id: str, sl_price: float, tp1_price: float, reason: str = "") -> tuple:
+    """
+    Update SL and TP1 for an open manual trade.
+    Rewrites the CSV row, recalculates pips/RR, restarts the monitor with new levels.
+    Returns (ok: bool, error: str)
+    """
+    import pandas as pd
+    from core.fetcher import pip_size
+
+    path = _get_log_path()
+    if not __import__("os").path.exists(path):
+        return False, "manual_trades.csv not found"
+
+    try:
+        df   = pd.read_csv(path, dtype=str)
+        mask = df["signal_id"] == signal_id
+        if not mask.any():
+            return False, f"Signal {signal_id} not found"
+
+        row       = df[mask].iloc[0]
+        pair      = str(row["pair"])
+        direction = str(row["direction"])
+        entry     = float(row["entry_price"]) if row["entry_price"] not in ("", "nan") else 0
+
+        pip  = pip_size(pair)
+        sl_pips  = round(abs(sl_price  - entry) / pip, 1)
+        tp1_pips = round(abs(tp1_price - entry) / pip, 1)
+        rr1      = f"1:{round(tp1_pips / sl_pips, 1)}" if sl_pips > 0 else "1:2"
+
+        # Grab old levels before overwriting (for level_edits log)
+        old_sl  = float(row["sl_price"])  if str(row.get("sl_price",  "")) not in ("", "nan") else 0
+        old_tp1 = float(row["tp1_price"]) if str(row.get("tp1_price", "")) not in ("", "nan") else 0
+
+        df.loc[mask, "sl_price"]  = str(sl_price)
+        df.loc[mask, "tp1_price"] = str(tp1_price)
+        df.loc[mask, "sl_pips"]   = str(sl_pips)
+        df.loc[mask, "tp1_pips"]  = str(tp1_pips)
+        df.loc[mask, "rr1"]       = rr1
+        df.to_csv(path, index=False)
+
+        # SQLite: update levels + log the edit
+        try:
+            from db.database import update_manual_trade_levels, insert_level_edit
+            update_manual_trade_levels(signal_id, sl_price, tp1_price, sl_pips, tp1_pips, rr1)
+            insert_level_edit(signal_id, old_sl, sl_price, old_tp1, tp1_price, reason)
+        except Exception as e:
+            logger.warning(f"SQLite level update failed for {signal_id}: {e}")
+
+        # Stop old monitor, restart with new levels
+        with _monitor_lock:
+            _active_monitors.pop(signal_id, None)
+
+        _start_monitor(signal_id, pair, direction, entry, sl_price, tp1_price, sl_pips)
+
+        logger.info(f"Levels updated: {signal_id} SL={sl_price} TP1={tp1_price} reason='{reason}' | monitor restarted")
+        return True, ""
+
+    except Exception as e:
+        logger.warning(f"update_trade_levels error: {e}", exc_info=True)
+        return False, str(e)
 
 
 def get_active_monitors() -> list:

@@ -153,6 +153,13 @@ def log_signal(scored_signal: dict, confluence: dict, alerted: bool) -> str:
         writer = csv.DictWriter(f, fieldnames=COLUMNS)
         writer.writerow(row)
 
+    # SQLite (primary store going forward)
+    try:
+        from db.database import insert_agent_signal
+        insert_agent_signal({**row, "outcome_pips": None})
+    except Exception as e:
+        logger.warning(f"SQLite agent signal write failed: {e}")
+
     _last_logged[pair] = now
     logger.info(f"Logged signal {signal_id} grade={row['grade']} alerted={alerted}")
     return signal_id
@@ -198,6 +205,11 @@ def mark_taken_by_id(signal_id: str) -> bool:
 
     df.loc[mask, "taken"] = True
     df.to_csv(LOG_PATH, index=False)
+    try:
+        from db.database import update_agent_signal_taken
+        update_agent_signal_taken(signal_id)
+    except Exception as e:
+        logger.warning(f"SQLite mark_taken_by_id failed: {e}")
     logger.info(f"Marked {signal_id} as taken")
     return True
 
@@ -220,6 +232,11 @@ def update_outcome(signal_id: str, outcome: str, pips: float, notes: str = ""):
     df.loc[mask, "outcome_pips"] = pips
     df.loc[mask, "notes"]        = notes
     df.to_csv(LOG_PATH, index=False)
+    try:
+        from db.database import update_agent_signal_outcome
+        update_agent_signal_outcome(signal_id, outcome, pips, notes)
+    except Exception as e:
+        logger.warning(f"SQLite update_outcome failed: {e}")
     logger.info(f"Updated {signal_id}: {outcome} ({pips} pips)")
 
 

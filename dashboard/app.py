@@ -211,7 +211,16 @@ def api_mode_toggle():
 
 @app.route("/api/recent_signals")
 def api_recent_signals():
-    """Returns last 20 ENTER_NOW signals from CSV for the performance panel."""
+    """Returns last 20 ENTER_NOW signals — SQLite first, CSV fallback."""
+    try:
+        from db.database import get_recent_agent_signals
+        rows = get_recent_agent_signals(limit=20)
+        if rows:
+            return jsonify({"signals": _sanitize(rows)})
+    except Exception as e:
+        logger.warning(f"SQLite recent_signals failed, falling back to CSV: {e}")
+
+    # CSV fallback
     try:
         import pandas as pd
         from config import LOG_CONFIG
@@ -228,7 +237,7 @@ def api_recent_signals():
         recent = df[cols].tail(20).iloc[::-1].fillna("").to_dict("records")
         return jsonify({"signals": recent})
     except Exception as e:
-        logger.error(f"recent_signals error: {e}")
+        logger.error(f"recent_signals CSV fallback error: {e}")
         return jsonify({"signals": [], "error": str(e)}), 500
 
 
@@ -275,10 +284,13 @@ def api_mark_outcome():
 
 @app.route("/api/performance")
 def api_performance():
-    """
-    Returns performance summary from signals.csv for the dashboard panel.
-    Uses existing get_performance_summary() — no new logic here.
-    """
+    """Returns performance summary — SQLite first, CSV fallback."""
+    try:
+        from db.database import get_performance_summary_db
+        summary = get_performance_summary_db()
+        return jsonify(_sanitize(summary))
+    except Exception as e:
+        logger.warning(f"SQLite performance failed, falling back to CSV: {e}")
     try:
         from alerts.logger import get_performance_summary
         summary = get_performance_summary()
@@ -368,9 +380,46 @@ def api_close_manual_trade():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/update_trade_levels", methods=["POST"])
+def api_update_trade_levels():
+    """
+    Update SL and TP1 for an open manual trade mid-trade.
+    Body: { "signal_id": "...", "sl_price": 1.2345, "tp1_price": 1.2500 }
+    Restarts the monitor thread with the new levels.
+    """
+    try:
+        from ml.manual_trade_logger import update_trade_levels
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        sl_price  = body.get("sl_price")
+        tp1_price = body.get("tp1_price")
+        reason    = body.get("reason", "").strip()
+
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        if sl_price is None or tp1_price is None:
+            return jsonify({"ok": False, "error": "sl_price and tp1_price required"}), 400
+
+        ok, err = update_trade_levels(signal_id, float(sl_price), float(tp1_price), reason)
+        if ok:
+            return jsonify({"ok": True, "signal_id": signal_id, "sl_price": sl_price, "tp1_price": tp1_price})
+        return jsonify({"ok": False, "error": err}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/recent_manual_trades")
 def api_recent_manual_trades():
-    """Returns last 20 manual trades from manual_trades.csv."""
+    """Returns last 20 manual trades — SQLite first, CSV fallback."""
+    try:
+        from db.database import get_recent_manual_trades
+        rows = get_recent_manual_trades(limit=20)
+        if rows:
+            return jsonify({"trades": _sanitize(rows)})
+    except Exception as e:
+        logger.warning(f"SQLite recent_manual_trades failed, falling back to CSV: {e}")
+
+    # CSV fallback
     try:
         import pandas as pd
         import os
@@ -395,6 +444,13 @@ def start_dashboard():
     host = DASHBOARD_CONFIG.get("host", "127.0.0.1")
     port = DASHBOARD_CONFIG.get("port", 5000)
     logger.info(f"Dashboard at http://{host}:{port}")
+
+    # Init SQLite on startup
+    try:
+        from db.database import init_db
+        init_db()
+    except Exception as e:
+        logger.warning(f"SQLite init failed: {e}")
 
     # Resume monitors for any open manual trades from last session
     try:

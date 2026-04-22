@@ -1050,6 +1050,41 @@
   </div>
 </div>
 
+<!-- EDIT SL/TP MODAL -->
+<div class="modal-overlay" id="edit-levels-modal">
+  <div class="modal-box" style="width:340px;">
+    <div class="modal-title">EDIT LEVELS — <span id="el-pair-label" style="color:var(--blue-bright)"></span></div>
+    <div class="modal-field">
+      <label class="modal-label">STOP LOSS <span style="font-weight:400;color:var(--red);font-size:9px;">price level</span></label>
+      <input class="modal-input" id="el-sl" type="number" step="0.00001" placeholder="e.g. 1.2345" />
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">TAKE PROFIT 1 <span style="font-weight:400;color:var(--green);font-size:9px;">price level</span></label>
+      <input class="modal-input" id="el-tp1" type="number" step="0.00001" placeholder="e.g. 1.2500" />
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">REASON <span style="font-weight:400;color:var(--text-muted);font-size:9px;">logged for model training</span></label>
+      <select class="modal-select" id="el-reason">
+        <option value="">— select reason —</option>
+        <option value="moved to breakeven">Moved to breakeven</option>
+        <option value="tightened at resistance">Tightened at resistance/support</option>
+        <option value="widened for volatility">Widened for volatility</option>
+        <option value="news event nearby">News event nearby</option>
+        <option value="manual adjustment">Manual adjustment</option>
+        <option value="corrected entry error">Corrected entry error</option>
+      </select>
+    </div>
+    <div style="margin-bottom:10px;">
+      <button onclick="resetToAutoLevels()" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:var(--text-muted);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:10px;font-family:'JetBrains Mono',monospace;">↺ Reset to auto levels</button>
+    </div>
+    <div class="modal-feedback" id="el-feedback"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeEditLevelsModal()">Cancel</button>
+      <button class="modal-submit" onclick="submitEditLevels()">UPDATE LEVELS</button>
+    </div>
+  </div>
+</div>
+
 <!-- NEWS SNIPER BANNER (hidden by default) -->
 <div id="news-sniper-banner" style="display:none; background:#1a0a00; border-bottom:2px solid #ff4444; padding:10px 28px; display:none; align-items:center; justify-content:space-between;">
   <div style="display:flex; align-items:center; gap:12px;">
@@ -1936,6 +1971,103 @@ async function submitCloseTrade() {
   }
 }
 
+// ── EDIT SL/TP MODAL ──────────────────────────────────────────────────────────
+
+let _editSignalId   = null;
+let _editPair       = null;
+let _editDirection  = null;
+let _editEntryPrice = null;
+
+function openEditLevelsModal(signalId, pair, currentSl, currentTp1, direction, entryPrice) {
+  _editSignalId   = signalId;
+  _editPair       = pair;
+  _editDirection  = direction  || null;
+  _editEntryPrice = entryPrice || null;
+  const displayPair = (pair || "").replace("_", "/");
+  document.getElementById("el-pair-label").textContent = displayPair;
+  document.getElementById("el-sl").value   = currentSl  || "";
+  document.getElementById("el-tp1").value  = currentTp1 || "";
+  document.getElementById("el-reason").value = "";
+  document.getElementById("el-feedback").textContent = "";
+  document.getElementById("el-feedback").className   = "modal-feedback";
+  document.getElementById("edit-levels-modal").classList.add("open");
+}
+
+async function resetToAutoLevels() {
+  const fb = document.getElementById("el-feedback");
+  if (!_editPair || !_editDirection || !_editEntryPrice) {
+    fb.textContent = "Cannot auto-calculate — missing entry data.";
+    fb.className   = "modal-feedback err";
+    return;
+  }
+  // Use pip sizes to calculate default 20-pip SL/TP
+  const pip   = _pipSize(_editPair);
+  const sl20  = 20 * pip;
+  const tp140 = 40 * pip;
+  const isBull = _editDirection === "bullish";
+  const sl  = isBull ? (_editEntryPrice - sl20)  : (_editEntryPrice + sl20);
+  const tp1 = isBull ? (_editEntryPrice + tp140) : (_editEntryPrice - tp140);
+  document.getElementById("el-sl").value  = Math.round(sl  * 100000) / 100000;
+  document.getElementById("el-tp1").value = Math.round(tp1 * 100000) / 100000;
+  document.getElementById("el-reason").value = "corrected entry error";
+  fb.textContent = "Auto levels filled — review then hit UPDATE.";
+  fb.className   = "modal-feedback ok";
+}
+
+function closeEditLevelsModal() {
+  document.getElementById("edit-levels-modal").classList.remove("open");
+  _editSignalId = null;
+}
+
+document.getElementById("edit-levels-modal").addEventListener("click", function(e) {
+  if (e.target === this) closeEditLevelsModal();
+});
+
+async function submitEditLevels() {
+  const sl     = parseFloat(document.getElementById("el-sl").value);
+  const tp1    = parseFloat(document.getElementById("el-tp1").value);
+  const reason = document.getElementById("el-reason").value;
+  const fb     = document.getElementById("el-feedback");
+
+  if (!sl || isNaN(sl)) {
+    fb.textContent = "Enter a valid SL price.";
+    fb.className   = "modal-feedback err";
+    return;
+  }
+  if (!tp1 || isNaN(tp1)) {
+    fb.textContent = "Enter a valid TP1 price.";
+    fb.className   = "modal-feedback err";
+    return;
+  }
+
+  fb.textContent = "Updating...";
+  fb.className   = "modal-feedback";
+
+  try {
+    const resp = await fetch("/api/update_trade_levels", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ signal_id: _editSignalId, sl_price: sl, tp1_price: tp1, reason }),
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      fb.textContent = `✓ Updated — SL: ${sl} | TP1: ${tp1}`;
+      fb.className   = "modal-feedback ok";
+      setTimeout(() => {
+        closeEditLevelsModal();
+        fetchManualTrades();
+      }, 1200);
+    } else {
+      fb.textContent = "Error: " + (data.error || "unknown");
+      fb.className   = "modal-feedback err";
+    }
+  } catch(e) {
+    fb.textContent = "Failed to connect.";
+    fb.className   = "modal-feedback err";
+  }
+}
+
 // ── PERF PANEL TABS ───────────────────────────────────────────────────────────
 
 let _currentPerfTab = "agent";
@@ -1984,6 +2116,8 @@ function renderManualTrades(trades) {
     const statusHtml = isOpen
       ? `<span style="display:flex;align-items:center;gap:6px;">
            <span style="color:var(--yellow);font-size:10px;font-family:'JetBrains Mono',monospace;">● MONITORING</span>
+           <button class="outcome-btn" style="background:rgba(0,180,255,.08);border-color:rgba(0,180,255,.3);color:var(--blue-bright);padding:2px 7px;"
+             onclick="openEditLevelsModal('${t.signal_id}','${t.pair||''}',${t.sl_price||0},${t.tp1_price||0},'${t.direction||''}',${t.entry_price||0})">Edit SL/TP</button>
            <button class="outcome-btn" style="background:rgba(255,68,68,.08);border-color:rgba(255,68,68,.3);color:var(--red);padding:2px 7px;"
              onclick="openCloseModal('${t.signal_id}','${t.pair||''}','${t.direction||''}',${t.entry_price||0})">Close ✕</button>
          </span>`
