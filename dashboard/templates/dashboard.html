@@ -1915,6 +1915,44 @@ async function submitManualTrade() {
   }
 }
 
+// ── INLINE SL/TP SAVE ─────────────────────────────────────────────────────────
+
+async function saveInlinelevels(signalId, pair) {
+  const sl     = parseFloat(document.getElementById(`isl-${signalId}`).value);
+  const tp1    = parseFloat(document.getElementById(`itp-${signalId}`).value);
+  const reason = document.getElementById(`ireason-${signalId}`).value;
+  const fb     = document.getElementById(`ilfb-${signalId}`);
+
+  if (!sl || isNaN(sl) || !tp1 || isNaN(tp1)) {
+    fb.textContent = "enter both";
+    fb.style.color = "var(--red)";
+    return;
+  }
+
+  fb.textContent = "saving...";
+  fb.style.color = "var(--text-muted)";
+
+  try {
+    const resp = await fetch("/api/update_trade_levels", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ signal_id: signalId, sl_price: sl, tp1_price: tp1, reason }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      fb.textContent = "✓ saved";
+      fb.style.color = "var(--green)";
+      setTimeout(() => { fb.textContent = ""; }, 2000);
+    } else {
+      fb.textContent = data.error || "error";
+      fb.style.color = "var(--red)";
+    }
+  } catch(e) {
+    fb.textContent = "failed";
+    fb.style.color = "var(--red)";
+  }
+}
+
 // ── CLOSE TRADE MODAL ─────────────────────────────────────────────────────────
 
 let _closeSignalId = null;
@@ -2227,14 +2265,42 @@ function renderManualTrades(trades) {
 
     const isOpen = !t.outcome || t.outcome === "";
     const statusHtml = isOpen
-      ? `<span style="display:flex;align-items:center;gap:6px;">
+      ? `<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
            <span style="color:var(--yellow);font-size:10px;font-family:'JetBrains Mono',monospace;">● MONITORING</span>
-           <button class="outcome-btn" style="background:rgba(0,180,255,.08);border-color:rgba(0,180,255,.3);color:var(--blue-bright);padding:2px 7px;"
-             onclick="openEditLevelsModal('${t.signal_id}','${t.pair||''}',${t.sl_price||0},${t.tp1_price||0},'${t.direction||''}',${t.entry_price||0})">Edit SL/TP</button>
            <button class="outcome-btn" style="background:rgba(255,68,68,.08);border-color:rgba(255,68,68,.3);color:var(--red);padding:2px 7px;"
              onclick="openCloseModal('${t.signal_id}','${t.pair||''}','${t.direction||''}',${t.entry_price||0})">Close ✕</button>
          </span>`
       : `<span class="outcome-marked ${outCls}">${outTxt}</span>`;
+
+    // Inline SL/TP edit for open trades — always visible, no modal needed
+    const inlineEditHtml = isOpen ? `
+      <div style="display:flex;align-items:center;gap:6px;margin-top:5px;padding:5px 8px;background:rgba(255,255,255,.02);border-radius:4px;border:1px solid rgba(255,255,255,.05);">
+        <span style="font-size:9px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;white-space:nowrap;">SL/TP:</span>
+        <input type="number" step="0.00001" id="isl-${t.signal_id}" value="${t.sl_price||''}"
+          style="width:90px;background:rgba(255,68,68,.06);border:1px solid rgba(255,68,68,.25);color:var(--red);
+                 font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 5px;border-radius:3px;outline:none;"
+          placeholder="SL price" />
+        <input type="number" step="0.00001" id="itp-${t.signal_id}" value="${t.tp1_price||''}"
+          style="width:90px;background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.25);color:var(--green);
+                 font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 5px;border-radius:3px;outline:none;"
+          placeholder="TP1 price" />
+        <select id="ireason-${t.signal_id}"
+          style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);color:var(--text-muted);
+                 font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 4px;border-radius:3px;outline:none;">
+          <option value="">reason</option>
+          <option value="moved to breakeven">breakeven</option>
+          <option value="tightened at resistance">tightened</option>
+          <option value="widened for volatility">widened</option>
+          <option value="news event nearby">news nearby</option>
+          <option value="manual adjustment">manual</option>
+        </select>
+        <button onclick="saveInlinelevels('${t.signal_id}','${t.pair||''}')"
+          style="background:rgba(77,159,255,.12);border:1px solid rgba(77,159,255,.3);color:var(--blue-bright);
+                 font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 8px;border-radius:3px;cursor:pointer;white-space:nowrap;">
+          Save
+        </button>
+        <span id="ilfb-${t.signal_id}" style="font-size:9px;color:var(--green);font-family:'JetBrains Mono',monospace;"></span>
+      </div>` : "";
 
     const livePx = (window._livePrices||{})[t.pair];
     const livePxHtml = livePx
@@ -2257,6 +2323,7 @@ function renderManualTrades(trades) {
           </span>
           ${statusHtml}
         </div>
+        ${inlineEditHtml}
         ${postMortem}
       </div>`;
   }).join("");
