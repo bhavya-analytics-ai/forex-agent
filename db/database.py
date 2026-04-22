@@ -126,6 +126,19 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_level_edits_signal_id   ON level_edits(signal_id);
         """)
         conn.commit()
+    # Migrations — add columns if they don't exist yet
+    for col, typedef in [
+        ("user_sl",   "REAL"),
+        ("user_tp1",  "REAL"),
+        ("actual_sl", "REAL"),
+        ("actual_tp1","REAL"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE agent_signals ADD COLUMN {col} {typedef}")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
     logger.info(f"SQLite DB ready at {_db_path()}")
 
 
@@ -188,7 +201,7 @@ def get_open_manual_trades() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_recent_manual_trades(limit: int = 20) -> list[dict]:
+def get_recent_manual_trades(limit: int = 100) -> list[dict]:
     conn = _get_conn()
     rows = conn.execute(
         "SELECT * FROM manual_trades ORDER BY timestamp_utc DESC LIMIT ?", (limit,)
@@ -253,6 +266,31 @@ def update_agent_signal_taken(signal_id: str):
     conn = _get_conn()
     with _write_lock:
         conn.execute("UPDATE agent_signals SET taken=1 WHERE signal_id=?", (signal_id,))
+        conn.commit()
+
+
+def update_agent_signal_took_it(signal_id: str, user_sl: float | None, user_tp1: float | None):
+    """
+    Mark signal as taken + save user's actual SL/TP.
+    actual_sl/tp1 = user's levels if provided, else falls back to scanner levels.
+    """
+    conn = _get_conn()
+    # Fetch scanner levels as fallback
+    row = conn.execute(
+        "SELECT sl_price, tp1_price FROM agent_signals WHERE signal_id=?", (signal_id,)
+    ).fetchone()
+    scanner_sl  = row["sl_price"]  if row else None
+    scanner_tp1 = row["tp1_price"] if row else None
+
+    actual_sl  = user_sl  if user_sl  is not None else scanner_sl
+    actual_tp1 = user_tp1 if user_tp1 is not None else scanner_tp1
+
+    with _write_lock:
+        conn.execute("""
+            UPDATE agent_signals
+            SET taken=1, user_sl=?, user_tp1=?, actual_sl=?, actual_tp1=?
+            WHERE signal_id=?
+        """, (user_sl, user_tp1, actual_sl, actual_tp1, signal_id))
         conn.commit()
 
 

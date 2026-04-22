@@ -243,15 +243,32 @@ def api_recent_signals():
 
 @app.route("/api/mark_taken", methods=["POST"])
 def api_mark_taken():
-    """Mark a signal as taken (you actually entered this trade)."""
+    """
+    Mark a signal as taken. Optionally saves user's actual SL/TP.
+    Body: { "signal_id": "...", "user_sl": 1.2345, "user_tp1": 1.2600 }
+    user_sl/tp1 are optional — if omitted, actual levels fall back to scanner levels.
+    """
     try:
         from alerts.logger import mark_taken_by_id
+        from db.database import update_agent_signal_took_it
         body      = request.get_json(silent=True) or {}
         signal_id = body.get("signal_id", "").strip()
+        user_sl   = body.get("user_sl")
+        user_tp1  = body.get("user_tp1")
+
         if not signal_id:
             return jsonify({"ok": False, "error": "signal_id required"}), 400
-        ok = mark_taken_by_id(signal_id)
-        return jsonify({"ok": ok, "signal_id": signal_id})
+
+        # CSV mark
+        mark_taken_by_id(signal_id)
+
+        # SQLite: save user levels + set actual levels
+        update_agent_signal_took_it(
+            signal_id,
+            float(user_sl)  if user_sl  not in (None, "") else None,
+            float(user_tp1) if user_tp1 not in (None, "") else None,
+        )
+        return jsonify({"ok": True, "signal_id": signal_id})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -413,7 +430,7 @@ def api_recent_manual_trades():
     """Returns last 20 manual trades — SQLite first, CSV fallback."""
     try:
         from db.database import get_recent_manual_trades
-        rows = get_recent_manual_trades(limit=20)
+        rows = get_recent_manual_trades(limit=100)
         if rows:
             return jsonify({"trades": _sanitize(rows)})
     except Exception as e:
@@ -434,7 +451,7 @@ def api_recent_manual_trades():
         for c in cols:
             if c not in df.columns:
                 df[c] = ""
-        trades = df[cols].tail(20).iloc[::-1].fillna("").to_dict("records")
+        trades = df[cols].tail(100).iloc[::-1].fillna("").to_dict("records")
         return jsonify({"trades": trades})
     except Exception as e:
         return jsonify({"trades": [], "error": str(e)}), 500
