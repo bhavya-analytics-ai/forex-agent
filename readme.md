@@ -6,16 +6,13 @@
 ## GIT LOG
 
 ```
+c4e32be feat: SQLite migration + SL/TP edit reason tracking
+c22d1f3 feat: phase 4 learning engine + close trade fix
+aa431f6 docs: replace fake changelog with actual git log --oneline
 901fbb2 merge: v6 worktree — Bayesian scorer, news sniper, strategy silos
 283f711 feat: v6 — Bayesian scorer, news sniper mode, strategy silos
 fafd657 feat: v5 execution layer — decision layer, gold mode, early entry
 c4b30d3 yeah
-be047a1 remove .DS_Store
-431b8ae Inside local
-20f7196 24 Mar 12.26pm push
-244b7e0 Latest update mar 23 8.48
-26e4146 updated run.md
-13d6262 Gold nd jpy breakout not good
 ```
 
 **Status: Paper trading. Core logic validated. Do NOT trade scanner-only signals — always validate against your chart first.**
@@ -435,16 +432,41 @@ Total running cost: **$0/month** (OANDA practice account, no paid APIs).
 - ✅ Dashboard: + LOG TRADE button — modal with auto-filled entry price, pair/direction, setup type, notes
 - ✅ Dashboard: WIN/LOSS buttons — manually mark outcome on any ENTER_NOW signal
 - ✅ Dashboard: TOOK IT button — marks which agent signals you actually traded
-- ✅ Dashboard: Close ✕ button — manually close open manual trades, auto-calculates pips from live price
+- ✅ Dashboard: Close ✕ button — manually close open manual trades, fetches live OANDA price, auto-calculates pips
+
+### Phase 5 — SQLite + SL/TP Edit Tracking
+- ✅ SQLite migration — `db/database.py`, all new data written to `logs/trades.db`
+- ✅ Three tables: `manual_trades`, `agent_signals`, `level_edits`
+- ✅ Dual-write — SQLite primary, CSV backup. Reads: SQLite first, CSV fallback. Old data never lost.
+- ✅ WAL mode — concurrent reads + writes, no corruption risk from monitor threads
+- ✅ `level_edits` table — logs every SL/TP change: old levels, new levels, reason, timestamp
+- ✅ Dashboard: Edit SL/TP button — on every open/monitoring trade row
+- ✅ Edit modal: reason dropdown (moved to breakeven / tightened at resistance / widened for volatility / news nearby / manual / corrected error)
+- ✅ Edit modal: Reset to auto button — recalculates SL/TP from entry price back to default pip logic
+- ✅ Pips at close always calculated from actual SL/TP in row — model trains on what you actually used, not the original auto levels
+- ✅ Monitor thread restarts automatically with new levels on every edit
+
+---
+
+## FILE STRUCTURE (additions)
+
+```
+db/
+├── __init__.py
+└── database.py     # SQLite core — init_db(), all read/write helpers
+
+logs/
+└── trades.db       # SQLite database (manual_trades + agent_signals + level_edits)
+```
 
 ---
 
 ## WHAT'S NEXT
 
-1. **Grade filter** — block Grade C signals from ENTER_NOW even if ICT sequence completes (threshold: A/A+ only, or include B — TBD)
-2. **Modal SL/TP** — LOG TRADE modal: pull agent's real ICT levels when source is scanner signal, user-defined SL when own analysis
-3. **50 labeled outcomes** — Bayesian status flips from EST → LIVE, priors replaced with real trade data
-4. **Phase 5 — Retest entries** — detect when price comes back to an already-confirmed OB after ENTER_NOW was missed
+1. **Journal panel** — free-form notes per trade or session, tagged (pattern/mistake/observation/rule), stored in SQLite
+2. **Grade filter** — block Grade C signals from ENTER_NOW even if ICT sequence completes (threshold: A/A+ only, or include B — TBD)
+3. **Modal SL/TP** — LOG TRADE modal: pull agent's real ICT levels when source is scanner signal, user-defined SL when own analysis
+4. **50 labeled outcomes** — Bayesian status flips from EST → LIVE, priors replaced with real trade data
 5. **Phase 6 — Dynamic risk engine** — lot sizing based on account balance + volatility, paper trading sandbox
 
 ---
