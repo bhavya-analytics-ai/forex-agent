@@ -1686,6 +1686,47 @@ async function toggleMode() {
   }
 }
 
+// ── NY TIME HELPER ────────────────────────────────────────────────────────────
+
+function utcToNY(utcStr) {
+  if (!utcStr || utcStr === "—") return "—";
+  try {
+    const dt = new Date(utcStr.trim().replace(" ", "T") + "Z");
+    if (isNaN(dt)) return "—";
+    const date = dt.toLocaleDateString("en-US", {
+      timeZone: "America/New_York",
+      month: "short", day: "numeric"
+    });
+    const time = dt.toLocaleTimeString("en-US", {
+      timeZone: "America/New_York",
+      hour: "numeric", minute: "2-digit", hour12: true
+    });
+    return `${date}, ${time}`;
+  } catch(e) { return "—"; }
+}
+
+function utcToNYDate(utcStr) {
+  // Returns just "Apr 22" part
+  if (!utcStr) return "—";
+  try {
+    const dt = new Date(utcStr.trim().replace(" ", "T") + "Z");
+    return dt.toLocaleDateString("en-US", {
+      timeZone: "America/New_York",
+      month: "short", day: "numeric"
+    });
+  } catch(e) { return "—"; }
+}
+
+function isToday_NY(utcStr) {
+  if (!utcStr) return false;
+  try {
+    const dt  = new Date(utcStr.trim().replace(" ", "T") + "Z");
+    const now = new Date();
+    const opts = { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" };
+    return dt.toLocaleDateString("en-US", opts) === now.toLocaleDateString("en-US", opts);
+  } catch(e) { return false; }
+}
+
 function updateClock() {
   const now = new Date();
   const pad = n => String(n).padStart(2,"0");
@@ -1726,8 +1767,7 @@ function renderPerformance(perf, recentSignals) {
   }
 
   // Count today's signals from recent list
-  const todayStr = new Date().toISOString().slice(0,10);
-  const todayCount = recentSignals.filter(s => (s.timestamp_utc||"").startsWith(todayStr)).length;
+  const todayCount = recentSignals.filter(s => isToday_NY(s.timestamp_utc||"")).length;
 
   document.getElementById("perf-today").textContent   = todayCount;
   document.getElementById("perf-total").textContent   = perf.completed || 0;
@@ -1785,7 +1825,7 @@ function renderPerformance(perf, recentSignals) {
     const outCls = s.outcome === "WIN"  ? "perf-log-outcome-win"
                  : s.outcome === "LOSS" ? "perf-log-outcome-loss" : "perf-log-outcome-none";
     const outTxt = s.outcome || "—";
-    const time   = (s.timestamp_utc||"").slice(11,16) || "—";
+    const time   = utcToNY(s.timestamp_utc);
 
     const isTaken = s.taken === true || s.taken === "True" || s.taken === "true" || s.taken === 1;
     const userLevels = (s.user_sl || s.user_tp1)
@@ -1803,9 +1843,8 @@ function renderPerformance(perf, recentSignals) {
          </span>`
       : `<span class="outcome-marked ${outCls}">${outTxt}</span>`;
 
-    const livePrice = (window._livePrices||{})[s.pair];
-    const livePriceHtml = livePrice
-      ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);">@ <b style="color:var(--text-primary)">${livePrice}</b></span>`
+    const livePriceHtml = s.entry_price
+      ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);">@ <b style="color:var(--text-primary)">${s.entry_price}</b></span>`
       : `<span style="font-size:10px;color:var(--text-muted);">—</span>`;
 
     // Inline SL/TP for taken agent signals
@@ -1834,7 +1873,7 @@ function renderPerformance(perf, recentSignals) {
     return `
       <div style="margin-bottom:4px;">
         <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 60px 60px 1fr 80px auto auto auto;">
-          <span class="perf-log-time">${(s.timestamp_utc||"").slice(0,10)} ${time}</span>
+          <span class="perf-log-time">${time}</span>
           <span class="perf-log-pair">${(s.pair||"").replace("_","/")}</span>
           <span class="${dirCls}">${dirSym} ${(s.direction||"").slice(0,4).toUpperCase()}</span>
           <span class="perf-log-grade">${s.grade||"—"}</span>
@@ -2378,7 +2417,7 @@ function renderManualTrades(trades) {
     const outCls  = t.outcome === "WIN"  ? "perf-log-outcome-win"
                   : t.outcome === "LOSS" ? "perf-log-outcome-loss" : "perf-log-outcome-none";
     const outTxt  = t.outcome || "watching...";
-    const time    = (t.timestamp_utc || "").slice(11, 16) || "—";
+    const time    = utcToNY(t.timestamp_utc);
     const postMortem = t.post_mortem
       ? `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;padding:4px 8px;
                      background:rgba(255,255,255,.02);border-radius:3px;font-family:'JetBrains Mono',monospace;">
@@ -2425,13 +2464,13 @@ function renderManualTrades(trades) {
 
     const livePx = (window._livePrices||{})[t.pair];
     const livePxHtml = livePx
-      ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);">Now: <b style="color:var(--text-primary)">${livePx}</b></span>`
+      ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--blue-bright);">Now: <b>${livePx}</b></span>`
       : "";
 
     return `
       <div style="margin-bottom:6px;">
         <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 1fr auto auto;">
-          <span class="perf-log-time">${(t.timestamp_utc||"").slice(0,10)} ${time}</span>
+          <span class="perf-log-time">${time}</span>
           <span class="perf-log-pair">${(t.pair||"").replace("_","/")}</span>
           <span class="${dirCls}">${dirSym} ${(t.direction||"").slice(0,4).toUpperCase()}</span>
           <span style="color:var(--text-muted);font-size:10px;">

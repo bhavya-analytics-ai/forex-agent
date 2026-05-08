@@ -6,13 +6,12 @@
 ## GIT LOG
 
 ```
+dd2fd2a feat: notes on all modals + agent inline SL/TP + note button on every row
+d5c9760 fix: migrate CSV trades to SQLite + inline SL/TP edit on open trades
+606c3f1 feat: TOOK IT modal with custom SL/TP + live price column + full trade history
+ee58f18 docs: update readme with phase 5 SQLite + SL/TP tracking
 c4e32be feat: SQLite migration + SL/TP edit reason tracking
 c22d1f3 feat: phase 4 learning engine + close trade fix
-aa431f6 docs: replace fake changelog with actual git log --oneline
-901fbb2 merge: v6 worktree — Bayesian scorer, news sniper, strategy silos
-283f711 feat: v6 — Bayesian scorer, news sniper mode, strategy silos
-fafd657 feat: v5 execution layer — decision layer, gold mode, early entry
-c4b30d3 yeah
 ```
 
 **Status: Paper trading. Core logic validated. Do NOT trade scanner-only signals — always validate against your chart first.**
@@ -440,11 +439,27 @@ Total running cost: **$0/month** (OANDA practice account, no paid APIs).
 - ✅ Dual-write — SQLite primary, CSV backup. Reads: SQLite first, CSV fallback. Old data never lost.
 - ✅ WAL mode — concurrent reads + writes, no corruption risk from monitor threads
 - ✅ `level_edits` table — logs every SL/TP change: old levels, new levels, reason, timestamp
-- ✅ Dashboard: Edit SL/TP button — on every open/monitoring trade row
-- ✅ Edit modal: reason dropdown (moved to breakeven / tightened at resistance / widened for volatility / news nearby / manual / corrected error)
-- ✅ Edit modal: Reset to auto button — recalculates SL/TP from entry price back to default pip logic
-- ✅ Pips at close always calculated from actual SL/TP in row — model trains on what you actually used, not the original auto levels
+- ✅ Inline SL/TP edit — always visible on open manual trade rows, no modal needed
+- ✅ Edit modal: reason dropdown + notes field
+- ✅ Edit modal: Reset to auto button — recalculates SL/TP from entry price
+- ✅ Pips at close always calculated from actual SL/TP in row — model trains on what you actually used
 - ✅ Monitor thread restarts automatically with new levels on every edit
+- ✅ All historical data migrated to SQLite: 17 agent signals + 13 manual trades
+
+### Phase 6 — TOOK IT Flow + Notes + Agent SL/TP
+- ✅ TOOK IT modal — scanner SL/TP shown as reference, optional user SL/TP + notes fields
+- ✅ `user_sl`, `user_tp1`, `actual_sl`, `actual_tp1` columns on agent_signals — scanner levels untouched, your levels separate, model trains on actual
+- ✅ Inline SL/TP on taken agent signal rows — scanner levels shown, editable user level fields
+- ✅ `+ note` button on every row — agent signals + manual trades, open or closed
+- ✅ Shared note modal — appends with NY timestamp, never overwrites
+- ✅ Notes field in Edit SL/TP modal and TOOK IT modal
+- ✅ `/api/save_note` endpoint — works for both agent and manual trades
+- ✅ `/api/update_agent_levels` endpoint — update user SL/TP without changing taken status
+- ✅ Timestamps display in NY time AM/PM — stored UTC, converted in JS (no data risk)
+- ✅ Entry price column on agent signals rows (unique per signal)
+- ✅ Live current price on manual trades rows
+- ✅ Manual trades history bumped to 100
+- ✅ CSV agent_signals.csv column mismatch fixed after adding new columns
 
 ---
 
@@ -463,11 +478,11 @@ logs/
 
 ## WHAT'S NEXT
 
-1. **Journal panel** — free-form notes per trade or session, tagged (pattern/mistake/observation/rule), stored in SQLite
-2. **Grade filter** — block Grade C signals from ENTER_NOW even if ICT sequence completes (threshold: A/A+ only, or include B — TBD)
-3. **Modal SL/TP** — LOG TRADE modal: pull agent's real ICT levels when source is scanner signal, user-defined SL when own analysis
+1. **Journal panel** — session-level notes, tagged (pattern/mistake/observation/rule), stored in SQLite
+2. **Grade filter** — block Grade C signals from ENTER_NOW (threshold: A/A+ only or include B — TBD)
+3. **Modal SL/TP** — LOG TRADE modal: pull agent's real ICT levels when source is scanner signal
 4. **50 labeled outcomes** — Bayesian status flips from EST → LIVE, priors replaced with real trade data
-5. **Phase 6 — Dynamic risk engine** — lot sizing based on account balance + volatility, paper trading sandbox
+5. **Phase 7 — Dynamic risk engine** — lot sizing based on account balance + volatility, paper trading sandbox
 
 ---
 
