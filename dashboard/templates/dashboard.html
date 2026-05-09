@@ -1876,9 +1876,15 @@ function renderPerformance(perf, recentSignals) {
         <span id="alfb-${s.signal_id}" style="font-size:9px;color:var(--green);font-family:'JetBrains Mono',monospace;"></span>
       </div>` : "";
 
+    const debateBtn = (s.grade === "A+" || s.grade === "A")
+      ? `<button id="debate-btn-${s.signal_id}" onclick="runDebate('${s.signal_id}',this)"
+           style="background:rgba(138,43,226,.12);border:1px solid rgba(138,43,226,.35);color:#b57bee;
+                  font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 7px;border-radius:3px;
+                  cursor:pointer;white-space:nowrap;">⚡ Debate</button>` : "";
+
     return `
       <div style="margin-bottom:4px;">
-        <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 60px 60px 1fr 80px auto auto auto;">
+        <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 60px 60px 1fr 80px auto auto auto auto;">
           <span class="perf-log-time">${time}</span>
           <span class="perf-log-pair">${(s.pair||"").replace("_","/")}</span>
           <span class="${dirCls}">${dirSym} ${(s.direction||"").slice(0,4).toUpperCase()}</span>
@@ -1888,10 +1894,12 @@ function renderPerformance(perf, recentSignals) {
           ${livePriceHtml}
           ${takenBadge}
           ${outcomeHtml}
+          ${debateBtn}
           <button onclick="openNoteModal('${s.signal_id}','${s.pair||''}','agent')"
             style="background:none;border:1px solid rgba(255,255,255,.1);color:var(--text-muted);
                    font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 6px;border-radius:3px;cursor:pointer;white-space:nowrap;">+ note</button>
         </div>
+        <div id="debate-result-${s.signal_id}" style="display:none;"></div>
         ${agentInlineHtml}
       </div>`;
   }).join("");
@@ -1970,6 +1978,59 @@ async function markOutcome(signalId, outcome, btn) {
     btn.disabled = false;
     showToast("Save failed: network error", true);
     console.warn("markOutcome error:", e);
+  }
+}
+
+async function runDebate(signalId, btn) {
+  const resultEl = document.getElementById(`debate-result-${signalId}`);
+  if (!resultEl) return;
+
+  // Toggle off if already showing
+  if (resultEl.style.display !== "none") {
+    resultEl.style.display = "none";
+    btn.textContent = "⚡ Debate";
+    return;
+  }
+
+  btn.textContent = "⏳ thinking...";
+  btn.disabled = true;
+
+  try {
+    const resp = await fetch("/api/debate_signal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: signalId }),
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      const vcolor = data.verdict === "TAKE" ? "var(--green)"
+                   : data.verdict === "PASS" ? "var(--red)"
+                   : "var(--yellow)";
+      const vicon  = data.verdict === "TAKE" ? "✅" : data.verdict === "PASS" ? "❌" : "⏳";
+      resultEl.innerHTML = `
+        <div style="margin:4px 0 4px 0;padding:8px 12px;background:rgba(138,43,226,.06);
+                    border:1px solid rgba(138,43,226,.2);border-radius:5px;
+                    font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.6;">
+          <div style="margin-bottom:5px;">
+            <span style="color:${vcolor};font-weight:700;font-size:12px;">${vicon} ${data.verdict}</span>
+            <span style="color:var(--text-muted);margin-left:8px;">${data.reason}</span>
+          </div>
+          <div style="color:var(--green);margin-bottom:3px;">🟢 ${data.bull}</div>
+          <div style="color:var(--red);">🔴 ${data.bear}</div>
+        </div>`;
+      resultEl.style.display = "block";
+      btn.textContent = "⚡ Debate";
+      btn.disabled = false;
+    } else {
+      showToast(`Debate failed: ${data.error || "unknown"}`, true);
+      btn.textContent = "⚡ Debate";
+      btn.disabled = false;
+    }
+  } catch(e) {
+    showToast("Debate failed: network error", true);
+    btn.textContent = "⚡ Debate";
+    btn.disabled = false;
   }
 }
 

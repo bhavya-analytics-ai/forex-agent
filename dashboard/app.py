@@ -509,6 +509,30 @@ def api_update_agent_levels():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/debate_signal", methods=["POST"])
+def api_debate_signal():
+    """
+    Run bull/bear debate on an agent signal via NIM.
+    Body: { "signal_id": "..." }
+    Returns: { ok, bull, bear, verdict, reason }
+    """
+    try:
+        from db.database import get_agent_signal
+        from core.debate import debate_signal
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        signal = get_agent_signal(signal_id)
+        if not signal:
+            return jsonify({"ok": False, "error": "signal not found"}), 404
+        result = debate_signal(signal)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"debate_signal error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/delete_signal", methods=["POST"])
 def api_delete_signal():
     """Delete an agent signal by signal_id. Body: { "signal_id": "..." }"""
