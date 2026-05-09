@@ -324,48 +324,48 @@ def _build_post_mortem(direction: str, result: str, entry: float,
 def close_trade_manually(signal_id: str, outcome: str, pips: float, notes: str = "") -> tuple:
     """
     Manually close a trade from the dashboard.
-    Stops the monitor thread and writes outcome to CSV.
+    SQLite is source of truth — written first. CSV update is best-effort (may not exist on Railway).
     Returns (ok: bool, error: str)
     """
-    import pandas as pd
-
-    path = _get_log_path()
-    if not __import__("os").path.exists(path):
-        return False, "manual_trades.csv not found"
+    from db.database import get_manual_trade, update_manual_trade_outcome
 
     try:
-        df   = pd.read_csv(path, dtype=str)
-        mask = df["signal_id"] == signal_id
-        if not mask.any():
-            return False, f"Signal {signal_id} not found in CSV"
-
-        row       = df[mask].iloc[0]
-        direction = str(row.get("direction", "bullish"))
         final_pips = pips if outcome == "WIN" else -abs(pips)
 
-        # Build post-mortem safely — don't crash if SL/TP are missing
-        try:
-            entry = float(row["entry_price"]) if row["entry_price"] != "" else 0
-            sl    = float(row["sl_price"])    if str(row.get("sl_price", "")) not in ("", "nan") else 0
-            tp1   = float(row["tp1_price"])   if str(row.get("tp1_price", "")) not in ("", "nan") else 0
-            note  = _build_post_mortem(direction, outcome, entry, sl, tp1, final_pips)
-        except Exception:
-            note  = f"{outcome} {final_pips:+.1f} pips | manual close"
+        # Read row from SQLite to build post-mortem (works on Railway, no CSV needed)
+        db_row = get_manual_trade(signal_id)
+        if db_row:
+            direction = str(db_row.get("direction", "bullish"))
+            try:
+                entry = float(db_row.get("entry_price") or 0)
+                sl    = float(db_row.get("sl_price")    or 0)
+                tp1   = float(db_row.get("tp1_price")   or 0)
+                note  = _build_post_mortem(direction, outcome, entry, sl, tp1, final_pips)
+            except Exception:
+                note  = f"{outcome} {final_pips:+.1f} pips | manual close"
+        else:
+            note = f"{outcome} {final_pips:+.1f} pips | manual close"
 
         if notes:
             note += f" | Note: {notes}"
 
-        df.loc[mask, "outcome"]      = str(outcome)
-        df.loc[mask, "outcome_pips"] = str(final_pips)
-        df.loc[mask, "post_mortem"]  = str(note)
-        df.to_csv(path, index=False)
+        # SQLite first — source of truth on Railway
+        update_manual_trade_outcome(signal_id, outcome, final_pips, note)
 
-        # SQLite
+        # CSV best-effort (may not exist on Railway — that's fine)
         try:
-            from db.database import update_manual_trade_outcome
-            update_manual_trade_outcome(signal_id, outcome, final_pips, note)
-        except Exception as e:
-            logger.warning(f"SQLite manual close failed for {signal_id}: {e}")
+            import pandas as pd
+            path = _get_log_path()
+            if __import__("os").path.exists(path):
+                df   = pd.read_csv(path, dtype=str)
+                mask = df["signal_id"] == signal_id
+                if mask.any():
+                    df.loc[mask, "outcome"]      = str(outcome)
+                    df.loc[mask, "outcome_pips"] = str(final_pips)
+                    df.loc[mask, "post_mortem"]  = str(note)
+                    df.to_csv(path, index=False)
+        except Exception as csv_err:
+            logger.warning(f"CSV manual close skipped (non-fatal): {csv_err}")
 
         # Stop the monitor thread
         with _monitor_lock:
