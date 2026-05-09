@@ -509,13 +509,6 @@ def api_update_agent_levels():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@app.route("/api/debug_env")
-def api_debug_env():
-    import os
-    key = os.getenv("NIM_API_KEY", "")
-    return jsonify({"nim_key_set": bool(key), "nim_key_prefix": key[:10] if key else ""})
-
-
 @app.route("/api/debate_signal", methods=["POST"])
 def api_debate_signal():
     """

@@ -16,7 +16,7 @@ import os
 logger = logging.getLogger(__name__)
 
 _NIM_BASE = "https://integrate.api.nvidia.com/v1"
-_MODEL    = "nvidia/kimi-k2-instruct"
+_MODEL    = "moonshotai/kimi-k2-instruct"
 
 # ── SIGNAL CONTEXT BLOCK (shared across all 3 calls) ─────────────────────────
 
