@@ -1,0 +1,518 @@
+# FOREX AGENT — ICT DECISION ENGINE
+### Personal trading scanner built on ICT/Smart Money Concepts
+
+---
+
+## GIT LOG
+
+```
+dd2fd2a feat: notes on all modals + agent inline SL/TP + note button on every row
+d5c9760 fix: migrate CSV trades to SQLite + inline SL/TP edit on open trades
+606c3f1 feat: TOOK IT modal with custom SL/TP + live price column + full trade history
+ee58f18 docs: update readme with phase 5 SQLite + SL/TP tracking
+c4e32be feat: SQLite migration + SL/TP edit reason tracking
+c22d1f3 feat: phase 4 learning engine + close trade fix
+```
+
+**Status: Paper trading. Core logic validated. Do NOT trade scanner-only signals — always validate against your chart first.**
+
+---
+
+## WHAT WE ARE BUILDING
+
+A personal trading decision engine that reads market data, applies ICT/Smart Money logic top-down, and tells you exactly whether to enter now, wait, or skip — with probability and expected value attached to every signal.
+
+Not a bot. Not a black box. A scanner that thinks the way an ICT trader thinks.
+
+Three jobs in one system:
+1. **Multi-timeframe confluence engine** — H1 structure → M15 confirm → M5/M1 trigger, every scan
+2. **Bayesian decision layer** — P(win) + EV math, two separate likelihood tables, auto-routes to correct strategy
+3. **News sniper mode** — detects post-news spikes, M1 wick sweep + CHoCH sequence, separate silo that never bleeds into normal mode
+
+---
+
+## HOW THE SYSTEM WORKS
+
+Each scan cycle does this, in order:
+
+**Step 1 — Fetch candles (OANDA API)**
+- Pulls H1, M15, M5, M1 for every pair
+- 100–200 candles per timeframe depending on lookback needs
+
+**Step 2 — Multi-TF confluence engine**
+- H1: market structure, swing highs/lows, bias direction
+- M15: confirms or denies H1 bias
+- M5/M1: entry timing
+- Detects 3 setup types: pullback, breakout, reversal
+
+**Step 3 — ICT concept detection**
+- Order Blocks (OB) — last bearish candle before bullish impulse, vice versa
+- Fair Value Gaps (FVG) — imbalance left by impulse move
+- Liquidity sweeps — wick above swing high that closes back below (stops taken)
+- Market Structure Shift (MSS) — H1 officially changes trend
+- Change of Character (CHoCH) — first break of short-term structure
+- Premium/Discount zones — where price sits in the larger range
+
+**Step 4 — Mode detection (auto or manual)**
+- Checks ForexFactory: HIGH impact news within 15 minutes?
+- YES → news sniper mode activates automatically
+- NO → normal mode (gold strategy or forex strategy)
+- Dashboard toggle lets you override manually anytime
+
+**Step 5 — Bayesian scorer**
+- Takes all confluence signals as conditions
+- Computes P(win) using Bayesian posterior: `P(W|conditions) = P(conditions|W) × P(W) / P(conditions)`
+- Computes Expected Value: `EV = P(win) × RR − P(loss)`
+- Uses STANDARD_LIKELIHOODS in normal mode, NEWS_LIKELIHOODS in news sniper
+- The two tables never mix — mode_manager controls which one gets passed to the scorer
+
+**Step 6 — Strategy router**
+
+*Normal mode:*
+- Gold pairs (XAU, XAG) → gold_strategy (ICT sniper sequence: sweep → CHoCH → OB entry)
+- All other pairs → forex_strategy (hard filters: mid-range, HTF zone, TF conflict, choppy, RR)
+
+*News sniper mode:*
+- All pairs → news_sniper (M1 spike → wick sweep → M1 CHoCH → spike extreme SL → opposing liquidity TP)
+
+**Step 7 — Output**
+- One of 3 entry states: `ENTER_NOW`, `WAIT_RETEST`, `SKIP`
+- Trade levels: entry, SL, TP1, TP2
+- P(win) %, EV, Grade (A+/A/B/C — human-readable fallback)
+- Flags explaining exactly why the decision was made
+- Dashboard updated, Slack alert fired (if ENTER_NOW + grade A or better)
+
+---
+
+## THE TWO MODES
+
+### NORMAL MODE
+
+Runs when no HIGH impact news is nearby. Two strategy paths:
+
+**Gold strategy (XAU_USD, XAG_USD)**
+
+ICT sniper sequence, in order:
+1. Liquidity sweep detected (wick beyond swing high/low, closes back inside)
+2. CHoCH fires in opposite direction after the sweep
+3. Price pulls back into OB or FVG zone
+4. If all 3 confirmed → ENTER_NOW
+5. If sweep + CHoCH confirmed but no zone yet → WAIT_RETEST
+6. Missing sweep → SKIP
+
+SL logic:
+- M5 swing extreme → M15 swing → OB edge → ATR×1.5 fallback
+- Capped at ATR×2 always
+- XAU floor: $15. XAG floor: $0.80
+
+TP logic:
+- Nearest opposing liquidity with RR ≥ 1.2
+- Deduped within ATR×0.3 (not 3 levels that are basically the same price)
+- TP2: next real level after TP1 — not a fixed multiplier
+
+**Forex strategy (all other pairs)**
+
+Hard filters, checked in order:
+| Filter | Condition | Result |
+|--------|-----------|--------|
+| Mid-range | Price 40–60% of HTF range, weak structure | SKIP |
+| HTF zone | Strong opposing zone within ATR×0.5 | SKIP |
+| TF conflict | H1/M15/M5 biases don't align | SKIP |
+| Choppy | Ranging + structure strength = 1 | SKIP |
+| Multi-conflict | 2+ mismatches (trend + zone + sweep) | SKIP |
+| RR < 1.2 | TP doesn't justify the SL | SKIP |
+
+Momentum override: if breakout ATR ratio ≥ 1.3, mid-range and HTF zone filters are skipped.
+
+---
+
+### NEWS SNIPER MODE
+
+Auto-activates 15 minutes before HIGH impact ForexFactory events (and stays active 5 minutes post-event).
+Manual toggle available on dashboard.
+
+ICT news sequence — all 3 must happen, in order:
+
+```
+HIGH IMPACT NEWS FIRES
+        ↓
+M1 SPIKE CANDLE  (≥1.5x ATR, ≥30% wick)
+        ↓
+WICK SWEEPS SWING HIGH/LOW  (liquidity grab — stops taken)
+        ↓
+M1 CHoCH IN OPPOSITE DIRECTION  (institutional reversal confirmed)
+        ↓
+ENTER NOW
+```
+
+SL: spike extreme + small buffer (institutional stops sit exactly at the extreme)
+TP: nearest opposing swing with RR ≥ 1.5
+
+State machine:
+- Spike detected, CHoCH not yet → `WAIT_RETEST`
+- Spike + CHoCH confirmed, RR ≥ 1.5 → `ENTER_NOW`
+- No spike, or spike bias ≠ signal direction, or RR too low → `SKIP`
+
+**The silo is strict.** NEWS_LIKELIHOODS only used in news sniper mode. Normal mode Bayesian table never runs during news sniper. Different timeframes, different logic, different likelihood table — zero bleed.
+
+---
+
+## BAYESIAN SCORING
+
+Old system: stacked bonuses and penalties → total score → grade. Problem: 30 points from ICT + 25 from zone + penalty −20 → number that doesn't mean anything about probability.
+
+New system: every condition updates a probability.
+
+```
+Base rate P(W) = 0.45  (45% win rate assumption, conservative)
+
+For each condition (sweep, CHoCH, FVG, zone, trend aligned, news safe...):
+  if condition is true:  P(W) × sensitivity
+  if condition is false: P(W) × (1 - sensitivity)
+
+Final P(win) → Expected Value = P(win) × RR − P(loss)
+```
+
+Two tables:
+- `STANDARD_LIKELIHOODS` — used in normal mode, trained on pullback/breakout/reversal setups
+- `NEWS_LIKELIHOODS` — used in news sniper mode, weighted toward spike + sweep + CHoCH confirmations
+
+Once 50+ labeled outcomes exist in signals.csv, base rates auto-update from real results. System gets smarter the more it runs.
+
+Grades still show (A+/A/B/C) as human-readable shorthand. Grade never overrides the entry state — the strategy decides ENTER/WAIT/SKIP, not the score.
+
+---
+
+## SETUP TYPES
+
+| Setup | What it means | Entry signal |
+|-------|--------------|-------------|
+| ↩ PULLBACK LONG/SHORT | M15/M5 retracing in H1 trend | M5 rejection at OB/FVG in trend direction |
+| 🚀 BREAKOUT ▲/▼ | M15 impulse breaks structure | FVG retest or M1 aggressive |
+| ⚡ BO RETEST | Price back at FVG after breakout | Enter now, SL below FVG |
+| ⚡ BREAKOUT PRESSURE | Consolidation at key level | Watch for expansion |
+| 🔄 REVERSAL | H1 MSS confirmed | M5 confirm in new direction |
+| 💥 NEWS SNIPER | Post-news spike + M1 CHoCH | Enter now, SL at spike extreme |
+
+---
+
+## ICT CONCEPTS
+
+| Concept | What it is |
+|---------|-----------|
+| OB (Order Block) | Last bearish candle before a bullish impulse (or vice versa). Institutional entry zone. |
+| FVG (Fair Value Gap) | Gap between candle 1 and candle 3 of a 3-candle impulse move. Price comes back to fill it. |
+| Liquidity Sweep | Wick pierces swing high/low, then closes back inside. Stops taken, reversal likely. |
+| MSS (Market Structure Shift) | H1 breaks a key swing in the opposite direction. Trend officially changing. |
+| CHoCH (Change of Character) | First short-term structure break against the trend. Early warning of reversal. |
+| Breaker Block | OB that got broken — now flipped polarity. Former support becomes resistance. |
+| Premium zone | Price above 60–70% of the H1 range. Sell bias, not a place to buy. |
+| Discount zone | Price below 30–40% of the H1 range. Buy bias, not a place to sell. |
+
+---
+
+## PAIRS AND SESSIONS
+
+**Pairs:**
+```
+XAU_USD  XAG_USD
+GBP_USD  EUR_USD  EUR_GBP
+USD_JPY  GBP_JPY  EUR_JPY  CHF_JPY  CAD_JPY  NZD_JPY
+```
+
+**Sessions and killzones:**
+| Session | UTC | Best pairs |
+|---------|-----|-----------|
+| Asian KZ | 01:00–05:00 | JPY pairs |
+| London Open KZ | 07:00–10:00 | GBP, EUR |
+| NY Open KZ | 12:00–15:00 | Gold, USD |
+| London Close KZ | 15:00–17:00 | GBP/EUR reversals |
+
+Outside killzones: score dampened, A+ capped to A, breakouts flagged WATCH only.
+
+---
+
+## NEWS FILTER
+
+Source: ForexFactory JSON feed (free, no API key required).
+
+| Impact | Action |
+|--------|--------|
+| HIGH | Hard block 60 min before, 30 min after. OR — switches to news sniper mode. |
+| MEDIUM | Caution flag on signal. Does not block. |
+| Post-news spike detected | Flag for ICT spike reversal setup. News sniper evaluates. |
+
+Dashboard shows a live news ticker with countdown to next HIGH event. News panel shows upcoming events and which pairs are affected.
+
+---
+
+## DASHBOARD
+
+```
+http://localhost:5000
+```
+
+- Navy/blue dark theme
+- Signals sorted: A+ first, then by score within each grade
+- Color-coded rows by grade
+- Live news ticker at top with countdown
+- ⚡ EARLY badge — early entry timing (pressure building, not full confirm)
+- ICT CONFLICT badge — do not trade this signal
+- 🔴 NEWS SNIPER ACTIVE banner — pulsing red when news mode is on
+- Click any row → Entry / SL / TP1 / TP2 / P(win) / EV breakdown
+- Mode toggle button — switch between Normal and News Sniper manually
+- Refreshes every 30 seconds
+
+**+ LOG TRADE button (stats bar)**
+Log a trade you took manually on TradingView or paper trading. Select pair, direction, entry price (auto-filled from scanner). System calculates SL/TP and starts monitoring M5 candles indefinitely until TP or SL is hit.
+
+**Performance panel (collapsible)**
+Two tabs:
+- AGENT SIGNALS — every ENTER_NOW the scanner fired, with WIN/LOSS/TOOK IT buttons
+- MY MANUAL TRADES — trades you logged manually, shows Entry/SL/TP1/RR and ● MONITORING status
+- Stats: Signals Today, Total Labeled, Win Rate, Avg Pips, 🦄 Unicorn Win Rate, Bayesian Status (EST → LIVE at N=50)
+
+**Close ✕ button**
+On any open manual trade — auto-calculates pips from live market price vs your entry. One click to close WIN or LOSS. Stops the monitor thread and writes outcome + post-mortem note to CSV.
+
+---
+
+## HOW TO RUN
+
+```bash
+# Single scan
+python main.py scan
+
+# Live mode — scans every 5 min + dashboard
+python main.py live
+
+# Live mode with custom interval (seconds)
+python main.py live 60
+
+# Real-time tick feed
+python main.py stream
+
+# Pre-session briefings
+python main.py briefing tokyo
+python main.py briefing london
+python main.py briefing new_york
+
+# Log a trade you took
+python main.py took GBP_JPY short
+
+# Performance stats
+python main.py stats
+
+# Auto-scheduler (briefings at session open automatically)
+python scheduler.py
+```
+
+---
+
+## FILE STRUCTURE
+
+```
+forex-agent/
+├── main.py                     # Entry point — all run modes
+├── config.py                   # Pairs, sessions, scoring weights
+├── scheduler.py                # Auto-briefing scheduler
+│
+├── core/
+│   ├── fetcher.py              # OANDA candle fetching (H1/M15/M5/M1)
+│   ├── confluence.py           # Multi-TF engine (pullback/breakout/reversal)
+│   ├── structure.py            # Swing highs/lows, trend, recency-weighted vote
+│   ├── ict.py                  # OB, MSS, CHoCH, FVG, premium/discount
+│   ├── zones.py                # S/R zones (ATR-based)
+│   ├── candles.py              # Candlestick pattern detection
+│   ├── fvg.py                  # Fair Value Gap detection
+│   ├── liquidity.py            # Structure-based SL/TP anchor points
+│   └── streamer.py             # Live tick streaming
+│
+├── filters/
+│   ├── decision_layer.py       # Thin orchestrator — routes to gold or forex strategy
+│   ├── mode_manager.py         # Auto/manual mode detection — news sniper vs normal
+│   ├── killzones.py            # ICT killzone filter
+│   ├── news.py                 # ForexFactory news filter
+│   └── session.py              # Session detection
+│
+├── strategies/
+│   ├── gold_strategy.py        # XAU/XAG — ICT sniper sequence (sweep→CHoCH→OB)
+│   ├── forex_strategy.py       # All other pairs — hard filters + RR check
+│   └── news_sniper.py          # News mode only — M1 spike + CHoCH sequence
+│
+├── alerts/
+│   ├── scorer.py               # Bayesian scorer — P(win), EV, grade
+│   ├── logger.py               # CSV signal logger
+│   └── slack.py                # Slack alerts
+│
+├── dashboard/
+│   ├── app.py                  # Flask dashboard + API routes
+│   └── templates/
+│       └── dashboard.html      # Navy/blue UI
+│
+├── reports/
+│   └── briefing.py             # Pre-session briefings + scan pipeline
+│
+├── ml/
+│   ├── outcome_labeler.py      # Auto WIN/LOSS labeler (runs every 5 min as background thread)
+│   ├── manual_trade_logger.py  # Manual trade logger — monitors TP/SL indefinitely
+│   └── trainer.py              # Base rate updater (needs 50+ signals)
+│
+├── filters/
+│   └── news_vibe.py            # NewsData.io headlines (Market Vibe panel)
+│
+└── logs/
+    ├── agent_signals.csv       # Agent ENTER_NOW signals (auto-logged)
+    ├── manual_trades.csv       # Your manually logged trades
+    ├── signals_backup.csv      # Original signal log backup
+    ├── signals_backup_1.csv    # Pre-Phase4 signal log backup
+    └── app.log
+```
+
+---
+
+## TECH STACK
+
+| What | Tool | Cost |
+|------|------|------|
+| Market data | OANDA API (practice) | Free |
+| News data | ForexFactory JSON | Free |
+| Backend | Python + Flask | Free |
+| Dashboard | HTML/JS (localhost:5000) | Free |
+| Alerts | Slack webhooks | Free |
+| Signal log | CSV (agent_signals.csv + manual_trades.csv) | Free |
+| ML (future) | scikit-learn | Free |
+
+Total running cost: **$0/month** (OANDA practice account, no paid APIs).
+
+---
+
+## WHAT'S DONE
+
+### Phase 1 — Bug fixes (core logic)
+- ✅ Swing lookback reduced (was too large, missing near-term structure)
+- ✅ Weighted vote bug fixed (was weighting the wrong candle)
+- ✅ Signal lock made pair-aware (gold = 200 pip threshold, forex = 20 pip)
+- ✅ Breakout threshold corrected (1.8x → 1.3x ATR)
+- ✅ Pullback detection cleaned up (M15 against H1 only, removed noisy M5 check)
+- ✅ M1 candles already in fetcher — confirmed no changes needed
+
+### Phase 2 — Architecture cleanup
+- ✅ decision_layer.py collapsed from 1164 lines → 22-line orchestrator
+- ✅ gold_strategy.py — clean ICT sniper sequence (~280 lines)
+- ✅ forex_strategy.py — hard filters extracted and isolated (~190 lines)
+- ✅ Sweep → CHoCH now linked sequence (previously detected independently, not connected)
+- ✅ Early entry flag moved to info-only (never changes entry state)
+- ✅ SL capped at ATR×2, ATR floors added for gold
+
+### Phase 3 — Bayesian scorer + news sniper mode
+- ✅ Bayesian scorer replacing stacked bonus system
+- ✅ P(win) + EV on every signal
+- ✅ STANDARD_LIKELIHOODS vs NEWS_LIKELIHOODS — strict silo, never mix
+- ✅ Auto base rate update at 50+ labeled signals (ml/ pipeline)
+- ✅ news_sniper.py — M1 spike + wick sweep + M1 CHoCH sequence
+- ✅ mode_manager.py — auto-detect + manual override, thread-safe
+- ✅ Dashboard news panel bug fixed (panel_events missing from /api/signals)
+- ✅ Dashboard mode banner (NEWS SNIPER ACTIVE red pulse)
+- ✅ /api/mode GET + /api/mode/toggle POST endpoints
+- ✅ Same 3 entry states across all strategies: ENTER_NOW / WAIT_RETEST / SKIP
+
+### Phase 4 — Learning Engine
+- ✅ Unicorn Model — FVG + Breaker Block overlap, M5 hard lock, killzone-gated ENTER_NOW
+- ✅ Killzone filter — Unicorn ENTER_NOW only fires London (2–5am EST) / NY (7–10am EST), outside → WAIT_RETEST
+- ✅ ENTER_NOW-only logging — no WAIT_RETEST/SKIP noise in agent_signals.csv
+- ✅ Two separate CSVs — agent_signals.csv (scanner auto-log) + manual_trades.csv (your own trades)
+- ✅ Outcome labeler thread — runs every 5 min, auto-labels WIN/LOSS on M5 candles 15 min after signal
+- ✅ Post-mortem notes — WIN: what worked. LOSS: what was missing + review note. Written on every close.
+- ✅ Manual trade logger — log trades you take yourself, monitors TP/SL indefinitely, resumes on restart
+- ✅ Bayesian key mismatch fixed — "🦄 UNICORN" now maps to "unicorn" in base rates correctly
+- ✅ ForexFactory silent parse bug fixed — ISO 8601 datetime in "date" field now handled correctly
+- ✅ Dashboard: Performance panel — AGENT SIGNALS + MY MANUAL TRADES tabs, win rate / avg pips / unicorn rate / Bayesian status
+- ✅ Dashboard: + LOG TRADE button — modal with auto-filled entry price, pair/direction, setup type, notes
+- ✅ Dashboard: WIN/LOSS buttons — manually mark outcome on any ENTER_NOW signal
+- ✅ Dashboard: TOOK IT button — marks which agent signals you actually traded
+- ✅ Dashboard: Close ✕ button — manually close open manual trades, fetches live OANDA price, auto-calculates pips
+
+### Phase 5 — SQLite + SL/TP Edit Tracking
+- ✅ SQLite migration — `db/database.py`, all new data written to `logs/trades.db`
+- ✅ Three tables: `manual_trades`, `agent_signals`, `level_edits`
+- ✅ Dual-write — SQLite primary, CSV backup. Reads: SQLite first, CSV fallback. Old data never lost.
+- ✅ WAL mode — concurrent reads + writes, no corruption risk from monitor threads
+- ✅ `level_edits` table — logs every SL/TP change: old levels, new levels, reason, timestamp
+- ✅ Inline SL/TP edit — always visible on open manual trade rows, no modal needed
+- ✅ Edit modal: reason dropdown + notes field
+- ✅ Edit modal: Reset to auto button — recalculates SL/TP from entry price
+- ✅ Pips at close always calculated from actual SL/TP in row — model trains on what you actually used
+- ✅ Monitor thread restarts automatically with new levels on every edit
+- ✅ All historical data migrated to SQLite: 17 agent signals + 13 manual trades
+
+### Phase 6 — TOOK IT Flow + Notes + Agent SL/TP
+- ✅ TOOK IT modal — scanner SL/TP shown as reference, optional user SL/TP + notes fields
+- ✅ `user_sl`, `user_tp1`, `actual_sl`, `actual_tp1` columns on agent_signals — scanner levels untouched, your levels separate, model trains on actual
+- ✅ Inline SL/TP on taken agent signal rows — scanner levels shown, editable user level fields
+- ✅ `+ note` button on every row — agent signals + manual trades, open or closed
+- ✅ Shared note modal — appends with NY timestamp, never overwrites
+- ✅ Notes field in Edit SL/TP modal and TOOK IT modal
+- ✅ `/api/save_note` endpoint — works for both agent and manual trades
+- ✅ `/api/update_agent_levels` endpoint — update user SL/TP without changing taken status
+- ✅ Timestamps display in NY time AM/PM — stored UTC, converted in JS (no data risk)
+- ✅ Entry price column on agent signals rows (unique per signal)
+- ✅ Live current price on manual trades rows
+- ✅ Manual trades history bumped to 100
+- ✅ CSV agent_signals.csv column mismatch fixed after adding new columns
+
+---
+
+## FILE STRUCTURE (additions)
+
+```
+db/
+├── __init__.py
+└── database.py     # SQLite core — init_db(), all read/write helpers
+
+logs/
+└── trades.db       # SQLite database (manual_trades + agent_signals + level_edits)
+```
+
+---
+
+## WHAT'S NEXT
+
+1. **Journal panel** — session-level notes, tagged (pattern/mistake/observation/rule), stored in SQLite
+2. **Grade filter** — block Grade C signals from ENTER_NOW (threshold: A/A+ only or include B — TBD)
+3. **Modal SL/TP** — LOG TRADE modal: pull agent's real ICT levels when source is scanner signal
+4. **50 labeled outcomes** — Bayesian status flips from EST → LIVE, priors replaced with real trade data
+5. **Phase 7 — Dynamic risk engine** — lot sizing based on account balance + volatility, paper trading sandbox
+
+---
+
+## QUICK START
+
+```bash
+# 1. Install dependencies
+pip install flask scikit-learn oandapyV20 requests pandas python-dotenv
+
+# 2. Create .env file
+OANDA_API_KEY=your_key
+OANDA_ACCOUNT_ID=your_account
+OANDA_ENVIRONMENT=practice
+SLACK_WEBHOOK_URL=your_webhook  # optional
+
+# 3. Test one scan
+python main.py scan
+
+# 4. Run live
+python main.py live
+# Dashboard at http://localhost:5000
+```
+
+---
+
+## PAPER TRADING RULE
+
+**Only trade when the scanner agrees with YOUR chart read.**
+
+Scanner tells you: probability, RR, entry state.
+Your chart tells you: does this actually look right right now?
+
+Both have to agree. Scanner-only signals are not a reason to trade.
