@@ -279,10 +279,10 @@ def api_mark_outcome():
     """
     Manually mark a signal outcome from the dashboard.
     Body: { "signal_id": "XAU_USD_20260409_143022", "outcome": "WIN" | "LOSS", "notes": "" }
-    Calls update_outcome() in alerts/logger.py — no new logic, just an API wrapper.
+    SQLite is source of truth — written first. CSV update is best-effort (may not exist on Railway).
     """
     try:
-        from alerts.logger import update_outcome
+        from db.database import update_agent_signal_outcome
         body      = request.get_json(silent=True) or {}
         signal_id = body.get("signal_id", "").strip()
         outcome   = body.get("outcome", "").upper().strip()
@@ -293,7 +293,16 @@ def api_mark_outcome():
         if outcome not in ("WIN", "LOSS", "NEUTRAL"):
             return jsonify({"ok": False, "error": "outcome must be WIN, LOSS, or NEUTRAL"}), 400
 
-        update_outcome(signal_id, outcome, pips=0, notes=notes)
+        # SQLite first — this is the source of truth on Railway
+        update_agent_signal_outcome(signal_id, outcome, pips=0, notes=notes)
+
+        # CSV best-effort (may not exist on Railway — that's fine)
+        try:
+            from alerts.logger import update_outcome
+            update_outcome(signal_id, outcome, pips=0, notes=notes)
+        except Exception as csv_err:
+            logger.warning(f"CSV update_outcome skipped (non-fatal): {csv_err}")
+
         return jsonify({"ok": True, "signal_id": signal_id, "outcome": outcome})
     except Exception as e:
         logger.error(f"mark_outcome error: {e}")
