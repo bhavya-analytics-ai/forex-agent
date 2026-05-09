@@ -524,6 +524,45 @@ def api_export():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/import", methods=["POST"])
+def api_import():
+    """
+    Bulk import manual_trades + agent_signals from JSON (output of /api/export).
+    Used by seed_railway.py to push local data to Railway on first deploy.
+    Skips rows that already exist (INSERT OR IGNORE).
+    """
+    try:
+        from db.database import insert_manual_trade, insert_agent_signal
+        body    = request.get_json(silent=True) or {}
+        manual  = body.get("manual_trades", [])
+        signals = body.get("agent_signals", [])
+
+        m_ok = m_skip = 0
+        for row in manual:
+            try:
+                insert_manual_trade(row)
+                m_ok += 1
+            except Exception:
+                m_skip += 1
+
+        s_ok = s_skip = 0
+        for row in signals:
+            try:
+                insert_agent_signal(row)
+                s_ok += 1
+            except Exception:
+                s_skip += 1
+
+        return jsonify({
+            "ok": True,
+            "manual_trades":  {"inserted": m_ok, "skipped": m_skip},
+            "agent_signals":  {"inserted": s_ok, "skipped": s_skip},
+        })
+    except Exception as e:
+        logger.error(f"api_import error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 def start_dashboard():
     host = DASHBOARD_CONFIG.get("host", "127.0.0.1")
     port = DASHBOARD_CONFIG.get("port", 5000)
