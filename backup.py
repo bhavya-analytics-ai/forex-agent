@@ -41,7 +41,7 @@ def fetch_export(base_url: str) -> dict:
 
 def save_json(data: dict, out_dir: str) -> str:
     os.makedirs(out_dir, exist_ok=True)
-    ts       = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts       = datetime.now(timezone.utc).strftime("%Y%m%d")
     filename = f"forex_backup_{ts}.json"
     path     = os.path.join(out_dir, filename)
     with open(path, "w") as f:
