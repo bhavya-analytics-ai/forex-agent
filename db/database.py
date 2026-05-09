@@ -15,13 +15,15 @@ import sqlite3
 import threading
 import logging
 
-logger   = logging.getLogger(__name__)
-
-_DB_PATH  = os.path.join(os.path.dirname(__file__), "..", "logs", "trades.db")
+logger      = logging.getLogger(__name__)
 _write_lock = threading.Lock()
+_local      = threading.local()
 
-# Per-thread connection cache (reads)
-_local = threading.local()
+# Railway Volume at /data, local fallback to logs/trades.db
+if os.path.isdir("/data"):
+    _DB_PATH = "/data/forex.db"
+else:
+    _DB_PATH = os.path.join(os.path.dirname(__file__), "..", "logs", "trades.db")
 
 
 def _db_path() -> str:
@@ -33,7 +35,8 @@ def _get_conn() -> sqlite3.Connection:
     if not hasattr(_local, "conn") or _local.conn is None:
         conn = sqlite3.connect(_db_path(), check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")   # allows concurrent reads + writes
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout = 5000")   # wait 5s on lock, don't crash
         conn.execute("PRAGMA foreign_keys=ON")
         _local.conn = conn
     return _local.conn

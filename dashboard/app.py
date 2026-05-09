@@ -500,6 +500,30 @@ def api_update_agent_levels():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/export")
+def api_export():
+    """
+    Full DB export — returns all manual_trades + agent_signals as JSON.
+    Used by backup.py for daily local backups.
+    """
+    try:
+        from db.database import get_recent_manual_trades, get_recent_agent_signals
+        manual  = get_recent_manual_trades(limit=100_000)
+        signals = get_recent_agent_signals(limit=100_000)
+        return jsonify(_sanitize({
+            "exported_at":    datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "manual_trades":  manual,
+            "agent_signals":  signals,
+            "counts": {
+                "manual_trades":  len(manual),
+                "agent_signals":  len(signals),
+            }
+        }))
+    except Exception as e:
+        logger.error(f"api_export error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 def start_dashboard():
     host = DASHBOARD_CONFIG.get("host", "127.0.0.1")
     port = DASHBOARD_CONFIG.get("port", 5000)
