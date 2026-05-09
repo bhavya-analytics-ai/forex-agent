@@ -1840,8 +1840,14 @@ function renderPerformance(perf, recentSignals) {
       ? `<span>
            <button class="outcome-btn outcome-btn-win" onclick="markOutcome('${s.signal_id}','WIN',this)">W</button>
            <button class="outcome-btn outcome-btn-loss" onclick="markOutcome('${s.signal_id}','LOSS',this)">L</button>
+           <button class="outcome-btn" style="padding:2px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${s.signal_id}','agent',this)">✕</button>
          </span>`
-      : `<span class="outcome-marked ${outCls}">${outTxt}</span>`;
+      : `<span style="display:inline-flex;align-items:center;gap:4px;">
+           <span class="outcome-marked ${outCls}">${outTxt}</span>
+           <button class="outcome-btn outcome-btn-win" style="padding:1px 5px;font-size:9px;" onclick="markOutcome('${s.signal_id}','WIN',this)">W</button>
+           <button class="outcome-btn outcome-btn-loss" style="padding:1px 5px;font-size:9px;" onclick="markOutcome('${s.signal_id}','LOSS',this)">L</button>
+           <button class="outcome-btn" style="padding:1px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${s.signal_id}','agent',this)">✕</button>
+         </span>`;
 
     const livePriceHtml = s.entry_price
       ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);">@ <b style="color:var(--text-primary)">${s.entry_price}</b></span>`
@@ -1940,10 +1946,15 @@ async function markOutcome(signalId, outcome, btn) {
     });
     const data = await resp.json();
     if (data.ok) {
-      // Replace buttons with outcome label
+      // Rebuild the outcome cell with new label + re-mark + delete buttons
       const container = btn.closest("span") || btn.parentElement;
       const cls = outcome === "WIN" ? "perf-log-outcome-win" : "perf-log-outcome-loss";
-      container.innerHTML = `<span class="outcome-marked ${cls}">${outcome}</span>`;
+      container.outerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;">
+        <span class="outcome-marked ${cls}">${outcome}</span>
+        <button class="outcome-btn outcome-btn-win" style="padding:1px 5px;font-size:9px;" onclick="markOutcome('${signalId}','WIN',this)">W</button>
+        <button class="outcome-btn outcome-btn-loss" style="padding:1px 5px;font-size:9px;" onclick="markOutcome('${signalId}','LOSS',this)">L</button>
+        <button class="outcome-btn" style="padding:1px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${signalId}','agent',this)">✕</button>
+      </span>`;
       showToast(`${outcome} saved ✓`);
       // Refresh performance panel stats immediately
       if (!_perfPanelCollapsed) fetchPerformance();
@@ -1959,6 +1970,38 @@ async function markOutcome(signalId, outcome, btn) {
     btn.disabled = false;
     showToast("Save failed: network error", true);
     console.warn("markOutcome error:", e);
+  }
+}
+
+async function deleteSignal(signalId, kind, btn) {
+  if (!signalId) return;
+  if (!confirm(`Delete ${signalId}? This cannot be undone.`)) return;
+  btn.disabled = true;
+  btn.style.opacity = "0.4";
+  try {
+    const endpoint = kind === "manual" ? "/api/delete_manual" : "/api/delete_signal";
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: signalId }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // Remove the entire row from DOM
+      const row = btn.closest("tr") || btn.closest(".signal-row") || btn.closest("li");
+      if (row) row.remove();
+      else fetchAndRender();
+      showToast("Deleted ✓");
+      if (!_perfPanelCollapsed) fetchPerformance();
+    } else {
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      showToast(`Delete failed: ${data.error || "unknown"}`, true);
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.style.opacity = "1";
+    showToast("Delete failed: network error", true);
   }
 }
 
@@ -2462,8 +2505,12 @@ function renderManualTrades(trades) {
            <span style="color:var(--yellow);font-size:10px;font-family:'JetBrains Mono',monospace;">● MONITORING</span>
            <button class="outcome-btn" style="background:rgba(255,68,68,.08);border-color:rgba(255,68,68,.3);color:var(--red);padding:2px 7px;"
              onclick="openCloseModal('${t.signal_id}','${t.pair||''}','${t.direction||''}',${t.entry_price||0})">Close ✕</button>
+           <button class="outcome-btn" style="padding:2px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${t.signal_id}','manual',this)">DEL</button>
          </span>`
-      : `<span class="outcome-marked ${outCls}">${outTxt}</span>`;
+      : `<span style="display:inline-flex;align-items:center;gap:4px;">
+           <span class="outcome-marked ${outCls}">${outTxt}</span>
+           <button class="outcome-btn" style="padding:1px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${t.signal_id}','manual',this)">DEL</button>
+         </span>`;
 
     // Inline SL/TP edit for open trades — always visible, no modal needed
     const inlineEditHtml = isOpen ? `

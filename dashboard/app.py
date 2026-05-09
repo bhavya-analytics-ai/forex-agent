@@ -509,6 +509,44 @@ def api_update_agent_levels():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/delete_signal", methods=["POST"])
+def api_delete_signal():
+    """Delete an agent signal by signal_id. Body: { "signal_id": "..." }"""
+    try:
+        from db.database import _get_conn, _write_lock
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        conn = _get_conn()
+        with _write_lock:
+            conn.execute("DELETE FROM agent_signals WHERE signal_id=?", (signal_id,))
+            conn.commit()
+        return jsonify({"ok": True, "signal_id": signal_id})
+    except Exception as e:
+        logger.error(f"delete_signal error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/delete_manual", methods=["POST"])
+def api_delete_manual():
+    """Delete a manual trade by signal_id. Body: { "signal_id": "..." }"""
+    try:
+        from db.database import _get_conn, _write_lock
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        conn = _get_conn()
+        with _write_lock:
+            conn.execute("DELETE FROM manual_trades WHERE signal_id=?", (signal_id,))
+            conn.commit()
+        return jsonify({"ok": True, "signal_id": signal_id})
+    except Exception as e:
+        logger.error(f"delete_manual error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/export")
 def api_export():
     """
