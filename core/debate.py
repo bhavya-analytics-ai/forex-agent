@@ -235,5 +235,6 @@ def debate_signal(signal: dict) -> dict:
             "key_risk":   "",
         }
     except Exception as e:
-        logger.error(f"debate_signal error: {e}")
-        return {"ok": False, "error": str(e)}
+        import traceback
+        logger.error(f"debate_signal error: {e}\n{traceback.format_exc()}")
+        return {"ok": False, "error": str(e), "detail": traceback.format_exc()[-500:]}
