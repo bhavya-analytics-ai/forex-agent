@@ -214,7 +214,7 @@ def api_recent_signals():
     """Returns last 20 ENTER_NOW signals — SQLite first, CSV fallback."""
     try:
         from db.database import get_recent_agent_signals
-        rows = get_recent_agent_signals(limit=20)
+        rows = get_recent_agent_signals(limit=500)
         if rows:
             return jsonify({"signals": _sanitize(rows)})
     except Exception as e:
@@ -234,7 +234,7 @@ def api_recent_signals():
         for c in cols:
             if c not in df.columns:
                 df[c] = ""
-        recent = df[cols].tail(20).iloc[::-1].fillna("").to_dict("records")
+        recent = df[cols].tail(500).iloc[::-1].fillna("").to_dict("records")
         return jsonify({"signals": recent})
     except Exception as e:
         logger.error(f"recent_signals CSV fallback error: {e}")
