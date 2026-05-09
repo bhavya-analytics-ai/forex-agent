@@ -31,6 +31,7 @@ OANDA_ENVIRONMENT=practice
 FINNHUB_API_KEY=optional
 NEWSDATA_API_KEY=optional
 SLACK_WEBHOOK_URL=optional
+NIM_API_KEY=your_nvidia_nim_key   # required for Signal Debate feature
 
 # 3. Run
 python main.py scan        # single scan
@@ -179,7 +180,7 @@ EV = P(win) × RR − P(loss)
 ```
 
 At N≥50 labeled outcomes → base rates auto-update from real results. Bayesian status: EST → LIVE.
-Current: 21 labeled outcomes (11W/10L). Need 29 more.
+Current: 27 labeled outcomes. Need 23 more.
 
 ---
 
@@ -226,7 +227,7 @@ Three tables:
 
 **Dual-write:** SQLite primary + CSV backup. Reads: SQLite first, CSV fallback. Old data never lost.
 
-**Current data:** 38 agent signals, 24 manual trades.
+**Current data:** 38 agent signals, 24 manual trades, 27 labeled outcomes.
 
 ---
 
@@ -248,9 +249,17 @@ Three tables:
 
 **Actions per row:**
 - `TOOK IT` — mark signal taken, save your custom SL/TP (scanner levels preserved separately)
+- `W / L` — mark outcome on any signal (re-markable at any time, updates instantly)
+- `✕ / DEL` — delete any signal or manual trade permanently
+- `⚡ Debate` — AI bull/bear debate on A/A+ signals (see Signal Debate below)
 - `Edit SL/TP` — update levels mid-trade, select reason, logs to level_edits
 - `+ Note` — append timestamped note to any trade (open or closed)
 - `Close ✕` — close manual trade, auto-calculates pips from live OANDA price
+
+**Refresh:**
+- Full dashboard: every 30s
+- Performance stats: every 10s (independent of full refresh)
+- W/L saves: instant with green/red toast feedback
 
 ---
 
@@ -268,7 +277,10 @@ Three tables:
 | POST | `/api/import` | Bulk insert trades from JSON (used by seed_railway.py) |
 | POST | `/api/mode/toggle` | Switch Normal ↔ News Sniper |
 | POST | `/api/mark_taken` | Mark signal taken + save user SL/TP + notes |
-| POST | `/api/mark_outcome` | WIN/LOSS/NEUTRAL on agent signal |
+| POST | `/api/mark_outcome` | WIN/LOSS/NEUTRAL on agent signal (SQLite-first, re-markable) |
+| POST | `/api/delete_signal` | Delete an agent signal permanently |
+| POST | `/api/delete_manual` | Delete a manual trade permanently |
+| POST | `/api/debate_signal` | Run 3-call ICT bull/bear debate on a signal |
 | POST | `/api/update_trade_levels` | Update SL/TP on manual trade + log to level_edits |
 | POST | `/api/update_agent_levels` | Update user SL/TP on agent signal |
 | POST | `/api/save_note` | Append note to any trade (agent or manual) |
@@ -297,7 +309,8 @@ forex-agent/
 │   ├── candles.py              # Candlestick patterns
 │   ├── fvg.py                  # Fair Value Gap detection
 │   ├── liquidity.py            # SL/TP anchor points
-│   └── streamer.py             # Live tick streaming
+│   ├── streamer.py             # Live tick streaming
+│   └── debate.py               # 3-call ICT bull/bear debate via NVIDIA NIM
 │
 ├── filters/
 │   ├── decision_layer.py       # Thin orchestrator → routes to strategy
@@ -344,6 +357,38 @@ forex-agent/
 
 ---
 
+## SIGNAL DEBATE (A/A+ only)
+
+On any A or A+ signal, hit **⚡ Debate** before deciding to take the trade.
+
+Three separate NIM calls run in sequence:
+
+1. **Bull** — makes the strongest case FOR the trade using ICT logic (structure, zone freshness, session, killzone, entry pattern, RR)
+2. **Bear** — reads bull's argument and attacks it specifically (mitigated zones, wrong session, liquidity sweeps, weak score breakdown, news risk)
+3. **Judge** — applies 7 hard ICT rules then weighs the debate. Verdict: `TAKE` / `PASS` / `WAIT`
+
+**Hard rules the judge enforces:**
+- HTF trend against direction → PASS
+- Outside killzone → WAIT
+- Zone strength < 40 → PASS (zone mitigated)
+- RR < 1.5 → PASS
+- News unsafe → WAIT
+- M15 + M5 both oppose → PASS
+- Bear made a point bull didn't address → weighted heavily
+
+**Output on the card:**
+- Verdict + one-line reason
+- Bull score vs Bear score (e.g. Bull 7/10 · Bear 9/10)
+- Full bull argument
+- Full bear rebuttal
+- Key risk warning (even on TAKE verdicts)
+
+**Not a trading system.** Read-only second opinion. You decide.
+
+**Requires:** `NIM_API_KEY` env var (NVIDIA NIM). Model: `moonshotai/kimi-k2-instruct`.
+
+---
+
 ## WHAT'S DONE
 
 ### Phase 1–3 — Core engine
@@ -383,14 +428,22 @@ forex-agent/
 - `seed_railway.py` — one-time seeder for Railway
 - launchd agent — auto backup on Mac login + every 24h
 
+### Phase 8 — Dashboard fixes + Signal Debate
+- **Bug fix:** `mark_outcome` and `close_trade_manually` now write SQLite first (CSV was checked first on Railway — CSV doesn't exist there, so outcomes never saved)
+- **Re-mark:** W/L buttons always visible on signal rows — change any outcome at any time
+- **Delete:** ✕/DEL button on every agent signal and manual trade row
+- **Error feedback:** green/red toast on W/L save success/failure, buttons dim while saving
+- **Performance refresh:** stats panel polls every 10s independent of 30s full refresh
+- **Signal Debate:** 3-call ICT bull/bear debate via NVIDIA NIM on A/A+ signals (see above)
+
 ---
 
 ## WHAT'S NEXT
 
-1. **Journal panel** — session-level notes, tagged (pattern/mistake/observation/rule), stored in SQLite
-2. **Grade filter** — minimum grade for ENTER_NOW (A/A+ only or include B — TBD)
-3. **50 labeled outcomes** — Bayesian flips EST → LIVE (need 29 more)
-4. **Phase 8 — Dynamic risk engine** — lot sizing based on account balance + volatility
+1. **50 labeled outcomes** — Bayesian flips EST → LIVE (need 23 more)
+2. **Journal panel** — session-level notes tagged (pattern/mistake/observation/rule)
+3. **Grade filter** — minimum grade for ENTER_NOW (A/A+ only or include B)
+4. **Dynamic risk engine** — lot sizing from account balance + volatility
 
 ---
 
