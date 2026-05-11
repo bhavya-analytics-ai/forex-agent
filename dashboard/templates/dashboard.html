@@ -925,9 +925,112 @@
     background: transparent;
     transition: all .15s;
   }
-  .perf-tab:first-child { border-radius: 4px 0 0 4px; }
-  .perf-tab:last-child  { border-radius: 0 4px 4px 0; border-left: none; }
-  .perf-tab.active      { background: rgba(77,159,255,.12); color: var(--blue-bright); border-color: rgba(77,159,255,.3); }
+  .perf-tab:first-child         { border-radius: 4px 0 0 4px; }
+  .perf-tab:not(:first-child)   { border-left: none; }
+  .perf-tab:last-child          { border-radius: 0 4px 4px 0; }
+  .perf-tab.active              { background: rgba(77,159,255,.12); color: var(--blue-bright); border-color: rgba(77,159,255,.3); }
+
+  /* ── JOURNAL ── */
+  .journal-filters {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .journal-tag-pill {
+    padding: 3px 10px; font-size: 9px; font-weight: 700; letter-spacing: 1px;
+    font-family: 'JetBrains Mono', monospace;
+    border: 1px solid var(--navy-border); border-radius: 12px;
+    cursor: pointer; background: transparent; color: var(--text-muted);
+    transition: all .15s;
+  }
+  .journal-tag-pill.active-all         { background: rgba(77,159,255,.12); color: var(--blue-bright); border-color: rgba(77,159,255,.3); }
+  .journal-tag-pill.active-pattern     { background: rgba(77,159,255,.12); color: var(--blue-bright); border-color: rgba(77,159,255,.3); }
+  .journal-tag-pill.active-mistake     { background: rgba(255,68,68,.1);   color: #ff8080;             border-color: rgba(255,68,68,.3); }
+  .journal-tag-pill.active-observation { background: rgba(255,200,50,.08); color: var(--yellow);        border-color: rgba(255,200,50,.3); }
+  .journal-tag-pill.active-rule        { background: rgba(138,43,226,.1);  color: var(--purple);        border-color: rgba(138,43,226,.3); }
+  .journal-entry {
+    border: 1px solid var(--navy-border); border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 8px;
+    background: rgba(255,255,255,.02);
+    transition: border-color .15s;
+  }
+  .journal-entry:hover { border-color: rgba(77,159,255,.2); }
+  .journal-entry-header {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .journal-entry-date {
+    font-size: 10px; font-weight: 700; color: var(--text-main);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .journal-session-badge {
+    font-size: 8px; font-weight: 700; letter-spacing: 1px;
+    padding: 2px 7px; border-radius: 10px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .session-tokyo    { background: rgba(0,200,255,.1);   color: #00c8ff; }
+  .session-london   { background: rgba(77,159,255,.1);  color: var(--blue-bright); }
+  .session-new_york { background: rgba(0,230,118,.1);   color: var(--green); }
+  .session-any      { background: rgba(180,180,180,.08); color: var(--text-muted); }
+  .journal-tag-chip {
+    font-size: 8px; font-weight: 700; letter-spacing: .8px;
+    padding: 2px 7px; border-radius: 10px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .tag-pattern     { background: rgba(77,159,255,.12); color: var(--blue-bright); }
+  .tag-mistake     { background: rgba(255,68,68,.1);   color: #ff8080; }
+  .tag-observation { background: rgba(255,200,50,.08); color: var(--yellow); }
+  .tag-rule        { background: rgba(138,43,226,.1);  color: var(--purple); }
+  .tag-other       { background: rgba(180,180,180,.08); color: var(--text-muted); }
+  .journal-entry-content {
+    font-size: 11px; color: var(--text-main); line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .journal-entry-footer {
+    margin-top: 7px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .journal-entry-ts { font-size: 9px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+  .journal-del-btn {
+    background: none; border: none; cursor: pointer;
+    color: var(--text-dim); font-size: 10px; padding: 0 2px;
+    transition: color .15s;
+  }
+  .journal-del-btn:hover { color: var(--red); }
+
+  /* new-entry form */
+  #journal-new-form {
+    border: 1px solid rgba(77,159,255,.25); border-radius: 6px;
+    padding: 12px 14px; margin-bottom: 12px;
+    background: rgba(77,159,255,.04); display: none;
+  }
+  .journal-form-row {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;
+  }
+  .journal-form-label { font-size: 9px; font-weight: 700; color: var(--text-muted); letter-spacing: 1px; }
+  .journal-form-input {
+    background: var(--navy-light); border: 1px solid var(--navy-border);
+    color: var(--text-main); font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; padding: 4px 8px; border-radius: 4px;
+  }
+  .journal-form-input:focus { outline: none; border-color: rgba(77,159,255,.4); }
+  .journal-tag-checkbox { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .journal-tag-checkbox input { display: none; }
+  .journal-tag-checkbox .chip {
+    font-size: 9px; font-weight: 700; padding: 2px 9px; border-radius: 10px;
+    border: 1px solid var(--navy-border); color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace; cursor: pointer; transition: all .12s;
+  }
+  .journal-tag-checkbox input:checked + .chip.chip-pattern     { background: rgba(77,159,255,.15); color: var(--blue-bright); border-color: rgba(77,159,255,.4); }
+  .journal-tag-checkbox input:checked + .chip.chip-mistake     { background: rgba(255,68,68,.12);  color: #ff8080;            border-color: rgba(255,68,68,.4); }
+  .journal-tag-checkbox input:checked + .chip.chip-observation { background: rgba(255,200,50,.1);  color: var(--yellow);       border-color: rgba(255,200,50,.4); }
+  .journal-tag-checkbox input:checked + .chip.chip-rule        { background: rgba(138,43,226,.12); color: var(--purple);       border-color: rgba(138,43,226,.4); }
+  #journal-content-input {
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 70px;
+    background: var(--navy-light); border: 1px solid var(--navy-border);
+    color: var(--text-main); font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; padding: 8px 10px; border-radius: 4px; line-height: 1.6;
+    margin-bottom: 10px;
+  }
+  #journal-content-input:focus { outline: none; border-color: rgba(77,159,255,.4); }
 </style>
 </head>
 <body>
@@ -1352,23 +1455,111 @@
         <div class="perf-stat-sub" id="perf-bayes-note">using priors</div>
       </div>
     </div>
-    <!-- Tabs: Agent / Manual -->
+    <!-- Tabs: Agent / Manual / Journal -->
     <div class="perf-tabs">
-      <button class="perf-tab active" id="tab-agent"  onclick="switchPerfTab('agent')">AGENT SIGNALS</button>
-      <button class="perf-tab"        id="tab-manual" onclick="switchPerfTab('manual')">MY MANUAL TRADES</button>
+      <button class="perf-tab active" id="tab-agent"   onclick="switchPerfTab('agent')">AGENT SIGNALS</button>
+      <button class="perf-tab"        id="tab-manual"  onclick="switchPerfTab('manual')">MY MANUAL TRADES</button>
+      <button class="perf-tab"        id="tab-journal" onclick="switchPerfTab('journal')">📓 JOURNAL</button>
     </div>
+
     <div id="perf-agent-section">
       <div class="perf-log-title">RECENT ENTER_NOW SIGNALS</div>
       <div class="perf-log" id="perf-log-body">
         <div style="color:var(--text-muted);font-size:11px;">Loading...</div>
       </div>
     </div>
+
     <div id="perf-manual-section" style="display:none;">
       <div class="perf-log-title">MY MANUAL TRADES</div>
       <div class="perf-log" id="perf-manual-body">
         <div style="color:var(--text-muted);font-size:11px;">Loading...</div>
       </div>
     </div>
+
+    <!-- JOURNAL SECTION -->
+    <div id="perf-journal-section" style="display:none;">
+      <!-- toolbar -->
+      <div class="journal-filters">
+        <button class="journal-tag-pill active-all" id="jpill-all"         onclick="setJournalTag('')">ALL</button>
+        <button class="journal-tag-pill"            id="jpill-pattern"     onclick="setJournalTag('pattern')">pattern</button>
+        <button class="journal-tag-pill"            id="jpill-mistake"     onclick="setJournalTag('mistake')">mistake</button>
+        <button class="journal-tag-pill"            id="jpill-observation" onclick="setJournalTag('observation')">observation</button>
+        <button class="journal-tag-pill"            id="jpill-rule"        onclick="setJournalTag('rule')">rule</button>
+        <select id="journal-session-filter" class="journal-form-input" style="margin-left:auto"
+                onchange="fetchJournal()">
+          <option value="">All sessions</option>
+          <option value="tokyo">Tokyo</option>
+          <option value="london">London</option>
+          <option value="new_york">New York</option>
+          <option value="any">No session</option>
+        </select>
+        <button onclick="toggleJournalForm()"
+                style="padding:4px 12px;font-size:9px;font-weight:700;letter-spacing:1px;
+                       font-family:'JetBrains Mono',monospace;cursor:pointer;border-radius:4px;
+                       background:rgba(0,230,118,.1);border:1px solid rgba(0,230,118,.25);
+                       color:var(--green);transition:all .15s;"
+                onmouseover="this.style.background='rgba(0,230,118,.18)'"
+                onmouseout="this.style.background='rgba(0,230,118,.1)'">
+          + New Entry
+        </button>
+      </div>
+
+      <!-- new entry form (hidden by default) -->
+      <div id="journal-new-form">
+        <div class="journal-form-row">
+          <span class="journal-form-label">DATE</span>
+          <input type="date" id="journal-date-input" class="journal-form-input" />
+          <span class="journal-form-label" style="margin-left:8px;">SESSION</span>
+          <select id="journal-session-input" class="journal-form-input">
+            <option value="any">No session</option>
+            <option value="tokyo">Tokyo</option>
+            <option value="london">London</option>
+            <option value="new_york">New York</option>
+          </select>
+        </div>
+        <div class="journal-form-row" style="margin-bottom:8px;">
+          <span class="journal-form-label">TAGS</span>
+          <label class="journal-tag-checkbox">
+            <input type="checkbox" id="jtag-pattern" value="pattern">
+            <span class="chip chip-pattern">pattern</span>
+          </label>
+          <label class="journal-tag-checkbox">
+            <input type="checkbox" id="jtag-mistake" value="mistake">
+            <span class="chip chip-mistake">mistake</span>
+          </label>
+          <label class="journal-tag-checkbox">
+            <input type="checkbox" id="jtag-observation" value="observation">
+            <span class="chip chip-observation">observation</span>
+          </label>
+          <label class="journal-tag-checkbox">
+            <input type="checkbox" id="jtag-rule" value="rule">
+            <span class="chip chip-rule">rule</span>
+          </label>
+        </div>
+        <textarea id="journal-content-input" placeholder="Write your entry..."></textarea>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button onclick="toggleJournalForm()"
+                  style="padding:4px 12px;font-size:9px;font-weight:700;letter-spacing:1px;
+                         font-family:'JetBrains Mono',monospace;cursor:pointer;border-radius:4px;
+                         background:transparent;border:1px solid var(--navy-border);color:var(--text-muted);">
+            Cancel
+          </button>
+          <button onclick="submitJournalEntry()"
+                  style="padding:4px 14px;font-size:9px;font-weight:700;letter-spacing:1px;
+                         font-family:'JetBrains Mono',monospace;cursor:pointer;border-radius:4px;
+                         background:rgba(0,230,118,.12);border:1px solid rgba(0,230,118,.3);
+                         color:var(--green);">
+            Save Entry
+          </button>
+        </div>
+      </div>
+
+      <!-- entries list -->
+      <div id="journal-entries-body">
+        <div style="color:var(--text-muted);font-size:11px;">Loading...</div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -2024,6 +2215,12 @@ async function markTaken(signalId, btn) {
   } catch(e) { console.warn("markTaken error:", e); }
 }
 
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
 function showToast(msg, isError = false) {
   let toast = document.getElementById("outcome-toast");
   if (!toast) {
@@ -2638,11 +2835,164 @@ let _currentPerfTab = "agent";
 
 function switchPerfTab(tab) {
   _currentPerfTab = tab;
-  document.getElementById("perf-agent-section").style.display  = tab === "agent"  ? "" : "none";
-  document.getElementById("perf-manual-section").style.display = tab === "manual" ? "" : "none";
-  document.getElementById("tab-agent").classList.toggle("active",  tab === "agent");
-  document.getElementById("tab-manual").classList.toggle("active", tab === "manual");
-  if (tab === "manual") fetchManualTrades();
+  document.getElementById("perf-agent-section").style.display   = tab === "agent"   ? "" : "none";
+  document.getElementById("perf-manual-section").style.display  = tab === "manual"  ? "" : "none";
+  document.getElementById("perf-journal-section").style.display = tab === "journal" ? "" : "none";
+  document.getElementById("tab-agent").classList.toggle("active",   tab === "agent");
+  document.getElementById("tab-manual").classList.toggle("active",  tab === "manual");
+  document.getElementById("tab-journal").classList.toggle("active", tab === "journal");
+  if (tab === "manual")  fetchManualTrades();
+  if (tab === "journal") fetchJournal();
+}
+
+// ── JOURNAL ──────────────────────────────────────────────────────────────────
+
+let _journalTag = "";
+
+function setJournalTag(tag) {
+  _journalTag = tag;
+  ["all","pattern","mistake","observation","rule"].forEach(t => {
+    const el = document.getElementById(`jpill-${t}`);
+    if (!el) return;
+    el.className = "journal-tag-pill";
+    if ((tag === "" && t === "all") || tag === t) {
+      el.classList.add(`active-${t === "all" ? "all" : t}`);
+    }
+  });
+  fetchJournal();
+}
+
+async function fetchJournal() {
+  const session = document.getElementById("journal-session-filter")?.value || "";
+  let url = `/api/journal?limit=200`;
+  if (_journalTag) url += `&tag=${encodeURIComponent(_journalTag)}`;
+  if (session)     url += `&session=${encodeURIComponent(session)}`;
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    renderJournal(data.entries || []);
+  } catch(e) {
+    document.getElementById("journal-entries-body").innerHTML =
+      `<div style="color:var(--text-muted);font-size:11px;">Failed to load.</div>`;
+  }
+}
+
+function _tagChip(tag) {
+  const cls = ["pattern","mistake","observation","rule"].includes(tag) ? `tag-${tag}` : "tag-other";
+  return `<span class="journal-tag-chip ${cls}">${tag}</span>`;
+}
+
+function _sessionBadge(s) {
+  const label = { tokyo: "TOKYO", london: "LONDON", new_york: "NY", any: "" }[s] || s.toUpperCase();
+  if (!label) return "";
+  return `<span class="journal-session-badge session-${s}">${label}</span>`;
+}
+
+function _formatJournalDate(d) {
+  if (!d) return "—";
+  try {
+    const dt = new Date(d + "T12:00:00Z");
+    return dt.toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric", timeZone:"UTC" });
+  } catch { return d; }
+}
+
+function renderJournal(entries) {
+  const el = document.getElementById("journal-entries-body");
+  if (!entries.length) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:11px;padding:10px 0;">
+      No entries yet — click <strong style="color:var(--green)">+ New Entry</strong> to start your playbook.</div>`;
+    return;
+  }
+
+  el.innerHTML = entries.map(e => {
+    const tags   = (e.tags || "").split(",").map(t => t.trim()).filter(Boolean);
+    const chips  = tags.map(_tagChip).join(" ");
+    const tsUtc  = (e.created_at || "").replace(" ", "T") + "Z";
+    const ts     = tsUtc ? new Date(tsUtc).toLocaleString("en-US", {
+      month:"short", day:"numeric", hour:"numeric", minute:"2-digit",
+      timeZone:"America/New_York"
+    }) + " NY" : "";
+
+    return `
+    <div class="journal-entry" id="jentry-${e.id}">
+      <div class="journal-entry-header">
+        <span class="journal-entry-date">${_formatJournalDate(e.entry_date)}</span>
+        ${_sessionBadge(e.session || "any")}
+        ${chips}
+      </div>
+      <div class="journal-entry-content">${escHtml(e.content || "")}</div>
+      <div class="journal-entry-footer">
+        <span class="journal-entry-ts">${ts}</span>
+        <button class="journal-del-btn" onclick="deleteJournalEntry(${e.id})" title="Delete entry">✕</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function toggleJournalForm() {
+  const form = document.getElementById("journal-new-form");
+  const open = form.style.display === "none" || form.style.display === "";
+  form.style.display = open ? "block" : "none";
+  if (open) {
+    // set date to today in NY time
+    const ny = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    document.getElementById("journal-date-input").value = ny;
+    document.getElementById("journal-content-input").focus();
+  }
+}
+
+async function submitJournalEntry() {
+  const date    = document.getElementById("journal-date-input").value.trim();
+  const session = document.getElementById("journal-session-input").value;
+  const content = document.getElementById("journal-content-input").value.trim();
+  const tags    = ["pattern","mistake","observation","rule"]
+    .filter(t => document.getElementById(`jtag-${t}`)?.checked)
+    .join(",");
+
+  if (!date)    { showToast("Date required", true); return; }
+  if (!content) { showToast("Content required", true); return; }
+
+  try {
+    const resp = await fetch("/api/journal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entry_date: date, session, tags, content }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // reset form
+      document.getElementById("journal-content-input").value = "";
+      document.getElementById("journal-date-input").value = "";
+      ["pattern","mistake","observation","rule"].forEach(t => {
+        const el = document.getElementById(`jtag-${t}`);
+        if (el) el.checked = false;
+      });
+      document.getElementById("journal-new-form").style.display = "none";
+      showToast("Entry saved");
+      fetchJournal();
+    } else {
+      showToast(`Failed: ${data.error || "unknown"}`, true);
+    }
+  } catch(e) {
+    showToast("Network error", true);
+  }
+}
+
+async function deleteJournalEntry(id) {
+  if (!confirm("Delete this journal entry?")) return;
+  try {
+    const resp = await fetch(`/api/journal/${id}`, { method: "DELETE" });
+    const data = await resp.json();
+    if (data.ok) {
+      const el = document.getElementById(`jentry-${id}`);
+      if (el) el.remove();
+      showToast("Entry deleted");
+    } else {
+      showToast("Delete failed", true);
+    }
+  } catch(e) {
+    showToast("Network error", true);
+  }
 }
 
 async function fetchManualTrades() {

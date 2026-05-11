@@ -1,10 +1,11 @@
 """
 db/database.py — SQLite core for forex-agent
 
-Three tables:
+Four tables:
   manual_trades   — trades you log manually
   agent_signals   — ENTER_NOW signals from the scanner
   level_edits     — every SL/TP edit (old/new levels + reason) for model training
+  journal_entries — session diary: patterns, mistakes, observations, rules
 
 All writes go through this module. CSVs in logs/ are kept as-is (read-only backup).
 Thread-safe: write lock for all INSERT/UPDATE, per-thread connections for reads.
@@ -127,6 +128,18 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_agent_signals_pair       ON agent_signals(pair);
             CREATE INDEX IF NOT EXISTS idx_agent_signals_outcome    ON agent_signals(outcome);
             CREATE INDEX IF NOT EXISTS idx_level_edits_signal_id   ON level_edits(signal_id);
+
+            CREATE TABLE IF NOT EXISTS journal_entries (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_date  TEXT,
+                session     TEXT DEFAULT 'any',
+                tags        TEXT DEFAULT '',
+                content     TEXT,
+                created_at  TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_journal_date    ON journal_entries(entry_date);
+            CREATE INDEX IF NOT EXISTS idx_journal_session ON journal_entries(session);
         """)
         conn.commit()
     # Migrations — add columns if they don't exist yet
@@ -437,3 +450,58 @@ def get_performance_summary_db() -> dict:
         "win_rate":      round((agent_stats["wins"] + manual_stats["wins"]) / (agent_stats["total"] + manual_stats["total"]) * 100, 1) if (agent_stats["total"] + manual_stats["total"]) > 0 else 0,
         "avg_pips":      agent_stats["avg_pips"],
     }
+
+
+# ── JOURNAL ENTRIES ───────────────────────────────────────────────────────────
+
+def add_journal_entry(entry_date: str, session: str, tags: str, content: str) -> int:
+    """
+    Insert a journal entry. Returns the new row id.
+    entry_date: YYYY-MM-DD
+    session:    tokyo | london | new_york | any
+    tags:       comma-separated — pattern,mistake,observation,rule
+    content:    free text
+    """
+    from datetime import datetime, timezone
+    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    conn = _get_conn()
+    with _write_lock:
+        cur = conn.execute(
+            "INSERT INTO journal_entries (entry_date, session, tags, content, created_at) VALUES (?,?,?,?,?)",
+            (entry_date, session, tags, content, created_at)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def get_journal_entries(limit: int = 200, tag: str = "", session: str = "") -> list[dict]:
+    """
+    Fetch journal entries, newest first.
+    Optional tag filter (substring match on tags column).
+    Optional session filter (exact match).
+    """
+    conn  = _get_conn()
+    query = "SELECT * FROM journal_entries"
+    args  = []
+    conds = []
+    if tag:
+        conds.append("tags LIKE ?")
+        args.append(f"%{tag}%")
+    if session and session != "any":
+        conds.append("session = ?")
+        args.append(session)
+    if conds:
+        query += " WHERE " + " AND ".join(conds)
+    query += " ORDER BY entry_date DESC, created_at DESC LIMIT ?"
+    args.append(limit)
+    rows = conn.execute(query, args).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_journal_entry(entry_id: int) -> bool:
+    """Delete a journal entry by id. Returns True if a row was deleted."""
+    conn = _get_conn()
+    with _write_lock:
+        cur = conn.execute("DELETE FROM journal_entries WHERE id=?", (entry_id,))
+        conn.commit()
+        return cur.rowcount > 0

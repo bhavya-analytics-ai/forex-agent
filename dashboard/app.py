@@ -9,6 +9,7 @@ UPDATES:
 """
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -743,6 +744,58 @@ def api_import():
         })
     except Exception as e:
         logger.error(f"api_import error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/journal", methods=["GET"])
+def api_journal_get():
+    """
+    Fetch journal entries.
+    Query params: tag=, session=, limit= (default 200)
+    """
+    try:
+        from db.database import get_journal_entries
+        tag     = request.args.get("tag", "").strip()
+        session = request.args.get("session", "").strip()
+        limit   = int(request.args.get("limit", 200))
+        entries = get_journal_entries(limit=limit, tag=tag, session=session)
+        return jsonify({"ok": True, "entries": _sanitize(entries)})
+    except Exception as e:
+        logger.error(f"api_journal_get error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/journal", methods=["POST"])
+def api_journal_post():
+    """
+    Add a journal entry.
+    Body: { "entry_date": "YYYY-MM-DD", "session": "london", "tags": "pattern,mistake", "content": "..." }
+    """
+    try:
+        from db.database import add_journal_entry
+        body    = request.get_json(silent=True) or {}
+        date    = body.get("entry_date", "").strip()
+        session = body.get("session", "any").strip()
+        tags    = body.get("tags", "").strip()
+        content = body.get("content", "").strip()
+        if not date or not content:
+            return jsonify({"ok": False, "error": "entry_date and content required"}), 400
+        entry_id = add_journal_entry(date, session, tags, content)
+        return jsonify({"ok": True, "id": entry_id})
+    except Exception as e:
+        logger.error(f"api_journal_post error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/journal/<int:entry_id>", methods=["DELETE"])
+def api_journal_delete(entry_id: int):
+    """Delete a journal entry by id."""
+    try:
+        from db.database import delete_journal_entry
+        ok = delete_journal_entry(entry_id)
+        return jsonify({"ok": ok})
+    except Exception as e:
+        logger.error(f"api_journal_delete error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
