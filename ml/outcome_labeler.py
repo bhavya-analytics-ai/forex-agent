@@ -2,17 +2,14 @@
 ml/outcome_labeler.py — Auto outcome labeler
 
 Runs automatically in background every 5 minutes.
-15 minutes after a signal fires:
-  → checks if TP1 or SL was hit
-  → labels WIN / LOSS / NEUTRAL
-  → writes back to CSV automatically
+Checks agent signals without outcome — looks at ALL M5 candles since signal
+time until TP1 or SL is hit. No fixed time window — trades run as long as needed.
 
-WIN:     TP1 hit (price reached 1:2 target)
+Reads + writes SQLite (Railway-safe). CSV never touched.
+
+WIN:     TP1 hit
 LOSS:    SL hit
-NEUTRAL: neither hit in 15 min window
-
-Metal-aware:
-  XAU/XAG use dollar thresholds not pip thresholds
+(neither → stays unlabeled, checked again next cycle)
 
 Usage:
   python -m ml.outcome_labeler          # label pending
@@ -22,289 +19,223 @@ Usage:
 import os
 import sys
 import logging
-import pandas as pd
-from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import LOG_CONFIG
 from core.fetcher import fetch_candles, pip_size
 
-logger   = logging.getLogger(__name__)
-LOG_PATH = LOG_CONFIG["signal_log_path"]
+logger = logging.getLogger(__name__)
 
-LABEL_DELAY_MINUTES = 15   # Wait this long before labeling
+LABEL_DELAY_MINUTES = 15   # wait before first check (signal needs time to develop)
+LABEL_MAX_HOURS     = 72   # skip signals older than this — M5 history doesn't go back far enough
 
 
 def label_pending_signals() -> int:
     """
-    Find signals without outcome that are 15+ min old.
-    Label them WIN/LOSS/NEUTRAL based on whether TP1 or SL was hit.
+    Find agent signals without outcome that are 15+ min old.
+    Checks all M5 candles since signal time — labels WIN/LOSS if hit.
     Returns count of newly labeled signals.
     """
-    if not os.path.exists(LOG_PATH):
-        logger.warning("No signal log found.")
+    from datetime import datetime, timezone, timedelta
+    from db.database import get_recent_agent_signals, update_agent_signal_outcome
+
+    rows = get_recent_agent_signals(limit=500)
+    if not rows:
+        logger.debug("No signals in DB")
         return 0
 
-    df = pd.read_csv(LOG_PATH, dtype=str)
+    now    = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=LABEL_DELAY_MINUTES)
+    oldest = now - timedelta(hours=LABEL_MAX_HOURS)
+    pending = [
+        r for r in rows
+        if not r.get("outcome")
+        and r.get("timestamp_utc")
+        and oldest <= _parse_utc(r["timestamp_utc"]) <= cutoff
+    ]
 
-    # Ensure columns exist
-    for col in ["outcome", "outcome_pips", "tp1_price", "sl_price"]:
-        if col not in df.columns:
-            df[col] = ""
-
-    df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"])
-
-    cutoff = datetime.utcnow() - timedelta(minutes=LABEL_DELAY_MINUTES)
-    mask   = (df["outcome"].isna() | (df["outcome"] == "")) & (df["timestamp_utc"] <= cutoff)
-    pending = df[mask]
-
-    if len(pending) == 0:
+    if not pending:
         logger.debug("No pending signals to label")
         return 0
 
-    logger.info(f"Labeling {len(pending)} pending signals...")
+    logger.info(f"Checking {len(pending)} pending signals...")
     labeled = 0
 
-    for idx, row in pending.iterrows():
+    for row in pending:
         outcome, pips = _check_outcome(row)
         if outcome is None:
             continue
 
-        df.loc[idx, "outcome"]      = str(outcome)
-        df.loc[idx, "outcome_pips"] = str(pips)
-        df.loc[idx, "notes"]        = str(_build_post_mortem(row, outcome, pips))
-        labeled += 1
-        logger.info(f"  {row.get('signal_id','?')} → {outcome} ({pips:+.1f} pips)")
+        note = _build_post_mortem(row, outcome, pips)
+        try:
+            update_agent_signal_outcome(row["signal_id"], outcome, pips, note)
+            labeled += 1
+            logger.info(f"  {row['signal_id']} → {outcome} ({pips:+.1f} pips)")
+        except Exception as e:
+            logger.warning(f"Failed to write outcome for {row['signal_id']}: {e}")
 
-    if labeled > 0:
-        df.to_csv(LOG_PATH, index=False)
-        logger.info(f"Labeled {labeled} signals and saved CSV.")
-
+    if labeled:
+        logger.info(f"Labeled {labeled} signals.")
     return labeled
 
 
-def _check_outcome(row) -> tuple:
+def _check_outcome(row: dict) -> tuple:
     """
-    Check if TP1 or SL was hit after the signal fired.
-    Uses TP1/SL from CSV if available, else falls back to pip-based logic.
-    Returns (outcome_str, pips) or (None, 0).
+    Fetch all M5 candles since signal time.
+    Return (outcome, pips) or (None, 0) if neither hit yet.
     """
     pair      = str(row.get("pair", ""))
     direction = str(row.get("direction", "")).lower()
-    sig_time  = pd.to_datetime(row.get("timestamp_utc"), utc=True)
+    sig_time  = _parse_utc(row.get("timestamp_utc"))
 
-    if not pair or not direction or direction == "none":
+    if not pair or not direction or not sig_time:
         return None, 0
 
-    # Get entry, SL, TP1 from CSV
     entry_px = _safe_float(row.get("entry_price"))
-    sl_px    = _safe_float(row.get("sl_price"))
-    tp1_px   = _safe_float(row.get("tp1_price"))
+    sl_px    = _safe_float(row.get("actual_sl") or row.get("sl_price"))
+    tp1_px   = _safe_float(row.get("actual_tp1") or row.get("tp1_price"))
 
     if not entry_px:
         return None, 0
 
     pip = pip_size(pair)
 
-    # Fallback if SL/TP not in CSV (old signals)
     if not sl_px or not tp1_px:
         sl_px, tp1_px = _fallback_levels(pair, direction, entry_px, pip)
 
     try:
-        # Fetch M5 candles after signal — 3 candles = 15 min window
-        df_m5 = fetch_candles(pair, "M5")
-        if df_m5.empty:
+        df = fetch_candles(pair, "M5")
+        if df is None or df.empty:
             return None, 0
 
-        after = df_m5[df_m5.index > sig_time].head(3)
+        # All candles AFTER signal fired
+        after = df[df.index > sig_time]
         if after.empty:
             return None, 0
 
         if direction == "bullish":
-            tp1_hit = (after["high"] >= tp1_px).any()
-            sl_hit  = (after["low"]  <= sl_px).any()
+            tp_hit = (after["high"] >= tp1_px).any()
+            sl_hit = (after["low"]  <= sl_px).any()
         else:
-            tp1_hit = (after["low"]  <= tp1_px).any()
-            sl_hit  = (after["high"] >= sl_px).any()
+            tp_hit = (after["low"]  <= tp1_px).any()
+            sl_hit = (after["high"] >= sl_px).any()
 
-        if tp1_hit and not sl_hit:
-            pips = round(abs(tp1_px - entry_px) / pip, 1)
-            return "WIN", pips
+        if tp_hit and not sl_hit:
+            return "WIN", round(abs(tp1_px - entry_px) / pip, 1)
 
-        elif sl_hit and not tp1_hit:
-            pips = round(abs(sl_px - entry_px) / pip, 1)
-            return "LOSS", -pips
+        elif sl_hit and not tp_hit:
+            return "LOSS", -round(abs(sl_px - entry_px) / pip, 1)
 
-        elif tp1_hit and sl_hit:
+        elif tp_hit and sl_hit:
             # Both hit — whichever came first
             if direction == "bullish":
-                tp1_time = after[after["high"] >= tp1_px].index[0]
-                sl_time  = after[after["low"]  <= sl_px].index[0]
+                tp_time = after[after["high"] >= tp1_px].index[0]
+                sl_time = after[after["low"]  <= sl_px].index[0]
             else:
-                tp1_time = after[after["low"]  <= tp1_px].index[0]
-                sl_time  = after[after["high"] >= sl_px].index[0]
+                tp_time = after[after["low"]  <= tp1_px].index[0]
+                sl_time = after[after["high"] >= sl_px].index[0]
 
-            if tp1_time <= sl_time:
-                pips = round(abs(tp1_px - entry_px) / pip, 1)
-                return "WIN", pips
+            if tp_time <= sl_time:
+                return "WIN", round(abs(tp1_px - entry_px) / pip, 1)
             else:
-                pips = round(abs(sl_px - entry_px) / pip, 1)
-                return "LOSS", -pips
+                return "LOSS", -round(abs(sl_px - entry_px) / pip, 1)
 
-        else:
-            # Neither hit yet — keep monitoring (return None so labeler skips)
-            return None, 0
+        # Neither hit yet — keep watching
+        return None, 0
 
     except Exception as e:
         logger.warning(f"Could not check outcome for {row.get('signal_id','?')}: {e}")
         return None, 0
 
 
-def _build_post_mortem(row, outcome: str, pips: float) -> str:
-    """
-    Build a plain-English note explaining what went right or wrong.
-    Reads condition columns from the signal row.
-    """
-    direction  = str(row.get("direction", "")).lower()
-    setup_type = str(row.get("setup_type", "")).strip()
-    pair       = str(row.get("pair", ""))
+def _build_post_mortem(row: dict, outcome: str, pips: float) -> str:
+    pair      = row.get("pair", "")
+    direction = row.get("direction", "")
+    setup     = row.get("setup_type", "")
 
-    # Read which conditions were true at signal time
-    conditions_present = []
-    conditions_missing = []
-
-    condition_labels = {
+    conditions_present, conditions_missing = [], []
+    for col, label in {
         "score_zone":    "zone quality",
-        "score_tf":      "timeframe alignment",
+        "score_tf":      "TF alignment",
         "score_pattern": "entry pattern",
         "score_session": "session timing",
-        "score_news":    "news filter",
-        "score_fvg":     "FVG present",
+        "score_news":    "news clear",
+        "score_fvg":     "FVG",
         "score_ict":     "ICT confluence",
-    }
-
-    for col, label in condition_labels.items():
-        val = row.get(col, 0)
+    }.items():
         try:
-            val = float(val)
+            val = float(row.get(col) or 0)
         except (TypeError, ValueError):
             val = 0
-        if val > 0:
-            conditions_present.append(label)
-        else:
-            conditions_missing.append(label)
+        (conditions_present if val > 0 else conditions_missing).append(label)
 
-    present_str = ", ".join(conditions_present) if conditions_present else "none"
-    missing_str = ", ".join(conditions_missing) if conditions_missing else "none"
+    present = ", ".join(conditions_present) or "none"
+    missing = ", ".join(conditions_missing) or "none"
 
     if outcome == "WIN":
-        return (
-            f"WIN +{abs(pips):.1f}p | {pair} {direction} | setup: {setup_type} | "
-            f"What worked: {present_str}"
-        )
+        return f"WIN +{abs(pips):.1f}p | {pair} {direction} | {setup} | worked: {present}"
     elif outcome == "LOSS":
-        return (
-            f"LOSS {pips:.1f}p | {pair} {direction} | setup: {setup_type} | "
-            f"What worked: {present_str} | "
-            f"What was missing: {missing_str} | "
-            f"Review: check if entry was too early or zone was weak"
-        )
-    else:
-        return f"NEUTRAL | {pair} {direction} | {setup_type} | neither TP nor SL hit"
+        return (f"LOSS {pips:.1f}p | {pair} {direction} | {setup} | "
+                f"worked: {present} | missing: {missing}")
+    return f"NEUTRAL | {pair} {direction} | {setup}"
 
 
 def _fallback_levels(pair: str, direction: str, entry: float, pip: float) -> tuple:
-    """Fallback SL/TP when not stored in CSV (old signals)."""
-    sl_pips_default = {
-        "XAU_USD": 200, "XAG_USD": 150,
-    }.get(pair, 20)
-
-    sl_dist = sl_pips_default * pip
-
+    sl_pips = {"XAU_USD": 200, "XAG_USD": 150}.get(pair, 20)
+    dist = sl_pips * pip
     if direction == "bullish":
-        sl  = entry - sl_dist
-        tp1 = entry + sl_dist * 2
-    else:
-        sl  = entry + sl_dist
-        tp1 = entry - sl_dist * 2
+        return entry - dist, entry + dist * 2
+    return entry + dist, entry - dist * 2
 
-    return sl, tp1
+
+def _parse_utc(ts_str):
+    if not ts_str:
+        return None
+    try:
+        from datetime import timezone
+        import pandas as pd
+        ts = pd.to_datetime(ts_str, utc=True)
+        return ts.to_pydatetime().replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
 
 
 def _safe_float(val) -> float:
     try:
         v = float(val)
-        return v if v > 0 else 0
+        return v if v > 0 else 0.0
     except (TypeError, ValueError):
-        return 0
+        return 0.0
 
 
 def backfill_outcomes():
-    """Label all historical signals that don't have an outcome yet."""
-    if not os.path.exists(LOG_PATH):
-        logger.warning("No signal log found.")
-        return
+    """Label all historical agent signals that don't have an outcome yet."""
+    from db.database import get_recent_agent_signals, update_agent_signal_outcome, init_db
+    init_db()
 
-    df = pd.read_csv(LOG_PATH)
-
-    for col in ["outcome", "outcome_pips", "tp1_price", "sl_price"]:
-        if col not in df.columns:
-            df[col] = ""
-
-    unlabeled = df[df["outcome"].isna() | (df["outcome"] == "")]
+    rows = get_recent_agent_signals(limit=100_000)
+    unlabeled = [r for r in rows if not r.get("outcome")]
     logger.info(f"Backfilling {len(unlabeled)} signals...")
 
     labeled = 0
-    for idx, row in unlabeled.iterrows():
+    for row in unlabeled:
         outcome, pips = _check_outcome(row)
         if outcome is None:
             continue
-        df.loc[idx, "outcome"]      = outcome
-        df.loc[idx, "outcome_pips"] = pips
+        note = _build_post_mortem(row, outcome, pips)
+        update_agent_signal_outcome(row["signal_id"], outcome, pips, note)
         labeled += 1
+        print(f"  {row['signal_id']} → {outcome} ({pips:+.1f}p)")
 
-    df.to_csv(LOG_PATH, index=False)
-    logger.info(f"Backfill complete — labeled {labeled} signals.")
-    _print_summary(df)
-
-
-def _print_summary(df: pd.DataFrame):
-    completed = df[df["outcome"].isin(["WIN", "LOSS", "NEUTRAL"])]
-    if completed.empty:
-        print("No completed signals to summarize.")
-        return
-
-    wins  = (completed["outcome"] == "WIN").sum()
-    total = len(completed)
-    rate  = round(wins / total * 100, 1)
-
-    print(f"\n📊 Outcome Summary")
-    print(f"   Total labeled: {total}")
-    print(f"   Win rate:      {rate}%")
-
-    if "grade" in df.columns:
-        print(f"\n   By grade:")
-        for grade in ["A+", "A", "B", "C"]:
-            g = completed[completed["grade"] == grade]
-            if len(g) >= 2:
-                gw   = (g["outcome"] == "WIN").sum()
-                gr   = round(gw / len(g) * 100, 1)
-                print(f"     {grade}: {gw}/{len(g)} = {gr}%")
-
-    print(f"\n   By pair:")
-    for pair in completed["pair"].unique():
-        p  = completed[completed["pair"] == pair]
-        pw = (p["outcome"] == "WIN").sum()
-        pr = round(pw / len(p) * 100, 1)
-        print(f"     {pair}: {pw}/{len(p)} = {pr}%")
+    print(f"\nBackfill complete — labeled {labeled} signals.")
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "label"
-
-    if cmd == "backfill":
+    import sys
+    from db.database import init_db
+    init_db()
+    if len(sys.argv) > 1 and sys.argv[1] == "backfill":
         backfill_outcomes()
     else:
         count = label_pending_signals()
