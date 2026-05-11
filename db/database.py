@@ -130,6 +130,7 @@ def init_db():
         """)
         conn.commit()
     # Migrations — add columns if they don't exist yet
+    # agent_signals extras
     for col, typedef in [
         ("user_sl",   "REAL"),
         ("user_tp1",  "REAL"),
@@ -138,6 +139,22 @@ def init_db():
     ]:
         try:
             conn.execute(f"ALTER TABLE agent_signals ADD COLUMN {col} {typedef}")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
+    # manual_trades — add model-training fields (session, killzone, trends, news)
+    # Old rows get NULL — honest, not fabricated
+    for col, typedef in [
+        ("session",   "TEXT"),
+        ("killzone",  "TEXT"),
+        ("h1_trend",  "TEXT"),
+        ("m15_trend", "TEXT"),
+        ("m5_trend",  "TEXT"),
+        ("news_safe", "INTEGER"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE manual_trades ADD COLUMN {col} {typedef}")
             conn.commit()
         except Exception:
             pass  # column already exists
@@ -155,12 +172,13 @@ def insert_manual_trade(row: dict):
             (signal_id, source, timestamp_utc, pair, direction, setup_type,
              entry_price, sl_price, tp1_price, tp2_price,
              sl_pips, tp1_pips, tp2_pips, rr1, outcome, outcome_pips,
-             post_mortem, notes)
+             post_mortem, notes, session, killzone, h1_trend, m15_trend, m5_trend, news_safe)
             VALUES
             (:signal_id, :source, :timestamp_utc, :pair, :direction, :setup_type,
              :entry_price, :sl_price, :tp1_price, :tp2_price,
              :sl_pips, :tp1_pips, :tp2_pips, :rr1, :outcome, :outcome_pips,
-             :post_mortem, :notes)
+             :post_mortem, :notes,
+             :session, :killzone, :h1_trend, :m15_trend, :m5_trend, :news_safe)
         """, row)
         conn.commit()
 

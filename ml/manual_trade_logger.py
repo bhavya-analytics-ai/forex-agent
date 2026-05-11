@@ -132,6 +132,32 @@ def log_manual_trade(pair: str, direction: str, entry_price: float,
     signal_id = _make_signal_id(pair, now)
     levels    = _calculate_levels(pair, direction, entry_price)
 
+    # Capture session/killzone/trend context at time of entry (for model training)
+    session = killzone = h1_trend = m15_trend = m5_trend = None
+    news_safe = None
+    try:
+        from filters.killzones import get_killzone
+        from filters.session import get_session
+        from core.fetcher import fetch_candles
+        from core.structure import detect_structure
+        session  = get_session()
+        killzone = get_killzone() or ""
+        for tf, key in [("H1", "h1_trend"), ("M15", "m15_trend"), ("M5", "m5_trend")]:
+            df = fetch_candles(pair, tf)
+            if df is not None and not df.empty:
+                st = detect_structure(df)
+                val = st.get("trend", "unknown") if st else "unknown"
+                if key == "h1_trend":   h1_trend  = val
+                elif key == "m15_trend": m15_trend = val
+                else:                    m5_trend  = val
+    except Exception as e:
+        logger.warning(f"Context capture failed (non-fatal): {e}")
+    try:
+        from filters.news import is_news_safe
+        news_safe = 1 if is_news_safe(pair) else 0
+    except Exception:
+        pass
+
     row = {
         "signal_id":     signal_id,
         "source":        "manual",
@@ -151,6 +177,12 @@ def log_manual_trade(pair: str, direction: str, entry_price: float,
         "outcome_pips":  "",
         "post_mortem":   "",
         "notes":         notes,
+        "session":       session,
+        "killzone":      killzone,
+        "h1_trend":      h1_trend,
+        "m15_trend":     m15_trend,
+        "m5_trend":      m5_trend,
+        "news_safe":     news_safe,
     }
 
     # Primary: SQLite
@@ -203,8 +235,37 @@ def _monitor_trade(signal_id, pair, direction, entry, sl, tp1, sl_pips):
 
     logger.info(f"Monitoring {signal_id} | {pair} {direction} | SL={sl} TP1={tp1}")
 
+    # On resume: check candle history since trade was logged — catch any missed SL/TP hits
+    try:
+        import pandas as pd
+        log_time = _get_log_time(signal_id)
+        df_hist = fetch_candles(pair, "M5")
+        if df_hist is not None and not df_hist.empty and log_time:
+            df_hist = df_hist[df_hist.index >= pd.Timestamp(log_time, tz="UTC")]
+            if not df_hist.empty:
+                if direction == "bullish":
+                    tp_hit = (df_hist["high"] >= tp1).any()
+                    sl_hit = (df_hist["low"]  <= sl).any()
+                else:
+                    tp_hit = (df_hist["low"]  <= tp1).any()
+                    sl_hit = (df_hist["high"] >= sl).any()
+                if tp_hit or sl_hit:
+                    if tp_hit and sl_hit:
+                        tp_time = df_hist[df_hist["high"] >= tp1].index[0] if direction == "bullish" else df_hist[df_hist["low"] <= tp1].index[0]
+                        sl_time = df_hist[df_hist["low"]  <= sl ].index[0] if direction == "bullish" else df_hist[df_hist["high"] >= sl].index[0]
+                        result = "WIN" if tp_time <= sl_time else "LOSS"
+                    elif tp_hit:
+                        result = "WIN"
+                    else:
+                        result = "LOSS"
+                    logger.info(f"Resume check: {signal_id} already {result} from history")
+                    _close_trade(signal_id, pair, direction, entry, sl, tp1, pip, result)
+                    return
+    except Exception as e:
+        logger.warning(f"Resume history check failed for {signal_id}: {e}")
+
     while True:
-        time.sleep(300)  # check every 5 minutes
+        time.sleep(60)  # check every 60s (was 300s — too slow for gold)
         try:
             sig_time = datetime.utcnow()
             df = fetch_candles(pair, "M5")
