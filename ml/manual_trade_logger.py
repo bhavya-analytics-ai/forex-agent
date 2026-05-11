@@ -453,55 +453,57 @@ def close_trade_manually(signal_id: str, outcome: str, pips: float, notes: str =
 def update_trade_levels(signal_id: str, sl_price: float, tp1_price: float, reason: str = "") -> tuple:
     """
     Update SL and TP1 for an open manual trade.
-    Rewrites the CSV row, recalculates pips/RR, restarts the monitor with new levels.
+    SQLite-first. CSV update is best-effort only.
     Returns (ok: bool, error: str)
     """
-    import pandas as pd
     from core.fetcher import pip_size
 
-    path = _get_log_path()
-    if not __import__("os").path.exists(path):
-        return False, "manual_trades.csv not found"
-
     try:
-        df   = pd.read_csv(path, dtype=str)
-        mask = df["signal_id"] == signal_id
-        if not mask.any():
+        from db.database import _get_conn, update_manual_trade_levels, insert_level_edit
+        conn = _get_conn()
+        row = conn.execute(
+            "SELECT signal_id, pair, direction, entry_price, sl_price, tp1_price "
+            "FROM manual_trades WHERE signal_id = ?", (signal_id,)
+        ).fetchone()
+
+        if not row:
             return False, f"Signal {signal_id} not found"
 
-        row       = df[mask].iloc[0]
-        pair      = str(row["pair"])
-        direction = str(row["direction"])
-        entry     = float(row["entry_price"]) if row["entry_price"] not in ("", "nan") else 0
+        pair      = row["pair"]
+        direction = row["direction"]
+        entry     = float(row["entry_price"])
+        old_sl    = float(row["sl_price"])
+        old_tp1   = float(row["tp1_price"])
 
-        pip  = pip_size(pair)
+        pip      = pip_size(pair)
         sl_pips  = round(abs(sl_price  - entry) / pip, 1)
         tp1_pips = round(abs(tp1_price - entry) / pip, 1)
         rr1      = f"1:{round(tp1_pips / sl_pips, 1)}" if sl_pips > 0 else "1:2"
 
-        # Grab old levels before overwriting (for level_edits log)
-        old_sl  = float(row["sl_price"])  if str(row.get("sl_price",  "")) not in ("", "nan") else 0
-        old_tp1 = float(row["tp1_price"]) if str(row.get("tp1_price", "")) not in ("", "nan") else 0
+        # Primary: SQLite
+        update_manual_trade_levels(signal_id, sl_price, tp1_price, sl_pips, tp1_pips, rr1)
+        insert_level_edit(signal_id, old_sl, sl_price, old_tp1, tp1_price, reason)
 
-        df.loc[mask, "sl_price"]  = str(sl_price)
-        df.loc[mask, "tp1_price"] = str(tp1_price)
-        df.loc[mask, "sl_pips"]   = str(sl_pips)
-        df.loc[mask, "tp1_pips"]  = str(tp1_pips)
-        df.loc[mask, "rr1"]       = rr1
-        df.to_csv(path, index=False)
-
-        # SQLite: update levels + log the edit
+        # Backup: CSV best-effort
         try:
-            from db.database import update_manual_trade_levels, insert_level_edit
-            update_manual_trade_levels(signal_id, sl_price, tp1_price, sl_pips, tp1_pips, rr1)
-            insert_level_edit(signal_id, old_sl, sl_price, old_tp1, tp1_price, reason)
+            import pandas as pd
+            path = _get_log_path()
+            if os.path.exists(path):
+                df   = pd.read_csv(path, dtype=str)
+                mask = df["signal_id"] == signal_id
+                if mask.any():
+                    df.loc[mask, "sl_price"]  = str(sl_price)
+                    df.loc[mask, "tp1_price"] = str(tp1_price)
+                    df.loc[mask, "sl_pips"]   = str(sl_pips)
+                    df.loc[mask, "tp1_pips"]  = str(tp1_pips)
+                    df.loc[mask, "rr1"]       = rr1
+                    df.to_csv(path, index=False)
         except Exception as e:
-            logger.warning(f"SQLite level update failed for {signal_id}: {e}")
+            logger.warning(f"CSV level update failed (non-fatal): {e}")
 
         # Stop old monitor, restart with new levels
         with _monitor_lock:
             _active_monitors.pop(signal_id, None)
-
         _start_monitor(signal_id, pair, direction, entry, sl_price, tp1_price, sl_pips)
 
         logger.info(f"Levels updated: {signal_id} SL={sl_price} TP1={tp1_price} reason='{reason}' | monitor restarted")
@@ -520,23 +522,22 @@ def get_active_monitors() -> list:
 
 def resume_monitors_on_startup():
     """
-    On app restart, resume monitoring any open trades from the CSV
-    (trades with no outcome yet).
+    On app restart, resume monitoring any open trades from SQLite
+    (trades with no outcome yet). CSV is unreliable on Railway (ephemeral FS).
     """
-    path = _get_log_path()
-    if not os.path.exists(path):
-        return
-
     try:
-        import pandas as pd
-        df = pd.read_csv(path)
-        open_trades = df[df["outcome"].isna() | (df["outcome"] == "")]
+        from db.database import _get_conn
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT signal_id, pair, direction, entry_price, sl_price, tp1_price, sl_pips "
+            "FROM manual_trades WHERE outcome IS NULL OR outcome = ''"
+        ).fetchall()
 
-        if open_trades.empty:
+        if not rows:
             return
 
-        logger.info(f"Resuming monitors for {len(open_trades)} open manual trades")
-        for _, row in open_trades.iterrows():
+        logger.info(f"Resuming monitors for {len(rows)} open manual trades")
+        for row in rows:
             try:
                 _start_monitor(
                     signal_id = row["signal_id"],
@@ -545,10 +546,10 @@ def resume_monitors_on_startup():
                     entry     = float(row["entry_price"]),
                     sl        = float(row["sl_price"]),
                     tp1       = float(row["tp1_price"]),
-                    sl_pips   = float(row.get("sl_pips", 20)),
+                    sl_pips   = float(row["sl_pips"] or 20),
                 )
             except Exception as e:
-                logger.warning(f"Could not resume monitor for {row.get('signal_id','?')}: {e}")
+                logger.warning(f"Could not resume monitor for {row['signal_id']}: {e}")
 
     except Exception as e:
         logger.warning(f"resume_monitors_on_startup failed: {e}")
