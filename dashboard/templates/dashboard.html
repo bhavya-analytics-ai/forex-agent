@@ -1051,6 +1051,101 @@
   </div>
 </div>
 
+<!-- TAKE TRADE MODAL -->
+<div class="modal-overlay" id="take-trade-modal" style="display:none;z-index:1000;position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;">
+  <div style="background:#0d1117;border:1px solid rgba(77,159,255,.3);border-radius:10px;width:92vw;max-width:1100px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.07);">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--blue-bright);" id="ttm-header">TAKE TRADE</span>
+      <button onclick="closeTradeModal()" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <!-- Body -->
+    <div style="display:flex;flex:1;overflow:hidden;min-height:0;">
+      <!-- Left: Chart -->
+      <div style="flex:1;display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,.07);">
+        <!-- TF tabs -->
+        <div style="display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.05);">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);margin-right:4px;">TF:</span>
+          <button onclick="ttmSwitchTF('H1',this)" data-tf="H1" id="ttm-tf-H1"
+            style="background:rgba(77,159,255,.2);border:1px solid rgba(77,159,255,.5);color:var(--blue-bright);font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 8px;border-radius:3px;cursor:pointer;">H1</button>
+          <button onclick="ttmSwitchTF('M15',this)" data-tf="M15" id="ttm-tf-M15"
+            style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.15);color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 8px;border-radius:3px;cursor:pointer;">M15</button>
+          <button onclick="ttmSwitchTF('M5',this)" data-tf="M5" id="ttm-tf-M5"
+            style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.15);color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 8px;border-radius:3px;cursor:pointer;">M5</button>
+          <button onclick="ttmSwitchTF('M1',this)" data-tf="M1" id="ttm-tf-M1"
+            style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.15);color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 8px;border-radius:3px;cursor:pointer;">M1</button>
+        </div>
+        <div style="flex:1;min-height:0;">
+          <iframe id="ttm-chart" style="width:100%;height:100%;border:none;min-height:400px;" allowtransparency="true" scrolling="no"></iframe>
+        </div>
+      </div>
+      <!-- Right: Controls -->
+      <div style="width:280px;padding:16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;">
+        <!-- Signal summary -->
+        <div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:6px;padding:10px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted);margin-bottom:6px;">SIGNAL</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--text-primary);" id="ttm-pair">—</span>
+            <span id="ttm-dir" style="font-size:11px;"></span>
+            <span id="ttm-grade" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--yellow);font-weight:700;"></span>
+          </div>
+          <div style="margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);">
+            Entry: <b style="color:var(--text-primary);" id="ttm-entry">—</b>
+            &nbsp;&nbsp;Score: <b style="color:var(--blue-bright);" id="ttm-score">—</b>
+          </div>
+        </div>
+
+        <!-- Scanner levels reference -->
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-muted);padding:6px 8px;background:rgba(255,255,255,.02);border-radius:4px;border:1px solid rgba(255,255,255,.05);">
+          Scanner: SL <span id="ttm-scan-sl" style="color:var(--red);">—</span> &nbsp;|&nbsp; TP <span id="ttm-scan-tp" style="color:var(--green);">—</span>
+        </div>
+
+        <!-- SL/TP inputs -->
+        <div>
+          <label style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-muted);display:block;margin-bottom:4px;">YOUR SL</label>
+          <input type="number" id="ttm-sl" step="0.00001" oninput="ttmRecalc()"
+            style="width:100%;box-sizing:border-box;background:rgba(255,68,68,.06);border:1px solid rgba(255,68,68,.3);color:var(--red);
+                   font-family:'JetBrains Mono',monospace;font-size:12px;padding:6px 10px;border-radius:4px;outline:none;" />
+        </div>
+        <div>
+          <label style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-muted);display:block;margin-bottom:4px;">YOUR TP</label>
+          <input type="number" id="ttm-tp" step="0.00001" oninput="ttmRecalc()"
+            style="width:100%;box-sizing:border-box;background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.3);color:var(--green);
+                   font-family:'JetBrains Mono',monospace;font-size:12px;padding:6px 10px;border-radius:4px;outline:none;" />
+        </div>
+        <div>
+          <label style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-muted);display:block;margin-bottom:4px;">UNITS</label>
+          <input type="number" id="ttm-units" value="1" min="1"
+            style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.15);color:var(--text-primary);
+                   font-family:'JetBrains Mono',monospace;font-size:12px;padding:6px 10px;border-radius:4px;outline:none;" />
+        </div>
+
+        <!-- Live RR display -->
+        <div style="background:rgba(255,255,255,.03);border-radius:4px;padding:8px 10px;font-family:'JetBrains Mono',monospace;font-size:10px;">
+          <span style="color:var(--text-muted);">RR: </span><b id="ttm-rr" style="color:var(--yellow);">—</b>
+          &nbsp;&nbsp;<span style="color:var(--text-muted);">SL dist: </span><b id="ttm-sl-dist" style="color:var(--red);">—</b>
+          &nbsp;&nbsp;<span style="color:var(--text-muted);">TP dist: </span><b id="ttm-tp-dist" style="color:var(--green);">—</b>
+        </div>
+
+        <!-- Buttons -->
+        <button id="ttm-send-btn" onclick="ttmSendToOanda()"
+          style="width:100%;padding:10px;background:rgba(0,230,118,.15);border:1px solid rgba(0,230,118,.4);
+                 color:var(--green);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;
+                 border-radius:5px;cursor:pointer;letter-spacing:0.05em;">
+          🚀 SEND TO OANDA
+        </button>
+        <button onclick="ttmSaveLevelsOnly()"
+          style="width:100%;padding:8px;background:rgba(77,159,255,.08);border:1px solid rgba(77,159,255,.25);
+                 color:var(--blue-bright);font-family:'JetBrains Mono',monospace;font-size:10px;
+                 border-radius:5px;cursor:pointer;">
+          💾 Save levels only (no order)
+        </button>
+        <div id="ttm-feedback" style="font-family:'JetBrains Mono',monospace;font-size:10px;text-align:center;min-height:18px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- EDIT SL/TP MODAL -->
 <div class="modal-overlay" id="edit-levels-modal">
   <div class="modal-box" style="width:340px;">
@@ -1833,9 +1928,14 @@ function renderPerformance(perf, recentSignals) {
       ? `<span style="font-size:9px;color:var(--yellow);font-family:'JetBrains Mono',monospace;margin-left:4px;">SL:${s.user_sl||'—'} TP:${s.user_tp1||'—'}</span>` : "";
     const takenBadge = isTaken
       ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--blue-bright);font-weight:700;">TOOK IT${userLevels}</span>`
-      : `<button class="outcome-btn" id="taken-btn-${s.signal_id}"
-           style="background:rgba(77,159,255,.08);border-color:rgba(77,159,255,.3);color:var(--blue-bright);"
-           onclick="openTookItModal('${s.signal_id}','${s.pair||''}',${s.sl_price||0},${s.tp1_price||0},this)">TOOK IT?</button>`;
+      : `<span style="display:inline-flex;gap:3px;">
+           <button class="outcome-btn" id="taken-btn-${s.signal_id}"
+             style="background:rgba(77,159,255,.08);border-color:rgba(77,159,255,.3);color:var(--blue-bright);"
+             onclick="openTookItModal('${s.signal_id}','${s.pair||''}',${s.sl_price||0},${s.tp1_price||0},this)">TOOK IT?</button>
+           <button class="outcome-btn" id="take-btn-${s.signal_id}"
+             style="background:rgba(0,230,118,.1);border-color:rgba(0,230,118,.35);color:var(--green);font-weight:700;"
+             onclick="openTradeModal(${JSON.stringify(s).replace(/'/g,'&#39;')})">🚀 Take</button>
+         </span>`;
 
     const outcomeHtml = (!s.outcome || s.outcome === "NEUTRAL" || s.outcome === "")
       ? `<span>
@@ -2741,6 +2841,203 @@ function switchChartTF(signalId, symbol, btn, tf) {
     frame.src = `https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(symbol)}&interval=${interval}&theme=dark&style=1&locale=en&hide_top_toolbar=0&hide_legend=0&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&studies=[]&withdateranges=1`;
   }
 }
+
+// ── TAKE TRADE MODAL ──────────────────────────────────────────────────────────
+
+let _ttmSignal   = null;
+let _ttmTakenBtn = null;
+const _TTM_TF_MAP = { H1:"60", M15:"15", M5:"5", M1:"1" };
+
+function _ttmSymbol(pair) {
+  // TradingView symbols: XAU_USD → OANDA:XAUUSD, EUR_USD → FX:EURUSD
+  const p = (pair||"").replace("_","");
+  if (p.includes("XAU") || p.includes("XAG")) return `OANDA:${p}`;
+  return `FX:${p}`;
+}
+
+function _ttmPipSize(pair) {
+  if (!pair) return 0.0001;
+  const p = pair.toUpperCase();
+  if (p.includes("XAU")) return 0.01;
+  if (p.includes("XAG")) return 0.01;
+  if (p.includes("JPY")) return 0.001;
+  return 0.0001;
+}
+
+function openTradeModal(signal) {
+  _ttmSignal = signal;
+
+  // Header
+  const dir     = signal.direction === "bullish" ? "▲ BULL" : "▼ BEAR";
+  const dirColor= signal.direction === "bullish" ? "var(--green)" : "var(--red)";
+  document.getElementById("ttm-header").textContent = `🚀 TAKE TRADE — ${(signal.pair||"").replace("_","/")}`;
+  document.getElementById("ttm-pair").textContent   = (signal.pair||"").replace("_","/");
+  document.getElementById("ttm-dir").innerHTML      = `<span style="color:${dirColor};font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;">${dir}</span>`;
+  document.getElementById("ttm-grade").textContent  = signal.grade || "—";
+  document.getElementById("ttm-entry").textContent  = signal.entry_price || "—";
+  document.getElementById("ttm-score").textContent  = signal.score || "—";
+  document.getElementById("ttm-scan-sl").textContent= signal.sl_price  || "—";
+  document.getElementById("ttm-scan-tp").textContent= signal.tp1_price || "—";
+
+  // Pre-fill SL/TP from scanner
+  document.getElementById("ttm-sl").value    = signal.sl_price  || "";
+  document.getElementById("ttm-tp").value    = signal.tp1_price || "";
+  document.getElementById("ttm-units").value = "1";
+  document.getElementById("ttm-feedback").textContent = "";
+  document.getElementById("ttm-send-btn").disabled = false;
+  document.getElementById("ttm-send-btn").textContent = "🚀 SEND TO OANDA";
+
+  // Load chart — H1 by default
+  const symbol = _ttmSymbol(signal.pair);
+  document.getElementById("ttm-chart").src =
+    `https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(symbol)}&interval=60&theme=dark&style=1&locale=en&hide_top_toolbar=0&hide_legend=0&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&withdateranges=1`;
+
+  // Reset TF buttons
+  ["H1","M15","M5","M1"].forEach(tf => {
+    const btn = document.getElementById(`ttm-tf-${tf}`);
+    if (btn) {
+      btn.style.background   = tf === "H1" ? "rgba(77,159,255,.2)" : "rgba(255,255,255,.05)";
+      btn.style.borderColor  = tf === "H1" ? "rgba(77,159,255,.5)" : "rgba(255,255,255,.15)";
+      btn.style.color        = tf === "H1" ? "var(--blue-bright)"  : "var(--text-muted)";
+    }
+  });
+
+  ttmRecalc();
+  document.getElementById("take-trade-modal").style.display = "flex";
+}
+
+function closeTradeModal() {
+  document.getElementById("take-trade-modal").style.display = "none";
+  document.getElementById("ttm-chart").src = "";
+  _ttmSignal = null;
+}
+
+function ttmSwitchTF(tf, btn) {
+  document.querySelectorAll("#take-trade-modal [data-tf]").forEach(b => {
+    b.style.background  = "rgba(255,255,255,.05)";
+    b.style.borderColor = "rgba(255,255,255,.15)";
+    b.style.color       = "var(--text-muted)";
+  });
+  btn.style.background  = "rgba(77,159,255,.2)";
+  btn.style.borderColor = "rgba(77,159,255,.5)";
+  btn.style.color       = "var(--blue-bright)";
+
+  const symbol   = _ttmSignal ? _ttmSymbol(_ttmSignal.pair) : "";
+  const interval = _TTM_TF_MAP[tf] || "60";
+  document.getElementById("ttm-chart").src =
+    `https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(symbol)}&interval=${interval}&theme=dark&style=1&locale=en&hide_top_toolbar=0&hide_legend=0&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&withdateranges=1`;
+}
+
+function ttmRecalc() {
+  if (!_ttmSignal) return;
+  const entry = parseFloat(_ttmSignal.entry_price) || 0;
+  const sl    = parseFloat(document.getElementById("ttm-sl").value) || 0;
+  const tp    = parseFloat(document.getElementById("ttm-tp").value) || 0;
+  const pip   = _ttmPipSize(_ttmSignal.pair);
+
+  if (!entry || !sl || !tp) {
+    document.getElementById("ttm-rr").textContent      = "—";
+    document.getElementById("ttm-sl-dist").textContent = "—";
+    document.getElementById("ttm-tp-dist").textContent = "—";
+    return;
+  }
+
+  const slDist = Math.abs(entry - sl)  / pip;
+  const tpDist = Math.abs(tp  - entry) / pip;
+  const rr     = slDist > 0 ? (tpDist / slDist).toFixed(2) : "—";
+
+  document.getElementById("ttm-rr").textContent      = rr !== "—" ? `1:${rr}` : "—";
+  document.getElementById("ttm-sl-dist").textContent = `${slDist.toFixed(1)}p`;
+  document.getElementById("ttm-tp-dist").textContent = `${tpDist.toFixed(1)}p`;
+}
+
+async function ttmSendToOanda() {
+  if (!_ttmSignal) return;
+  const sl    = document.getElementById("ttm-sl").value;
+  const tp    = document.getElementById("ttm-tp").value;
+  const units = document.getElementById("ttm-units").value;
+  const fb    = document.getElementById("ttm-feedback");
+
+  if (!sl || !tp || !units) {
+    fb.style.color = "var(--red)";
+    fb.textContent = "SL, TP and units required";
+    return;
+  }
+
+  const btn = document.getElementById("ttm-send-btn");
+  btn.disabled    = true;
+  btn.textContent = "Sending...";
+  fb.textContent  = "";
+
+  try {
+    const resp = await fetch("/api/take_trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        signal_id: _ttmSignal.signal_id,
+        units:     parseFloat(units),
+        sl_price:  parseFloat(sl),
+        tp1_price: parseFloat(tp),
+      }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      fb.style.color  = "var(--green)";
+      fb.textContent  = `✓ Order sent | Fill: ${data.fill_price || "pending"} | Trade #${data.trade_id || "—"}`;
+      btn.textContent = "✓ SENT";
+      showToast(`✓ ${(_ttmSignal.pair||"").replace("_","/")} order sent to OANDA`);
+      setTimeout(closeTradeModal, 1800);
+      fetchPerformance();
+    } else {
+      fb.style.color  = "var(--red)";
+      fb.textContent  = `Error: ${data.error}`;
+      btn.disabled    = false;
+      btn.textContent = "🚀 SEND TO OANDA";
+    }
+  } catch(e) {
+    fb.style.color  = "var(--red)";
+    fb.textContent  = `Network error: ${e.message}`;
+    btn.disabled    = false;
+    btn.textContent = "🚀 SEND TO OANDA";
+  }
+}
+
+async function ttmSaveLevelsOnly() {
+  if (!_ttmSignal) return;
+  const sl  = document.getElementById("ttm-sl").value;
+  const tp  = document.getElementById("ttm-tp").value;
+  const fb  = document.getElementById("ttm-feedback");
+  fb.textContent = "";
+
+  try {
+    const resp = await fetch("/api/mark_taken", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        signal_id: _ttmSignal.signal_id,
+        user_sl:   sl   ? parseFloat(sl)  : null,
+        user_tp1:  tp   ? parseFloat(tp)  : null,
+      }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      showToast("✓ Levels saved — no OANDA order");
+      setTimeout(closeTradeModal, 1200);
+      fetchPerformance();
+    } else {
+      fb.style.color = "var(--red)";
+      fb.textContent = `Error: ${data.error}`;
+    }
+  } catch(e) {
+    fb.style.color = "var(--red)";
+    fb.textContent = `Error: ${e.message}`;
+  }
+}
+
+// Close modal on backdrop click
+document.getElementById("take-trade-modal").addEventListener("click", function(e) {
+  if (e.target === this) closeTradeModal();
+});
 
 // ── MARKET VIBE PANEL ─────────────────────────────────────────────────────────
 

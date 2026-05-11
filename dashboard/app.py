@@ -571,6 +571,118 @@ def api_delete_manual():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/take_trade", methods=["POST"])
+def api_take_trade():
+    """
+    Fire a market order to OANDA practice account.
+    Body: { signal_id, units, sl_price, tp1_price }
+    On success: marks signal as taken + saves user SL/TP to agent_signals.
+    Returns: { ok, order_id, fill_price, units }
+    """
+    try:
+        import oandapyV20
+        import oandapyV20.endpoints.orders as orders
+        from db.database import get_agent_signal, update_agent_signal_took_it
+
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        units     = body.get("units")
+        sl_price  = body.get("sl_price")
+        tp1_price = body.get("tp1_price")
+
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        if units is None or sl_price is None or tp1_price is None:
+            return jsonify({"ok": False, "error": "units, sl_price, tp1_price required"}), 400
+
+        signal = get_agent_signal(signal_id)
+        if not signal:
+            return jsonify({"ok": False, "error": "signal not found"}), 404
+
+        pair      = signal["pair"]
+        direction = signal["direction"]
+        units_int = int(units)
+        if direction == "bearish":
+            units_int = -abs(units_int)
+        else:
+            units_int = abs(units_int)
+
+        # Price precision: metals 2dp, JPY pairs 3dp, others 5dp
+        from core.fetcher import pip_size
+        pip = pip_size(pair)
+        if pip >= 0.01:       price_fmt = "{:.2f}"   # metals
+        elif pip >= 0.001:    price_fmt = "{:.3f}"   # JPY
+        else:                 price_fmt = "{:.5f}"   # majors
+
+        sl_str  = price_fmt.format(float(sl_price))
+        tp_str  = price_fmt.format(float(tp1_price))
+
+        api_key    = os.environ.get("OANDA_API_KEY", "")
+        account_id = os.environ.get("OANDA_ACCOUNT_ID", "")
+        env        = os.environ.get("OANDA_ENVIRONMENT", "practice")
+
+        if not api_key or not account_id:
+            return jsonify({"ok": False, "error": "OANDA credentials not set"}), 500
+
+        client = oandapyV20.API(
+            access_token=api_key,
+            environment="practice" if env == "practice" else "live"
+        )
+
+        order_data = {
+            "order": {
+                "type":      "MARKET",
+                "instrument": pair,
+                "units":     str(units_int),
+                "stopLossOnFill":   {"price": sl_str,  "timeInForce": "GTC"},
+                "takeProfitOnFill": {"price": tp_str,  "timeInForce": "GTC"},
+            }
+        }
+
+        r = orders.OrderCreate(account_id, data=order_data)
+        client.request(r)
+        resp = r.response
+
+        # Extract fill price + order ID from OANDA response
+        fill_price = None
+        order_id   = None
+        trade_id   = None
+        if "orderFillTransaction" in resp:
+            fill = resp["orderFillTransaction"]
+            fill_price = float(fill.get("price", 0))
+            trade_id   = fill.get("tradeOpened", {}).get("tradeID")
+        if "relatedTransactionIDs" in resp:
+            order_id = resp["relatedTransactionIDs"][0]
+
+        # Mark taken + save user levels in DB
+        update_agent_signal_took_it(
+            signal_id,
+            float(sl_price),
+            float(tp1_price),
+        )
+        if body.get("notes"):
+            from db.database import save_note
+            save_note(signal_id, body["notes"], "agent")
+
+        logger.info(f"OANDA order placed: {pair} {units_int} units | fill={fill_price} | trade={trade_id}")
+        return jsonify({
+            "ok":         True,
+            "signal_id":  signal_id,
+            "order_id":   order_id,
+            "trade_id":   trade_id,
+            "fill_price": fill_price,
+            "units":      units_int,
+            "pair":       pair,
+        })
+
+    except oandapyV20.exceptions.V20Error as e:
+        logger.error(f"OANDA API error: {e}")
+        return jsonify({"ok": False, "error": f"OANDA: {e}"}), 400
+    except Exception as e:
+        logger.error(f"take_trade error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/export")
 def api_export():
     """
