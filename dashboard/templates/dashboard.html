@@ -1851,7 +1851,10 @@ function renderPerformance(perf, recentSignals) {
          </span>`;
 
     const livePriceHtml = s.entry_price
-      ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);">@ <b style="color:var(--text-primary)">${s.entry_price}</b></span>`
+      ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);">@ <b style="color:var(--text-primary)">${s.entry_price}</b>
+          <span style="margin-left:6px;color:var(--red);">SL:<b>${s.sl_price||'—'}</b></span>
+          <span style="margin-left:6px;color:var(--green);">TP:<b>${s.tp1_price||'—'}</b></span>
+         </span>`
       : `<span style="font-size:10px;color:var(--text-muted);">—</span>`;
 
     // Inline SL/TP for taken agent signals
