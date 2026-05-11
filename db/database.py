@@ -430,10 +430,10 @@ def get_performance_summary_db() -> dict:
         "manual":        manual_stats,
         "taken_count":   taken_count,
         "by_grade":      by_grade,
-        # legacy keys for dashboard compat
-        "completed":     agent_stats["total"],
-        "wins":          agent_stats["wins"],
-        "losses":        agent_stats["losses"],
-        "win_rate":      agent_stats["win_rate"],
+        # legacy keys for dashboard compat — combined agent + manual
+        "completed":     agent_stats["total"] + manual_stats["total"],
+        "wins":          agent_stats["wins"]   + manual_stats["wins"],
+        "losses":        agent_stats["losses"] + manual_stats["losses"],
+        "win_rate":      round((agent_stats["wins"] + manual_stats["wins"]) / (agent_stats["total"] + manual_stats["total"]) * 100, 1) if (agent_stats["total"] + manual_stats["total"]) > 0 else 0,
         "avg_pips":      agent_stats["avg_pips"],
     }
