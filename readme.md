@@ -227,7 +227,9 @@ Three tables:
 
 **Dual-write:** SQLite primary + CSV backup. Reads: SQLite first, CSV fallback. Old data never lost.
 
-**Current data:** 38 agent signals, 24 manual trades, 27 labeled outcomes.
+**Current data:** 39 agent signals, 34 manual trades, 53 labeled outcomes (25 agent + 28 manual).
+
+**Nightly sync:** `sync.py` runs at 2am via launchd — full mirror Railway → local including deletions. Manual: `python sync.py`.
 
 ---
 
@@ -435,15 +437,28 @@ Three separate NIM calls run in sequence:
 - **Error feedback:** green/red toast on W/L save success/failure, buttons dim while saving
 - **Performance refresh:** stats panel polls every 10s independent of 30s full refresh
 - **Signal Debate:** 3-call ICT bull/bear debate via NVIDIA NIM on A/A+ signals (see above)
+- **TradingView chart panel:** click any manual trade row → live chart opens below with H1/M15/M5/M1 tabs
+- **NZD/JPY added** to log trade pair dropdown
+- **Model training fields** captured at entry: session, killzone, h1_trend, m15_trend, m5_trend, news_safe
+
+### Phase 9 — Data integrity + sync
+- **Labeled count fix:** dashboard now combines agent + manual (was agent-only, showed 32, now correct 53)
+- **CSV crash fix:** CSV write always best-effort wrapped in try/except — SQLite saves first, CSV never blocks
+- **Monitor resume fix:** reads open trades from SQLite on restart (was reading CSV which doesn't exist on Railway)
+- **SL/TP update fix:** `update_trade_levels` now SQLite-first (was CSV-first, returned 400 on Railway)
+- **Scanner SL/TP visible:** shown on every agent signal row (was only shown after TOOK IT)
+- **Auto-labeler audit:** 9 auto-labeled signals checked against real candles — 4 were wrong (marked LOSS, actually WIN), all 7 non-taken signals deleted except 2 correct WINs
+- **Nightly sync:** `sync.py` + launchd — full Railway→local mirror every 2am including deletions
 
 ---
 
 ## WHAT'S NEXT
 
-1. **50 labeled outcomes** — Bayesian flips EST → LIVE (need 23 more)
-2. **Journal panel** — session-level notes tagged (pattern/mistake/observation/rule)
-3. **Grade filter** — minimum grade for ENTER_NOW (A/A+ only or include B)
-4. **Dynamic risk engine** — lot sizing from account balance + volatility
+1. **50 labeled outcomes** — Bayesian flips EST → LIVE (need ~0 more — already at 53, flip pending)
+2. **Auto-labeler fix** — currently uses 15min window + reads CSV; needs SQLite + full trade window
+3. **OANDA paper trading** — "Take Trade" button sends order to OANDA demo account directly from dashboard
+4. **Journal panel** — session-level notes tagged (pattern/mistake/observation/rule)
+5. **Vision chart spec** — `docs/vision_chart_spec.md` — Phase A: chart images in debate; Phase B: training at 200+ outcomes
 
 ---
 
