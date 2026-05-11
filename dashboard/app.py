@@ -491,22 +491,96 @@ def api_save_note():
 
 @app.route("/api/update_agent_levels", methods=["POST"])
 def api_update_agent_levels():
-    """Update user SL/TP on an agent signal. Body: { signal_id, user_sl, user_tp1 }"""
+    """
+    Update user SL/TP on an agent signal.
+    Body: { signal_id, user_sl, user_tp1, reason (optional) }
+
+    Also:
+    - Logs the change to level_edits (source=agent) with timestamp
+    - If oanda_trade_id is set, updates the live GTC order on OANDA practice account
+      so the actual execution level matches the DB
+    """
     try:
-        from db.database import update_agent_signal_levels
+        from db.database import update_agent_signal_levels, get_agent_signal, insert_level_edit
         body      = request.get_json(silent=True) or {}
         signal_id = body.get("signal_id", "").strip()
         user_sl   = body.get("user_sl")
         user_tp1  = body.get("user_tp1")
+        reason    = body.get("reason", "manual adjustment").strip() or "manual adjustment"
+
         if not signal_id:
             return jsonify({"ok": False, "error": "signal_id required"}), 400
-        ok = update_agent_signal_levels(
-            signal_id,
-            float(user_sl)  if user_sl  not in (None, "") else None,
-            float(user_tp1) if user_tp1 not in (None, "") else None,
-        )
-        return jsonify({"ok": ok})
+
+        new_sl  = float(user_sl)  if user_sl  not in (None, "") else None
+        new_tp1 = float(user_tp1) if user_tp1 not in (None, "") else None
+
+        # Get current levels before update (for level_edits log)
+        current = get_agent_signal(signal_id)
+        if not current:
+            return jsonify({"ok": False, "error": "signal not found"}), 404
+
+        old_sl  = float(current.get("actual_sl")  or current.get("sl_price")  or 0)
+        old_tp1 = float(current.get("actual_tp1") or current.get("tp1_price") or 0)
+
+        # Update DB
+        ok = update_agent_signal_levels(signal_id, new_sl, new_tp1)
+        if not ok:
+            return jsonify({"ok": False, "error": "DB update failed"}), 500
+
+        # ── Sync to OANDA live GTC order if trade ID is stored ────────────────
+        oanda_synced = 0
+        oanda_trade_id = current.get("oanda_trade_id")
+        if oanda_trade_id and new_sl and new_tp1:
+            try:
+                import oandapyV20
+                import oandapyV20.endpoints.trades as oanda_trades
+                from core.fetcher import pip_size
+                pip = pip_size(current["pair"])
+                if pip >= 0.01:    price_fmt = "{:.2f}"
+                elif pip >= 0.001: price_fmt = "{:.3f}"
+                else:              price_fmt = "{:.5f}"
+
+                api_key    = os.environ.get("OANDA_API_KEY", "")
+                account_id = os.environ.get("OANDA_ACCOUNT_ID", "")
+                env        = os.environ.get("OANDA_ENVIRONMENT", "practice")
+                client     = oandapyV20.API(
+                    access_token=api_key,
+                    environment="practice" if env == "practice" else "live"
+                )
+                order_body = {
+                    "stopLoss":   {"price": price_fmt.format(new_sl),  "timeInForce": "GTC"},
+                    "takeProfit": {"price": price_fmt.format(new_tp1), "timeInForce": "GTC"},
+                }
+                r = oanda_trades.TradeCRCDO(account_id, oanda_trade_id, data=order_body)
+                client.request(r)
+                oanda_synced = 1
+                logger.info(f"OANDA GTC updated: {signal_id} | trade={oanda_trade_id} | SL={new_sl} TP={new_tp1}")
+            except Exception as oanda_err:
+                # Log warning but don't fail — DB update already succeeded
+                logger.warning(f"OANDA GTC update failed for {signal_id}: {oanda_err}")
+
+        # ── Log to level_edits ────────────────────────────────────────────────
+        try:
+            insert_level_edit(
+                signal_id  = signal_id,
+                old_sl     = old_sl,
+                new_sl     = new_sl or old_sl,
+                old_tp1    = old_tp1,
+                new_tp1    = new_tp1 or old_tp1,
+                reason     = reason,
+                source     = "agent",
+                oanda_synced = oanda_synced,
+            )
+        except Exception as le_err:
+            logger.warning(f"level_edits insert failed for {signal_id}: {le_err}")
+
+        return jsonify({
+            "ok":           True,
+            "signal_id":    signal_id,
+            "oanda_synced": bool(oanda_synced),
+        })
     except Exception as e:
+        logger.error(f"update_agent_levels error: {e}", exc_info=True)
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
@@ -655,11 +729,12 @@ def api_take_trade():
         if "relatedTransactionIDs" in resp:
             order_id = resp["relatedTransactionIDs"][0]
 
-        # Mark taken + save user levels in DB
+        # Mark taken + save user levels + OANDA trade ID in DB
         update_agent_signal_took_it(
             signal_id,
             float(sl_price),
             float(tp1_price),
+            oanda_trade_id=str(trade_id) if trade_id else None,
         )
         if body.get("notes"):
             from db.database import save_note
@@ -687,20 +762,27 @@ def api_take_trade():
 @app.route("/api/export")
 def api_export():
     """
-    Full DB export — returns all manual_trades + agent_signals as JSON.
-    Used by backup.py for daily local backups.
+    Full DB export — all 4 tables as JSON.
+    Used by backup.py + sync.py for Railway → local mirror.
     """
     try:
-        from db.database import get_recent_manual_trades, get_recent_agent_signals
-        manual  = get_recent_manual_trades(limit=100_000)
-        signals = get_recent_agent_signals(limit=100_000)
+        from db.database import (get_recent_manual_trades, get_recent_agent_signals,
+                                  get_all_level_edits, get_all_journal_entries)
+        manual   = get_recent_manual_trades(limit=100_000)
+        signals  = get_recent_agent_signals(limit=100_000)
+        edits    = get_all_level_edits(limit=100_000)
+        journal  = get_all_journal_entries(limit=100_000)
         return jsonify(_sanitize({
             "exported_at":    datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             "manual_trades":  manual,
             "agent_signals":  signals,
+            "level_edits":    edits,
+            "journal_entries": journal,
             "counts": {
-                "manual_trades":  len(manual),
-                "agent_signals":  len(signals),
+                "manual_trades":   len(manual),
+                "agent_signals":   len(signals),
+                "level_edits":     len(edits),
+                "journal_entries": len(journal),
             }
         }))
     except Exception as e:
@@ -711,36 +793,37 @@ def api_export():
 @app.route("/api/import", methods=["POST"])
 def api_import():
     """
-    Bulk import manual_trades + agent_signals from JSON (output of /api/export).
-    Used by seed_railway.py to push local data to Railway on first deploy.
+    Bulk import all 4 tables from JSON (output of /api/export).
+    Used by seed_railway.py + sync to push data to Railway.
     Skips rows that already exist (INSERT OR IGNORE).
     """
     try:
-        from db.database import insert_manual_trade, insert_agent_signal
+        from db.database import (insert_manual_trade, insert_agent_signal,
+                                  insert_level_edit_row, insert_journal_entry_row)
         body    = request.get_json(silent=True) or {}
-        manual  = body.get("manual_trades", [])
-        signals = body.get("agent_signals", [])
+        manual  = body.get("manual_trades",   [])
+        signals = body.get("agent_signals",   [])
+        edits   = body.get("level_edits",     [])
+        journal = body.get("journal_entries", [])
 
-        m_ok = m_skip = 0
-        for row in manual:
-            try:
-                insert_manual_trade(row)
-                m_ok += 1
-            except Exception:
-                m_skip += 1
+        def _bulk(rows, fn):
+            ok = skip = 0
+            for row in rows:
+                try:    fn(row); ok += 1
+                except: skip += 1
+            return ok, skip
 
-        s_ok = s_skip = 0
-        for row in signals:
-            try:
-                insert_agent_signal(row)
-                s_ok += 1
-            except Exception:
-                s_skip += 1
+        m_ok,  m_skip  = _bulk(manual,  insert_manual_trade)
+        s_ok,  s_skip  = _bulk(signals, insert_agent_signal)
+        e_ok,  e_skip  = _bulk(edits,   insert_level_edit_row)
+        j_ok,  j_skip  = _bulk(journal, insert_journal_entry_row)
 
         return jsonify({
             "ok": True,
-            "manual_trades":  {"inserted": m_ok, "skipped": m_skip},
-            "agent_signals":  {"inserted": s_ok, "skipped": s_skip},
+            "manual_trades":   {"inserted": m_ok,  "skipped": m_skip},
+            "agent_signals":   {"inserted": s_ok,  "skipped": s_skip},
+            "level_edits":     {"inserted": e_ok,  "skipped": e_skip},
+            "journal_entries": {"inserted": j_ok,  "skipped": j_skip},
         })
     except Exception as e:
         logger.error(f"api_import error: {e}")

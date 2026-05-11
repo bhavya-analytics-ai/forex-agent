@@ -142,13 +142,14 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_journal_session ON journal_entries(session);
         """)
         conn.commit()
-    # Migrations — add columns if they don't exist yet
-    # agent_signals extras
+    # ── MIGRATIONS ────────────────────────────────────────────────────────────
+    # agent_signals: extra user/actual level columns + oanda_trade_id
     for col, typedef in [
-        ("user_sl",   "REAL"),
-        ("user_tp1",  "REAL"),
-        ("actual_sl", "REAL"),
-        ("actual_tp1","REAL"),
+        ("user_sl",        "REAL"),
+        ("user_tp1",       "REAL"),
+        ("actual_sl",      "REAL"),
+        ("actual_tp1",     "REAL"),
+        ("oanda_trade_id", "TEXT"),   # OANDA fill trade ID — needed to update GTC orders
     ]:
         try:
             conn.execute(f"ALTER TABLE agent_signals ADD COLUMN {col} {typedef}")
@@ -156,8 +157,7 @@ def init_db():
         except Exception:
             pass  # column already exists
 
-    # manual_trades — add model-training fields (session, killzone, trends, news)
-    # Old rows get NULL — honest, not fabricated
+    # manual_trades: model-training context fields
     for col, typedef in [
         ("session",   "TEXT"),
         ("killzone",  "TEXT"),
@@ -171,6 +171,39 @@ def init_db():
             conn.commit()
         except Exception:
             pass  # column already exists
+
+    # level_edits: remove FOREIGN KEY constraint (blocks agent signal edits),
+    # add source column (manual/agent) so we know which table each edit belongs to.
+    # Migration is idempotent — only runs if source column is missing.
+    le_cols = [r[1] for r in conn.execute("PRAGMA table_info(level_edits)").fetchall()]
+    if "source" not in le_cols:
+        try:
+            with _write_lock:
+                conn.executescript("""
+                    CREATE TABLE level_edits_new (
+                        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        signal_id     TEXT,
+                        source        TEXT DEFAULT 'manual',
+                        edited_at     TEXT,
+                        old_sl        REAL,
+                        new_sl        REAL,
+                        old_tp1       REAL,
+                        new_tp1       REAL,
+                        reason        TEXT DEFAULT '',
+                        oanda_synced  INTEGER DEFAULT 0
+                    );
+                    INSERT INTO level_edits_new
+                        (id, signal_id, source, edited_at, old_sl, new_sl, old_tp1, new_tp1, reason, oanda_synced)
+                    SELECT id, signal_id, 'manual', edited_at, old_sl, new_sl, old_tp1, new_tp1, reason, 0
+                    FROM level_edits;
+                    DROP TABLE level_edits;
+                    ALTER TABLE level_edits_new RENAME TO level_edits;
+                    CREATE INDEX IF NOT EXISTS idx_level_edits_signal_id ON level_edits(signal_id);
+                    CREATE INDEX IF NOT EXISTS idx_level_edits_source    ON level_edits(source);
+                """)
+            logger.info("level_edits migrated: FK removed, source + oanda_synced columns added")
+        except Exception as e:
+            logger.warning(f"level_edits migration failed (may already be done): {e}")
 
     logger.info(f"SQLite DB ready at {_db_path()}")
 
@@ -246,15 +279,23 @@ def get_recent_manual_trades(limit: int = 100) -> list[dict]:
 # ── LEVEL EDITS ───────────────────────────────────────────────────────────────
 
 def insert_level_edit(signal_id: str, old_sl: float, new_sl: float,
-                      old_tp1: float, new_tp1: float, reason: str = ""):
+                      old_tp1: float, new_tp1: float, reason: str = "",
+                      source: str = "manual", oanda_synced: int = 0):
+    """
+    Log a SL/TP level change.
+    source: 'manual' (manual_trades) or 'agent' (agent_signals)
+    oanda_synced: 1 if the change was also pushed to the live OANDA GTC order
+    """
     from datetime import datetime, timezone
     conn = _get_conn()
     with _write_lock:
         conn.execute("""
-            INSERT INTO level_edits (signal_id, edited_at, old_sl, new_sl, old_tp1, new_tp1, reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (signal_id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-              old_sl, new_sl, old_tp1, new_tp1, reason))
+            INSERT INTO level_edits
+                (signal_id, source, edited_at, old_sl, new_sl, old_tp1, new_tp1, reason, oanda_synced)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (signal_id, source,
+              datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+              old_sl, new_sl, old_tp1, new_tp1, reason, oanda_synced))
         conn.commit()
 
 
@@ -303,13 +344,14 @@ def update_agent_signal_taken(signal_id: str):
         conn.commit()
 
 
-def update_agent_signal_took_it(signal_id: str, user_sl: float | None, user_tp1: float | None):
+def update_agent_signal_took_it(signal_id: str, user_sl: float | None, user_tp1: float | None,
+                                oanda_trade_id: str | None = None):
     """
-    Mark signal as taken + save user's actual SL/TP.
+    Mark signal as taken + save user's actual SL/TP + OANDA trade ID.
     actual_sl/tp1 = user's levels if provided, else falls back to scanner levels.
+    oanda_trade_id: fill trade ID from OANDA — stored so we can update GTC orders later.
     """
     conn = _get_conn()
-    # Fetch scanner levels as fallback
     row = conn.execute(
         "SELECT sl_price, tp1_price FROM agent_signals WHERE signal_id=?", (signal_id,)
     ).fetchone()
@@ -322,9 +364,9 @@ def update_agent_signal_took_it(signal_id: str, user_sl: float | None, user_tp1:
     with _write_lock:
         conn.execute("""
             UPDATE agent_signals
-            SET taken=1, user_sl=?, user_tp1=?, actual_sl=?, actual_tp1=?
+            SET taken=1, user_sl=?, user_tp1=?, actual_sl=?, actual_tp1=?, oanda_trade_id=?
             WHERE signal_id=?
-        """, (user_sl, user_tp1, actual_sl, actual_tp1, signal_id))
+        """, (user_sl, user_tp1, actual_sl, actual_tp1, oanda_trade_id, signal_id))
         conn.commit()
 
 
@@ -452,6 +494,32 @@ def get_performance_summary_db() -> dict:
     }
 
 
+# ── LEVEL EDITS — EXPORT / IMPORT ────────────────────────────────────────────
+
+def get_all_level_edits(limit: int = 100_000) -> list[dict]:
+    """Return all level_edits rows for export/sync."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM level_edits ORDER BY edited_at ASC LIMIT ?", (limit,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def insert_level_edit_row(row: dict):
+    """
+    Upsert a level_edit row from export data (sync/import).
+    Uses INSERT OR REPLACE to handle both new and updated rows.
+    """
+    conn = _get_conn()
+    cols = ["id","signal_id","source","edited_at","old_sl","new_sl","old_tp1","new_tp1","reason","oanda_synced"]
+    with _write_lock:
+        conn.execute(
+            f"INSERT OR REPLACE INTO level_edits ({','.join(cols)}) VALUES ({','.join('?'*len(cols))})",
+            [row.get(c) for c in cols]
+        )
+        conn.commit()
+
+
 # ── JOURNAL ENTRIES ───────────────────────────────────────────────────────────
 
 def add_journal_entry(entry_date: str, session: str, tags: str, content: str) -> int:
@@ -505,3 +573,27 @@ def delete_journal_entry(entry_id: int) -> bool:
         cur = conn.execute("DELETE FROM journal_entries WHERE id=?", (entry_id,))
         conn.commit()
         return cur.rowcount > 0
+
+
+def get_all_journal_entries(limit: int = 100_000) -> list[dict]:
+    """Return all journal_entries rows for export/sync."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM journal_entries ORDER BY created_at ASC LIMIT ?", (limit,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def insert_journal_entry_row(row: dict) -> None:
+    """
+    Upsert a journal_entry row from export data (sync/import).
+    Uses INSERT OR REPLACE to handle both new and updated rows.
+    """
+    conn = _get_conn()
+    cols = ["id","entry_date","session","tags","content","created_at"]
+    with _write_lock:
+        conn.execute(
+            f"INSERT OR REPLACE INTO journal_entries ({','.join(cols)}) VALUES ({','.join('?'*len(cols))})",
+            [row.get(c) for c in cols]
+        )
+        conn.commit()
