@@ -41,6 +41,12 @@ _MANUAL_COLUMNS = [
     "outcome_pips",
     "post_mortem",      # what went right / wrong in plain English
     "notes",
+    "session",
+    "killzone",
+    "h1_trend",
+    "m15_trend",
+    "m5_trend",
+    "news_safe",
 ]
 
 # Active monitors: signal_id → thread watching for TP/SL hit
