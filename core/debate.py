@@ -131,7 +131,7 @@ def debate_signal(signal: dict) -> dict:
 
     try:
         from openai import OpenAI
-        client = OpenAI(base_url=_NIM_BASE, api_key=api_key)
+        client = OpenAI(base_url=_NIM_BASE, api_key=api_key, timeout=90.0)
 
         sl   = float(signal.get("sl_pips")  or 0)
         tp   = float(signal.get("tp1_pips") or 0)

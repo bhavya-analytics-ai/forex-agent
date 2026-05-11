@@ -2115,10 +2115,19 @@ function renderPerformance(perf, recentSignals) {
     const time   = utcToNY(s.timestamp_utc);
 
     const isTaken = s.taken === true || s.taken === "True" || s.taken === "true" || s.taken === 1;
+    const isOpen  = isTaken && (!s.outcome || s.outcome === "" || s.outcome === "NEUTRAL");
     const userLevels = (s.user_sl || s.user_tp1)
       ? `<span style="font-size:9px;color:var(--yellow);font-family:'JetBrains Mono',monospace;margin-left:4px;">SL:${s.user_sl||'—'} TP:${s.user_tp1||'—'}</span>` : "";
+    const chartBtn = isOpen
+      ? `<button onclick="openChartView(${JSON.stringify(s).replace(/'/g,'&#39;')})"
+           style="background:rgba(77,159,255,.08);border:1px solid rgba(77,159,255,.25);color:var(--blue-bright);
+                  font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 7px;border-radius:3px;
+                  cursor:pointer;white-space:nowrap;" title="Open chart for this position">📊</button>` : "";
     const takenBadge = isTaken
-      ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--blue-bright);font-weight:700;">TOOK IT${userLevels}</span>`
+      ? `<span style="display:inline-flex;align-items:center;gap:4px;">
+           <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--blue-bright);font-weight:700;">TOOK IT${userLevels}</span>
+           ${chartBtn}
+         </span>`
       : `<span style="display:inline-flex;gap:3px;">
            <button class="outcome-btn" id="taken-btn-${s.signal_id}"
              style="background:rgba(77,159,255,.08);border-color:rgba(77,159,255,.3);color:var(--blue-bright);"
@@ -2147,6 +2156,13 @@ function renderPerformance(perf, recentSignals) {
           <span style="margin-left:6px;color:var(--green);">TP:<b>${s.tp1_price||'—'}</b></span>
          </span>`
       : `<span style="font-size:10px;color:var(--text-muted);">—</span>`;
+
+    // Live tracker for taken+open agent signals
+    const _agentSL = s.actual_sl  || s.user_sl  || s.sl_price;
+    const _agentTP = s.actual_tp1 || s.user_tp1 || s.tp1_price;
+    const agentTrackerHtml = isOpen
+      ? _liveTracker(s.pair, s.direction, s.entry_price, _agentSL, _agentTP)
+      : "";
 
     // Inline SL/TP for taken agent signals
     const agentInlineHtml = isTaken ? `
@@ -2196,6 +2212,7 @@ function renderPerformance(perf, recentSignals) {
         </div>
         <div id="debate-result-${s.signal_id}" style="display:none;"></div>
         ${agentInlineHtml}
+        ${agentTrackerHtml}
       </div>`;
   }).join("");
 }
@@ -2219,6 +2236,70 @@ function escHtml(s) {
   return String(s)
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+// ── LIVE POSITION TRACKER ─────────────────────────────────────────────────────
+// Shows current price, P&L pips, and progress bar between SL and TP.
+// Used on any open taken position — both agent signals and manual trades.
+function _liveTracker(pair, direction, entryPx, slPx, tpPx) {
+  const livePx = parseFloat((window._livePrices||{})[pair]);
+  const entry  = parseFloat(entryPx);
+  const sl     = parseFloat(slPx);
+  const tp     = parseFloat(tpPx);
+  if (!livePx || !entry || !sl || !tp) return "";
+
+  const pip    = _ttmPipSize(pair);
+  const isBull = (direction||"").toLowerCase() === "bullish";
+
+  // P&L pips from entry — positive = profitable
+  const pipsDiff = isBull ? (livePx - entry) / pip : (entry - livePx) / pip;
+  const isProfit = pipsDiff >= 0;
+
+  // Progress 0–100%: 0% = at SL, 100% = at TP
+  const range  = isBull ? (tp - sl) : (sl - tp);
+  let progress = 50;
+  if (range > 0) {
+    progress = isBull
+      ? ((livePx - sl)  / range) * 100
+      : ((sl - livePx) / range) * 100;
+  }
+  progress = Math.max(0, Math.min(100, progress));
+
+  const distSL   = (Math.abs(livePx - sl) / pip).toFixed(1);
+  const distTP   = (Math.abs(livePx - tp) / pip).toFixed(1);
+  const pipsSign = isProfit ? "+" : "";
+  const barColor = progress > 60 ? "#00e676" : progress > 30 ? "#ffc107" : "#ff4444";
+  const pipsClr  = isProfit ? "#00e676" : "#ff4444";
+
+  return `
+    <div style="margin-top:5px;padding:7px 10px 12px;background:rgba(255,255,255,.02);
+                border-radius:4px;border:1px solid rgba(255,255,255,.06);
+                font-family:'JetBrains Mono',monospace;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+        <span style="font-size:8px;font-weight:700;letter-spacing:1.5px;color:#fff;
+                     background:rgba(77,159,255,.2);padding:1px 6px;border-radius:3px;">LIVE</span>
+        <span style="font-size:12px;font-weight:700;color:#4d9fff;">${livePx}</span>
+        <span style="font-size:12px;font-weight:700;color:${pipsClr};">${pipsSign}${pipsDiff.toFixed(1)}p</span>
+        <span style="margin-left:auto;font-size:9px;">
+          <span style="color:#ff4444;">SL ${distSL}p away</span>
+          <span style="color:rgba(255,255,255,.3);margin:0 5px;">·</span>
+          <span style="color:#00e676;">TP ${distTP}p away</span>
+        </span>
+      </div>
+      <div style="position:relative;height:4px;background:rgba(255,255,255,.07);border-radius:2px;margin:0 6px;">
+        <div style="position:absolute;inset:0 auto 0 0;width:${progress}%;
+                    background:${barColor};border-radius:2px;"></div>
+        <div style="position:absolute;top:50%;left:calc(${progress}% - 5px);
+                    transform:translateY(-50%);width:10px;height:10px;
+                    border-radius:50%;background:${barColor};border:2px solid #0d1117;
+                    box-shadow:0 0 5px ${barColor};"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:8px;">
+        <span style="color:#ff4444;">SL&nbsp;${sl}</span>
+        <span style="color:rgba(255,255,255,.4);">entry&nbsp;${entry}</span>
+        <span style="color:#00e676;">TP&nbsp;${tp}</span>
+      </div>
+    </div>`;
 }
 
 function showToast(msg, isError = false) {
@@ -2296,12 +2377,17 @@ async function runDebate(signalId, btn) {
   btn.textContent = "⏳ thinking...";
   btn.disabled = true;
 
+  const _debateCtrl    = new AbortController();
+  const _debateTimeout = setTimeout(() => _debateCtrl.abort(), 90000); // 90s hard cap
+
   try {
     const resp = await fetch("/api/debate_signal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signal_id: signalId }),
+      signal: _debateCtrl.signal,
     });
+    clearTimeout(_debateTimeout);
     const data = await resp.json();
 
     if (data.ok) {
@@ -2341,7 +2427,9 @@ async function runDebate(signalId, btn) {
       btn.disabled = false;
     }
   } catch(e) {
-    showToast("Debate failed: network error", true);
+    clearTimeout(_debateTimeout);
+    const msg = e.name === "AbortError" ? "Debate timed out — try again" : "Debate failed: network error";
+    showToast(msg, true);
     btn.textContent = "⚡ Debate";
     btn.disabled = false;
   }
@@ -3073,6 +3161,10 @@ function renderManualTrades(trades) {
     const livePxHtml = livePx
       ? `<span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--blue-bright);">Now: <b>${livePx}</b></span>`
       : "";
+    // Full live tracker shown below the row for open trades
+    const manualTrackerHtml = isOpen
+      ? _liveTracker(t.pair, t.direction, t.entry_price, t.sl_price, t.tp1_price)
+      : "";
 
     const tvPair = (t.pair||"").replace("_","");  // XAU_USD → XAUUSD
     return `
@@ -3098,6 +3190,7 @@ function renderManualTrades(trades) {
         </div>
         <div id="chart-${t.signal_id}" style="display:none;"></div>
         ${inlineEditHtml}
+        ${manualTrackerHtml}
         ${postMortem}
       </div>`;
   }).join("");
@@ -3259,7 +3352,58 @@ function openTradeModal(signal) {
 function closeTradeModal() {
   document.getElementById("take-trade-modal").style.display = "none";
   document.getElementById("ttm-chart").src = "";
+  document.getElementById("ttm-send-btn").style.display = "";  // restore if hidden by chart view
   _ttmSignal = null;
+}
+
+// Opens the chart modal for an already-taken open position (no OANDA send)
+function openChartView(signal) {
+  _ttmSignal = signal;
+
+  const dir      = signal.direction === "bullish" ? "▲ BULL" : "▼ BEAR";
+  const dirColor = signal.direction === "bullish" ? "var(--green)" : "var(--red)";
+  const livePx   = (window._livePrices||{})[signal.pair] || "—";
+
+  // Header shows OPEN POSITION with live price
+  document.getElementById("ttm-header").innerHTML =
+    `📊 OPEN POSITION — <span style="color:var(--blue-bright)">${(signal.pair||"").replace("_","/")}</span>` +
+    `<span style="font-size:10px;color:var(--text-muted);margin-left:10px;">Now: <b style="color:var(--yellow)">${livePx}</b></span>`;
+
+  document.getElementById("ttm-pair").textContent  = (signal.pair||"").replace("_","/");
+  document.getElementById("ttm-dir").innerHTML     = `<span style="color:${dirColor};font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;">${dir}</span>`;
+  document.getElementById("ttm-grade").textContent = signal.grade  || "—";
+  document.getElementById("ttm-entry").textContent = signal.entry_price || "—";
+  document.getElementById("ttm-score").textContent = signal.score  || "—";
+
+  // Use user's actual levels (actual_sl/tp1 > user_sl/tp1 > scanner)
+  const sl = signal.actual_sl  || signal.user_sl  || signal.sl_price  || "";
+  const tp = signal.actual_tp1 || signal.user_tp1 || signal.tp1_price || "";
+  document.getElementById("ttm-scan-sl").textContent = signal.sl_price  || "—";
+  document.getElementById("ttm-scan-tp").textContent = signal.tp1_price || "—";
+  document.getElementById("ttm-sl").value    = sl;
+  document.getElementById("ttm-tp").value    = tp;
+  document.getElementById("ttm-units").value = "—";
+  document.getElementById("ttm-feedback").textContent = "";
+
+  // Hide SEND TO OANDA — already taken
+  document.getElementById("ttm-send-btn").style.display = "none";
+
+  // Load chart — H1 default
+  const symbol = _ttmSymbol(signal.pair);
+  document.getElementById("ttm-chart").src =
+    `https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(symbol)}&interval=60&theme=dark&style=1&locale=en&hide_top_toolbar=0&hide_legend=0&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&withdateranges=1`;
+
+  ["H1","M15","M5","M1"].forEach(tf => {
+    const btn = document.getElementById(`ttm-tf-${tf}`);
+    if (btn) {
+      btn.style.background  = tf === "H1" ? "rgba(77,159,255,.2)" : "rgba(255,255,255,.05)";
+      btn.style.borderColor = tf === "H1" ? "rgba(77,159,255,.5)" : "rgba(255,255,255,.15)";
+      btn.style.color       = tf === "H1" ? "var(--blue-bright)"  : "var(--text-muted)";
+    }
+  });
+
+  ttmRecalc();
+  document.getElementById("take-trade-modal").style.display = "flex";
 }
 
 function ttmSwitchTF(tf, btn) {
