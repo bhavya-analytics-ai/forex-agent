@@ -198,11 +198,15 @@ def log_manual_trade(pair: str, direction: str, entry_price: float,
     except Exception as e:
         logger.warning(f"SQLite write failed for {signal_id}: {e}")
 
-    # Backup: CSV
-    path = _get_log_path()
-    with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=_MANUAL_COLUMNS)
-        writer.writerow(row)
+    # Backup: CSV (best-effort — never crash the trade log if CSV missing)
+    try:
+        _ensure_log_file()
+        path = _get_log_path()
+        with open(path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=_MANUAL_COLUMNS)
+            writer.writerow(row)
+    except Exception as e:
+        logger.warning(f"CSV backup failed (non-fatal, SQLite already saved): {e}")
 
     logger.info(f"Manual trade logged: {signal_id} {pair} {direction} @ {entry_price}")
 
