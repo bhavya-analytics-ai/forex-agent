@@ -246,6 +246,11 @@ def analyze_timeframe(candles: dict, pair: str, timeframe: str) -> dict:
     active_fvgs   = get_active_fvgs(df)
     fvg_overlaps  = fvg_zone_overlap(active_fvgs, zones)
 
+    # H1 50-EMA — used by gold_strategy hard block and dashboard context
+    ema_50 = None
+    if timeframe == "H1" and len(df) >= 20:
+        ema_50 = float(df["close"].ewm(span=50, adjust=False).mean().iloc[-1])
+
     trend_bias = structure.get("bias", "neutral")
     if trend_bias == "neutral":
         trend = structure.get("trend", "ranging")
@@ -286,6 +291,7 @@ def analyze_timeframe(candles: dict, pair: str, timeframe: str) -> dict:
         "current_price":     df["close"].iloc[-1],
         "zone_conflict":     zone_conflict,
         "zone_warning":      zone_warning,
+        "ema_50":            ema_50,
     }
 
 
@@ -516,6 +522,8 @@ def check_confluence(candles: dict, pair: str) -> dict:
         "ict_conflict":        ict_conflict,
         "zone_warnings":       zone_warnings,
         "current_price":       current_price,
+        "h1_ema_50":           h1.get("ema_50"),
+        "price_below_h1_ema":  (current_price < h1["ema_50"]) if h1.get("ema_50") else None,
     }
 
 

@@ -210,6 +210,36 @@ def api_mode_toggle():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/bulk_archive", methods=["POST"])
+def api_bulk_archive():
+    """
+    Bulk archive records by pair + outcome filter.
+    Body: {"pair_like": "XAG%", "outcome": "LOSS"}
+    """
+    try:
+        import sqlite3, os
+        DB_PATH = "/data/forex.db" if os.path.exists("/data") else os.path.join(os.path.dirname(__file__), "..", "logs", "trades.db")
+        body    = request.get_json(silent=True) or {}
+        pair_p  = body.get("pair_like", "").strip()
+        outcome = body.get("outcome", "").strip().upper()
+        if not pair_p or not outcome:
+            return jsonify({"error": "pair_like and outcome required"}), 400
+        conn = sqlite3.connect(os.path.abspath(DB_PATH))
+        r1 = conn.execute(
+            "UPDATE agent_signals SET is_archived=1 WHERE pair LIKE ? AND outcome=?",
+            (pair_p, outcome)
+        )
+        r2 = conn.execute(
+            "UPDATE manual_trades SET is_archived=1 WHERE pair LIKE ? AND outcome=?",
+            (pair_p, outcome)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "agent_archived": r1.rowcount, "manual_archived": r2.rowcount})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/recent_signals")
 def api_recent_signals():
     """Returns last 20 ENTER_NOW signals — SQLite first, CSV fallback."""
@@ -641,6 +671,48 @@ def api_debate_signal():
         return jsonify(result)
     except Exception as e:
         logger.error(f"debate_signal error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/archive_signal", methods=["POST"])
+def api_archive_signal():
+    """Toggle is_archived on an agent signal. Body: { "signal_id": "...", "archived": true/false }"""
+    try:
+        from db.database import _get_conn, _write_lock
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        archived  = 1 if body.get("archived", True) else 0
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        conn = _get_conn()
+        with _write_lock:
+            conn.execute("UPDATE agent_signals SET is_archived=? WHERE signal_id=?",
+                         (archived, signal_id))
+            conn.commit()
+        return jsonify({"ok": True, "signal_id": signal_id, "is_archived": archived})
+    except Exception as e:
+        logger.error(f"archive_signal error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/archive_manual_trade", methods=["POST"])
+def api_archive_manual_trade():
+    """Toggle is_archived on a manual trade. Body: { "signal_id": "...", "archived": true/false }"""
+    try:
+        from db.database import _get_conn, _write_lock
+        body      = request.get_json(silent=True) or {}
+        signal_id = body.get("signal_id", "").strip()
+        archived  = 1 if body.get("archived", True) else 0
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        conn = _get_conn()
+        with _write_lock:
+            conn.execute("UPDATE manual_trades SET is_archived=? WHERE signal_id=?",
+                         (archived, signal_id))
+            conn.commit()
+        return jsonify({"ok": True, "signal_id": signal_id, "is_archived": archived})
+    except Exception as e:
+        logger.error(f"archive_manual_trade error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 

@@ -472,9 +472,15 @@ def apply_gold_strategy(scored: dict, confluence: dict, pair: str, candles: dict
 
     atr = _get_atr(confluence, pair)
 
-    # ── H1 CANDLE COLOR HARD BLOCK (NORMAL MODE) ─────────────────────────────
-    # If the last completed H1 candle closes AGAINST our trade direction → block.
-    # This gate runs in normal mode only (news_sniper never calls gold_strategy).
+    # ── H1 HARD BLOCK (NORMAL MODE ONLY) ─────────────────────────────────────
+    # News Sniper never calls gold_strategy — this gate runs in normal mode only.
+    #
+    # BULL signal killed if:
+    #   (A) Last completed H1 candle is RED (close < open), OR
+    #   (B) Current price is BELOW the H1 50-EMA
+    #
+    # BEAR signal killed if:
+    #   (A) Last completed H1 candle is GREEN (close > open)
     df_h1 = (candles or {}).get("H1")
     if df_h1 is not None and len(df_h1) >= 2:
         last_h1    = df_h1.iloc[-2]   # last *completed* H1 candle
@@ -484,22 +490,38 @@ def apply_gold_strategy(scored: dict, confluence: dict, pair: str, candles: dict
         h1_bearish = last_h1["close"] < last_h1["open"]
         h1_bullish = last_h1["close"] > last_h1["open"]
 
-        if (direction == "bullish" and h1_bearish) or (direction == "bearish" and h1_bullish):
-            h1_color  = "BEARISH" if h1_bearish else "BULLISH"
+        block_reason = None
+
+        if direction == "bullish":
+            # Gate A: red H1 candle
+            if h1_bearish:
+                block_reason = (
+                    f"H1 RED candle ({body_pct}% body) vs BULL signal"
+                )
+            # Gate B: price below H1 50-EMA (only if candle gate passed)
+            if block_reason is None:
+                h1_ema = confluence.get("h1_ema_50") or confluence.get("h1", {}).get("ema_50")
+                if h1_ema and price < h1_ema:
+                    block_reason = (
+                        f"Price {round(price, 2)} below H1 50-EMA {round(h1_ema, 2)} — BULL blocked"
+                    )
+
+        elif direction == "bearish" and h1_bullish:
             block_reason = (
-                f"H1 candle color block — last H1 closed {h1_color} "
-                f"({body_pct}% body) vs {direction} signal"
+                f"H1 GREEN candle ({body_pct}% body) vs BEAR signal"
             )
+
+        if block_reason:
             scored.update({
                 "dl_blocked":      True,
                 "dl_block_reason": block_reason,
                 "should_alert":    False,
                 "should_log":      False,
-                "flags":           [f"🚫 H1 COLOR BLOCK — {block_reason}"],
+                "flags":           [f"🚫 H1 HARD BLOCK — {block_reason}"],
                 "entry_state":     "SKIP",
                 "gold_mode":       True,
             })
-            logger.info(f"{pair} | H1 COLOR BLOCK | {block_reason}")
+            logger.info(f"{pair} | H1 HARD BLOCK | {block_reason}")
             return scored
 
     # ── SNIPER SEQUENCE ───────────────────────────────────────────────────────
