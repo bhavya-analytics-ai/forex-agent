@@ -1,191 +1,169 @@
 """
 ml/outcome_labeler.py — Auto outcome labeler
 
-Runs automatically in background every 5 minutes.
-Checks agent signals without outcome — looks at ALL M5 candles since signal
-time until TP1 or SL is hit. No fixed time window — trades run as long as needed.
+Runs every 5 minutes via scheduler.
+Finds all taken signals with no outcome + valid user_sl/user_tp1.
+Fetches full M5 candle history from entry_time → now via OANDA.
+Walks candles in order — first level touched is the outcome.
 
-Reads + writes SQLite (Railway-safe). CSV never touched.
+WIN:  TP1 hit first
+LOSS: SL hit first
+Neither hit yet → stays unlabeled, checked again next cycle
 
-WIN:     TP1 hit
-LOSS:    SL hit
-(neither → stays unlabeled, checked again next cycle)
+Reads + writes SQLite only. CSV never touched. Railway-safe.
 
 Usage:
   python -m ml.outcome_labeler          # label pending
-  python -m ml.outcome_labeler backfill # label all historical
+  python -m ml.outcome_labeler backfill # same thing, alias
 """
 
 import os
 import sys
+import time
 import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.fetcher import fetch_candles, pip_size
-
 logger = logging.getLogger(__name__)
 
-LABEL_DELAY_MINUTES = 15   # wait before first check (signal needs time to develop)
-LABEL_MAX_HOURS     = 72   # skip signals older than this — M5 history doesn't go back far enough
+# Wait at least this long after signal before checking (trade needs time to develop)
+LABEL_DELAY_MINUTES = 15
 
 
 def label_pending_signals() -> int:
     """
-    Find agent signals without outcome that are 15+ min old.
-    Checks all M5 candles since signal time — labels WIN/LOSS if hit.
+    Find all taken signals with no outcome and valid user SL/TP.
+    Fetch M5 candles from entry_time → now, determine WIN/LOSS.
     Returns count of newly labeled signals.
     """
     from datetime import datetime, timezone, timedelta
-    from db.database import get_recent_agent_signals, update_agent_signal_outcome
+    from db.database import get_unlabeled_taken_signals, update_agent_signal_outcome
+    from core.fetcher import fetch_candles_from, pip_size
 
-    rows = get_recent_agent_signals(limit=500)
-    if not rows:
-        logger.debug("No signals in DB")
+    signals = get_unlabeled_taken_signals()
+    if not signals:
+        logger.debug("[labeler] No unlabeled taken signals.")
         return 0
 
     now    = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=LABEL_DELAY_MINUTES)
-    oldest = now - timedelta(hours=LABEL_MAX_HOURS)
-    pending = [
-        r for r in rows
-        if not r.get("outcome")
-        and r.get("timestamp_utc")
-        and oldest <= _parse_utc(r["timestamp_utc"]) <= cutoff
-    ]
+
+    # Only process signals old enough to have developed
+    pending = [s for s in signals if _parse_utc(s["timestamp_utc"]) <= cutoff]
 
     if not pending:
-        logger.debug("No pending signals to label")
+        logger.debug("[labeler] All unlabeled signals are too recent (<15 min).")
         return 0
 
-    logger.info(f"Checking {len(pending)} pending signals...")
+    logger.info(f"[labeler] Checking {len(pending)} unlabeled taken signals...")
     labeled = 0
 
-    for row in pending:
-        outcome, pips = _check_outcome(row)
-        if outcome is None:
+    for sig in pending:
+        sig_id    = sig["signal_id"]
+        pair      = sig["pair"]
+        direction = (sig["direction"] or "").lower()
+        entry_px  = _safe_float(sig["entry_price"])
+        user_sl   = _safe_float(sig["user_sl"])
+        user_tp1  = _safe_float(sig["user_tp1"])
+        sig_time  = _parse_utc(sig["timestamp_utc"])
+
+        if not all([pair, direction, entry_px, user_sl, user_tp1, sig_time]):
+            logger.warning(f"[labeler] {sig_id} — missing fields, skipping")
             continue
 
-        note = _build_post_mortem(row, outcome, pips)
+        pip = pip_size(pair)
+
         try:
-            update_agent_signal_outcome(row["signal_id"], outcome, pips, note)
-            labeled += 1
-            logger.info(f"  {row['signal_id']} → {outcome} ({pips:+.1f} pips)")
+            df = fetch_candles_from(pair, "M5", sig_time)
         except Exception as e:
-            logger.warning(f"Failed to write outcome for {row['signal_id']}: {e}")
+            logger.warning(f"[labeler] {sig_id} — candle fetch failed: {e}")
+            continue
+
+        if df is None or df.empty:
+            logger.debug(f"[labeler] {sig_id} — no candles returned yet")
+            continue
+
+        # Only candles AFTER signal fired
+        after = df[df.index > sig_time]
+        if after.empty:
+            logger.debug(f"[labeler] {sig_id} — no candles after signal time")
+            continue
+
+        outcome, pips = _determine_outcome(after, direction, entry_px, user_sl, user_tp1, pip)
+
+        if outcome is None:
+            logger.debug(f"[labeler] {sig_id} — neither SL nor TP hit yet")
+            continue
+
+        note = _build_note(sig, outcome, pips)
+        try:
+            update_agent_signal_outcome(sig_id, outcome, pips, note)
+            labeled += 1
+            logger.info(f"[labeler] {pair} {direction} {sig_id[:8]} → {outcome} ({pips:+.1f} pips)")
+        except Exception as e:
+            logger.warning(f"[labeler] {sig_id} — write failed: {e}")
+
+        # Small sleep between signals to avoid OANDA rate limit
+        time.sleep(0.3)
 
     if labeled:
-        logger.info(f"Labeled {labeled} signals.")
+        logger.info(f"[labeler] Labeled {labeled} signal(s) this run.")
     return labeled
 
 
-def _check_outcome(row: dict) -> tuple:
+def _determine_outcome(after, direction: str, entry_px: float,
+                        sl: float, tp: float, pip: float) -> tuple:
     """
-    Fetch all M5 candles since signal time.
-    Return (outcome, pips) or (None, 0) if neither hit yet.
+    Walk M5 candles in order. Return (outcome, pips) when SL or TP is hit,
+    or (None, 0) if neither hit yet.
+
+    BULL: price goes UP to hit TP (high >= tp), DOWN to hit SL (low <= sl)
+    BEAR: price goes DOWN to hit TP (low <= tp), UP to hit SL (high >= sl)
     """
-    pair      = str(row.get("pair", ""))
-    direction = str(row.get("direction", "")).lower()
-    sig_time  = _parse_utc(row.get("timestamp_utc"))
+    is_bull = "bull" in direction
 
-    if not pair or not direction or not sig_time:
-        return None, 0
+    for _, candle in after.iterrows():
+        high = candle["high"]
+        low  = candle["low"]
 
-    entry_px = _safe_float(row.get("entry_price"))
-    sl_px    = _safe_float(row.get("actual_sl") or row.get("sl_price"))
-    tp1_px   = _safe_float(row.get("actual_tp1") or row.get("tp1_price"))
-
-    if not entry_px:
-        return None, 0
-
-    pip = pip_size(pair)
-
-    if not sl_px or not tp1_px:
-        sl_px, tp1_px = _fallback_levels(pair, direction, entry_px, pip)
-
-    try:
-        df = fetch_candles(pair, "M5")
-        if df is None or df.empty:
-            return None, 0
-
-        # All candles AFTER signal fired
-        after = df[df.index > sig_time]
-        if after.empty:
-            return None, 0
-
-        if direction == "bullish":
-            tp_hit = (after["high"] >= tp1_px).any()
-            sl_hit = (after["low"]  <= sl_px).any()
+        if is_bull:
+            tp_hit = high >= tp
+            sl_hit = low  <= sl
         else:
-            tp_hit = (after["low"]  <= tp1_px).any()
-            sl_hit = (after["high"] >= sl_px).any()
+            tp_hit = low  <= tp
+            sl_hit = high >= sl
 
-        if tp_hit and not sl_hit:
-            return "WIN", round(abs(tp1_px - entry_px) / pip, 1)
-
-        elif sl_hit and not tp_hit:
-            return "LOSS", -round(abs(sl_px - entry_px) / pip, 1)
-
-        elif tp_hit and sl_hit:
-            # Both hit — whichever came first
-            if direction == "bullish":
-                tp_time = after[after["high"] >= tp1_px].index[0]
-                sl_time = after[after["low"]  <= sl_px].index[0]
+        if tp_hit and sl_hit:
+            # Both hit same candle — use open price to determine which side
+            # If open is closer to TP side, TP was hit first
+            if is_bull:
+                # Opened closer to TP (high) → TP first, closer to SL (low) → SL first
+                tp_dist = abs(candle["open"] - tp)
+                sl_dist = abs(candle["open"] - sl)
             else:
-                tp_time = after[after["low"]  <= tp1_px].index[0]
-                sl_time = after[after["high"] >= sl_px].index[0]
+                tp_dist = abs(candle["open"] - tp)
+                sl_dist = abs(candle["open"] - sl)
 
-            if tp_time <= sl_time:
-                return "WIN", round(abs(tp1_px - entry_px) / pip, 1)
+            if tp_dist <= sl_dist:
+                return "WIN",  round(abs(tp - entry_px) / pip, 1)
             else:
-                return "LOSS", -round(abs(sl_px - entry_px) / pip, 1)
+                return "LOSS", -round(abs(sl - entry_px) / pip, 1)
 
-        # Neither hit yet — keep watching
-        return None, 0
+        elif tp_hit:
+            return "WIN",  round(abs(tp - entry_px) / pip, 1)
 
-    except Exception as e:
-        logger.warning(f"Could not check outcome for {row.get('signal_id','?')}: {e}")
-        return None, 0
+        elif sl_hit:
+            return "LOSS", -round(abs(sl - entry_px) / pip, 1)
 
-
-def _build_post_mortem(row: dict, outcome: str, pips: float) -> str:
-    pair      = row.get("pair", "")
-    direction = row.get("direction", "")
-    setup     = row.get("setup_type", "")
-
-    conditions_present, conditions_missing = [], []
-    for col, label in {
-        "score_zone":    "zone quality",
-        "score_tf":      "TF alignment",
-        "score_pattern": "entry pattern",
-        "score_session": "session timing",
-        "score_news":    "news clear",
-        "score_fvg":     "FVG",
-        "score_ict":     "ICT confluence",
-    }.items():
-        try:
-            val = float(row.get(col) or 0)
-        except (TypeError, ValueError):
-            val = 0
-        (conditions_present if val > 0 else conditions_missing).append(label)
-
-    present = ", ".join(conditions_present) or "none"
-    missing = ", ".join(conditions_missing) or "none"
-
-    if outcome == "WIN":
-        return f"WIN +{abs(pips):.1f}p | {pair} {direction} | {setup} | worked: {present}"
-    elif outcome == "LOSS":
-        return (f"LOSS {pips:.1f}p | {pair} {direction} | {setup} | "
-                f"worked: {present} | missing: {missing}")
-    return f"NEUTRAL | {pair} {direction} | {setup}"
+    return None, 0
 
 
-def _fallback_levels(pair: str, direction: str, entry: float, pip: float) -> tuple:
-    sl_pips = {"XAU_USD": 200, "XAG_USD": 150}.get(pair, 20)
-    dist = sl_pips * pip
-    if direction == "bullish":
-        return entry - dist, entry + dist * 2
-    return entry + dist, entry - dist * 2
+def _build_note(sig: dict, outcome: str, pips: float) -> str:
+    pair      = sig.get("pair", "")
+    direction = sig.get("direction", "")
+    setup     = sig.get("setup_type", "")
+    tag       = f"+{abs(pips):.1f}p" if outcome == "WIN" else f"{pips:.1f}p"
+    return f"[auto-labeled] {outcome} {tag} | {pair} {direction} | {setup}"
 
 
 def _parse_utc(ts_str):
@@ -208,35 +186,12 @@ def _safe_float(val) -> float:
         return 0.0
 
 
-def backfill_outcomes():
-    """Label all historical agent signals that don't have an outcome yet."""
-    from db.database import get_recent_agent_signals, update_agent_signal_outcome, init_db
-    init_db()
-
-    rows = get_recent_agent_signals(limit=100_000)
-    unlabeled = [r for r in rows if not r.get("outcome")]
-    logger.info(f"Backfilling {len(unlabeled)} signals...")
-
-    labeled = 0
-    for row in unlabeled:
-        outcome, pips = _check_outcome(row)
-        if outcome is None:
-            continue
-        note = _build_post_mortem(row, outcome, pips)
-        update_agent_signal_outcome(row["signal_id"], outcome, pips, note)
-        labeled += 1
-        print(f"  {row['signal_id']} → {outcome} ({pips:+.1f}p)")
-
-    print(f"\nBackfill complete — labeled {labeled} signals.")
-
-
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    import sys
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
     from db.database import init_db
     init_db()
-    if len(sys.argv) > 1 and sys.argv[1] == "backfill":
-        backfill_outcomes()
-    else:
-        count = label_pending_signals()
-        print(f"Labeled {count} signals.")
+    count = label_pending_signals()
+    print(f"\nLabeled {count} signal(s).")

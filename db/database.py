@@ -388,6 +388,25 @@ def get_recent_agent_signals(limit: int = 20) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_unlabeled_taken_signals() -> list[dict]:
+    """
+    All taken signals with no outcome and valid user SL/TP set.
+    These are the candidates for auto-labeling.
+    """
+    conn = _get_conn()
+    rows = conn.execute("""
+        SELECT signal_id, pair, direction, timestamp_utc, entry_price,
+               user_sl, user_tp1, sl_price, tp1_price
+        FROM agent_signals
+        WHERE taken = 1
+          AND (outcome IS NULL OR outcome = '')
+          AND user_sl  IS NOT NULL AND user_sl  > 0
+          AND user_tp1 IS NOT NULL AND user_tp1 > 0
+        ORDER BY timestamp_utc ASC
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_agent_signal(signal_id: str) -> dict | None:
     conn = _get_conn()
     row  = conn.execute(

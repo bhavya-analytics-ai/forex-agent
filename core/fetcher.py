@@ -8,7 +8,7 @@ FIX: XAU_USD pip size corrected from 0.1 → 0.01
 """
 
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from oandapyV20 import API
 from oandapyV20.endpoints.instruments import InstrumentsCandles
@@ -59,6 +59,75 @@ def fetch_candles(pair: str, timeframe: str) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Failed to fetch {pair} {timeframe}: {e}")
         return pd.DataFrame()
+
+
+def fetch_candles_from(pair: str, timeframe: str, from_time: datetime) -> pd.DataFrame:
+    """
+    Fetch all M5 (or any TF) candles from from_time to now.
+    Uses OANDA 'from'/'to' params instead of count — supports historical lookback
+    of any length. Paginates automatically (OANDA max 5000 candles per call).
+    Returns DataFrame with columns: open, high, low, close, volume — indexed by UTC time.
+    """
+    OANDA_MAX = 4999   # stay just under OANDA's 5000 limit
+
+    now = datetime.now(timezone.utc)
+    if from_time.tzinfo is None:
+        from_time = from_time.replace(tzinfo=timezone.utc)
+
+    all_rows = []
+    cursor = from_time
+
+    while cursor < now:
+        params = {
+            "granularity": timeframe,
+            "from":        cursor.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "to":          now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "count":       OANDA_MAX,
+            "price":       "M",
+        }
+        try:
+            req = InstrumentsCandles(instrument=pair, params=params)
+            client.request(req)
+            raw = req.response["candles"]
+        except Exception as e:
+            logger.error(f"fetch_candles_from {pair} {timeframe} failed: {e}")
+            break
+
+        if not raw:
+            break
+
+        rows = []
+        for c in raw:
+            if not c["complete"]:
+                continue
+            rows.append({
+                "time":   pd.to_datetime(c["time"], utc=True),
+                "open":   float(c["mid"]["o"]),
+                "high":   float(c["mid"]["h"]),
+                "low":    float(c["mid"]["l"]),
+                "close":  float(c["mid"]["c"]),
+                "volume": int(c["volume"]),
+            })
+
+        all_rows.extend(rows)
+
+        # If we got fewer than max, we've reached now — done
+        if len(raw) < OANDA_MAX:
+            break
+
+        # Advance cursor to last candle time + 1 second to avoid duplicates
+        last_time = pd.to_datetime(raw[-1]["time"], utc=True)
+        cursor = last_time.to_pydatetime() + pd.Timedelta(seconds=1)
+
+    if not all_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_rows)
+    df.set_index("time", inplace=True)
+    df.sort_index(inplace=True)
+    df = df[~df.index.duplicated(keep="first")]
+    logger.info(f"fetch_candles_from: {pair} {timeframe} from {from_time} → {len(df)} candles")
+    return df
 
 
 def fetch_all_timeframes(pair: str) -> dict:
