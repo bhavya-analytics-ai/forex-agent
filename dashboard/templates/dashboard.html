@@ -115,6 +115,10 @@
     letter-spacing: 1px;
   }
 
+  @keyframes sniper-pulse {
+    0%,100% { box-shadow: 0 0 0px #f5c400; opacity: 1; }
+    50%      { box-shadow: 0 0 12px #f5c400, 0 0 24px rgba(245,196,0,.4); opacity: .85; }
+  }
   .pulse {
     width: 7px; height: 7px;
     background: var(--green);
@@ -824,6 +828,12 @@
   .perf-log-outcome-loss { color: var(--red); font-weight: 700; }
   .perf-log-outcome-none { color: var(--text-muted); }
   .perf-log-time { color: var(--text-muted); font-size: 10px; }
+  .badge-sniper { display:inline-block; font-size:9px; padding:1px 5px; border-radius:2px;
+                  margin-left:5px; background:rgba(255,165,0,.15); color:var(--yellow);
+                  border:1px solid rgba(255,165,0,.3); vertical-align:middle; font-weight:400; }
+  .badge-normal { display:inline-block; font-size:9px; padding:1px 5px; border-radius:2px;
+                  margin-left:5px; background:rgba(77,159,255,.08); color:var(--blue-bright);
+                  border:1px solid rgba(77,159,255,.2); vertical-align:middle; font-weight:400; }
 
   .outcome-btn {
     padding: 2px 8px; border-radius: 3px; font-size: 10px;
@@ -1375,23 +1385,23 @@
   </div>
 </div>
 
-<!-- NEWS SNIPER BANNER (hidden by default) -->
-<div id="news-sniper-banner" style="display:none; background:#1a0a00; border-bottom:2px solid #ff4444; padding:10px 28px; display:none; align-items:center; justify-content:space-between;">
-  <div style="display:flex; align-items:center; gap:12px;">
-    <span style="background:#ff4444; color:#fff; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; letter-spacing:2px; padding:4px 10px; border-radius:4px; animation:pulse 1s infinite;">⚡ NEWS SNIPER ACTIVE</span>
-    <span style="color:#ff9100; font-size:12px; font-family:'JetBrains Mono',monospace;" id="sniper-source-label">AUTO</span>
-    <span style="color:#aaa; font-size:11px;">M1 CHoCH mode — spike reversal entries only</span>
+<!-- NEWS SNIPER BANNER (hidden by default, shown when sniper mode active) -->
+<div id="news-sniper-banner" style="display:none; background:#1a1200; border-bottom:2px solid #f5c400; padding:10px 28px; align-items:center; justify-content:space-between;">
+  <div style="display:flex; align-items:center; gap:14px;">
+    <span id="sniper-pulse-badge" style="background:#f5c400; color:#111; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:800; letter-spacing:2px; padding:4px 12px; border-radius:4px; animation:sniper-pulse 1.2s ease-in-out infinite;">⚡ SNIPER ACTIVE</span>
+    <span style="color:#f5c400; font-size:11px; font-family:'JetBrains Mono',monospace; opacity:.7;" id="sniper-source-label">MANUAL</span>
+    <span style="color:#999; font-size:11px; font-family:'JetBrains Mono',monospace;">XAU/USD only · M5 sweep → M1 CHoCH</span>
   </div>
   <button onclick="toggleMode()" id="mode-toggle-btn"
-    style="background:rgba(255,68,68,.15); border:1px solid rgba(255,68,68,.4); color:#ff4444; padding:5px 14px; border-radius:4px; cursor:pointer; font-size:11px; font-family:'JetBrains Mono',monospace; font-weight:700; letter-spacing:1px;">
-    SWITCH TO NORMAL
+    style="background:rgba(245,196,0,.12); border:1px solid rgba(245,196,0,.4); color:#f5c400; padding:5px 14px; border-radius:4px; cursor:pointer; font-size:11px; font-family:'JetBrains Mono',monospace; font-weight:700; letter-spacing:1px;">
+    ↩ SWITCH TO NORMAL
   </button>
 </div>
 
 <!-- NORMAL MODE BAR (shown when normal) -->
 <div id="normal-mode-bar" style="background:var(--navy-dark); border-bottom:1px solid var(--navy-border); padding:6px 28px; display:flex; align-items:center; justify-content:flex-end;">
   <button onclick="toggleMode()" id="mode-toggle-btn-normal"
-    style="background:rgba(255,68,68,.08); border:1px solid rgba(255,68,68,.25); color:#ff6666; padding:4px 12px; border-radius:4px; cursor:pointer; font-size:10px; font-family:'JetBrains Mono',monospace; font-weight:600; letter-spacing:1px;">
+    style="background:rgba(245,196,0,.08); border:1px solid rgba(245,196,0,.2); color:#f5c400; padding:4px 12px; border-radius:4px; cursor:pointer; font-size:10px; font-family:'JetBrains Mono',monospace; font-weight:600; letter-spacing:1px;">
     ⚡ ACTIVATE NEWS SNIPER
   </button>
 </div>
@@ -1522,7 +1532,15 @@
     </div>
 
     <div id="perf-agent-section">
-      <div class="perf-log-title">RECENT ENTER_NOW SIGNALS</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div class="perf-log-title" style="margin-bottom:0;">RECENT ENTER_NOW SIGNALS</div>
+        <button id="archive-toggle-btn" onclick="toggleShowArchived()"
+          style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);
+                 color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:9px;
+                 padding:3px 10px;border-radius:3px;cursor:pointer;">
+          👁 Show Archived
+        </button>
+      </div>
       <div class="perf-log" id="perf-log-body">
         <div style="color:var(--text-muted);font-size:11px;">Loading...</div>
       </div>
@@ -2024,14 +2042,19 @@ function renderModeBanner(mode) {
   const banner    = document.getElementById("news-sniper-banner");
   const normalBar = document.getElementById("normal-mode-bar");
   const srcLabel  = document.getElementById("sniper-source-label");
+  const pairsStat = document.getElementById("stat-pairs");
 
   if (isNews) {
     banner.style.display    = "flex";
     normalBar.style.display = "none";
-    if (srcLabel) srcLabel.textContent = mode.is_manual ? "MANUAL" : "AUTO";
+    if (srcLabel)  srcLabel.textContent  = mode.is_manual ? "MANUAL" : "AUTO";
+    if (pairsStat) pairsStat.textContent = "1 (XAU)";      // sniper: XAU only
+    document.title = "⚡ SNIPER — Forex Agent";
   } else {
     banner.style.display    = "none";
     normalBar.style.display = "flex";
+    if (pairsStat) pairsStat.textContent = "{{ pairs|length }}";
+    document.title = "Forex Agent";
   }
 }
 
@@ -2137,6 +2160,7 @@ async function fetchPerformance() {
 }
 
 function renderPerformance(perf, recentSignals) {
+  window._lastPerfData = {perf, signals: recentSignals};
   if (perf.error) {
     document.getElementById("perf-stats-row").innerHTML =
       `<div style="color:var(--text-muted);font-size:11px;">${perf.error}</div>`;
@@ -2209,7 +2233,10 @@ function renderPerformance(perf, recentSignals) {
     return;
   }
 
-  logEl.innerHTML = recentSignals.map(s => {
+  const _showArchived = window._showArchived || false;
+  const visibleSignals = _showArchived ? recentSignals : recentSignals.filter(s => !s.is_archived);
+
+  logEl.innerHTML = visibleSignals.map(s => {
     const dirCls = s.direction === "bullish" ? "perf-log-dir-bull" : "perf-log-dir-bear";
     const dirSym = s.direction === "bullish" ? "▲" : "▼";
     const outCls = s.outcome === "WIN"  ? "perf-log-outcome-win"
@@ -2241,16 +2268,24 @@ function renderPerformance(perf, recentSignals) {
              onclick="openTradeModal(${JSON.stringify(s).replace(/'/g,'&#39;')})">🚀 Take</button>
          </span>`;
 
+    const _isArchived  = s.is_archived === 1 || s.is_archived === true;
+    const archiveBtn   = `<button class="outcome-btn" title="${_isArchived?'Unarchive':'Archive'}"
+        style="padding:1px 5px;font-size:9px;color:${_isArchived?'var(--yellow)':'var(--text-muted)'};
+               border-color:rgba(255,255,255,.1);"
+        onclick="archiveSignal('${s.signal_id}',${_isArchived?'false':'true'},this)">${_isArchived?'📦':'🗂'}</button>`;
+
     const outcomeHtml = (!s.outcome || s.outcome === "NEUTRAL" || s.outcome === "")
       ? `<span>
            <button class="outcome-btn outcome-btn-win" onclick="markOutcome('${s.signal_id}','WIN',this)">W</button>
            <button class="outcome-btn outcome-btn-loss" onclick="markOutcome('${s.signal_id}','LOSS',this)">L</button>
+           ${archiveBtn}
            <button class="outcome-btn" style="padding:2px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${s.signal_id}','agent',this)">✕</button>
          </span>`
       : `<span style="display:inline-flex;align-items:center;gap:4px;">
            <span class="outcome-marked ${outCls}">${outTxt}</span>
            <button class="outcome-btn outcome-btn-win" style="padding:1px 5px;font-size:9px;" onclick="markOutcome('${s.signal_id}','WIN',this)">W</button>
            <button class="outcome-btn outcome-btn-loss" style="padding:1px 5px;font-size:9px;" onclick="markOutcome('${s.signal_id}','LOSS',this)">L</button>
+           ${archiveBtn}
            <button class="outcome-btn" style="padding:1px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${s.signal_id}','agent',this)">✕</button>
          </span>`;
 
@@ -2297,11 +2332,16 @@ function renderPerformance(perf, recentSignals) {
                   font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 7px;border-radius:3px;
                   cursor:pointer;white-space:nowrap;">⚡ Debate</button>` : "";
 
+    // Mode badge — shown on every agent signal row, next to pair name
+    const agentModeBadge = s.signal_mode
+      ? `<span class="${s.signal_mode === 'news_sniper' ? 'badge-sniper' : 'badge-normal'}">${s.signal_mode === 'news_sniper' ? '⚡ SNIPER' : '◈ NORMAL'}</span>`
+      : '';
+
     return `
       <div style="margin-bottom:4px;">
         <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 60px 60px 1fr 80px auto auto auto auto;">
           <span class="perf-log-time">${time}</span>
-          <span class="perf-log-pair">${(s.pair||"").replace("_","/")}</span>
+          <span class="perf-log-pair">${(s.pair||"").replace("_","/")}${agentModeBadge}</span>
           <span class="${dirCls}">${dirSym} ${(s.direction||"").slice(0,4).toUpperCase()}</span>
           <span class="perf-log-grade">${s.grade||"—"}</span>
           <span style="color:var(--text-muted)">${s.score||"—"}</span>
@@ -2565,6 +2605,76 @@ async function closeAgentTrade(signalId, exitPrice) {
     }
   } catch(e) {
     alert("Close failed: " + e.message);
+  }
+}
+
+window._showArchived    = false;
+window._lastManualTrades = null;
+function toggleShowArchived() {
+  window._showArchived = !window._showArchived;
+  const btn = document.getElementById("archive-toggle-btn");
+  if (btn) btn.textContent = window._showArchived ? "👁 Hide Archived" : "👁 Show Archived";
+  // Re-render both tables immediately with cached data — no fetch needed
+  if (window._lastPerfData) {
+    renderPerformance(window._lastPerfData.perf, window._lastPerfData.signals);
+  }
+  if (window._lastManualTrades) {
+    renderManualTrades(window._lastManualTrades);
+  }
+}
+
+async function archiveManualTrade(signalId, archive, btn) {
+  if (!signalId) return;
+  btn.disabled = true;
+  try {
+    const resp = await fetch("/api/archive_manual_trade", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({signal_id: signalId, archived: archive}),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      showToast(archive ? "Archived" : "Unarchived");
+      if (window._lastManualTrades) {
+        const t = window._lastManualTrades.find(t => t.signal_id === signalId);
+        if (t) t.is_archived = archive ? 1 : 0;
+        renderManualTrades(window._lastManualTrades);
+      }
+    } else {
+      btn.disabled = false;
+      showToast("Archive failed: " + (data.error || "unknown"));
+    }
+  } catch(e) {
+    btn.disabled = false;
+    showToast("Archive failed: " + e.message);
+  }
+}
+
+async function archiveSignal(signalId, archive, btn) {
+  if (!signalId) return;
+  btn.disabled = true;
+  try {
+    const resp = await fetch("/api/archive_signal", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({signal_id: signalId, archived: archive}),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      showToast(archive ? "Archived" : "Unarchived");
+      if (window._lastPerfData) {
+        // Update cached signal
+        const sig = window._lastPerfData.signals.find(s => s.signal_id === signalId);
+        if (sig) sig.is_archived = archive ? 1 : 0;
+        renderPerformance(window._lastPerfData.perf, window._lastPerfData.signals);
+      }
+    } else {
+      showToast("Archive failed: " + (data.error||""), true);
+      btn.disabled = false;
+    }
+  } catch(e) {
+    showToast("Archive failed", true);
+    btn.disabled = false;
   }
 }
 
@@ -3229,14 +3339,26 @@ async function fetchManualTrades() {
 }
 
 function renderManualTrades(trades) {
+  // Cache for re-render on toggle (is_archived filter)
+  window._lastManualTrades = trades;
+
   const el = document.getElementById("perf-manual-body");
-  if (!trades.length) {
+
+  // Apply archived filter — same flag as agent signals
+  const visible = (window._showArchived || false)
+    ? trades
+    : trades.filter(t => !t.is_archived);
+
+  if (!visible.length) {
     el.innerHTML = `<div style="color:var(--text-muted);font-size:11px;padding:8px 0;">
-      No manual trades yet — click <strong style="color:var(--green)">+ LOG TRADE</strong> in the header to add one.</div>`;
+      ${trades.length && !window._showArchived
+        ? 'All manual trades are archived. Click <b>👁 Show Archived</b> to view them.'
+        : 'No manual trades yet — click <strong style="color:var(--green)">+ LOG TRADE</strong> in the header to add one.'
+      }</div>`;
     return;
   }
 
-  el.innerHTML = trades.map(t => {
+  el.innerHTML = visible.map(t => {
     const dirCls  = t.direction === "bullish" ? "perf-log-dir-bull" : "perf-log-dir-bear";
     const dirSym  = t.direction === "bullish" ? "▲" : "▼";
     const outCls  = t.outcome === "WIN"  ? "perf-log-outcome-win"
@@ -3248,18 +3370,31 @@ function renderManualTrades(trades) {
                      background:rgba(255,255,255,.02);border-radius:3px;font-family:'JetBrains Mono',monospace;">
            ${t.post_mortem}</div>` : "";
 
-    const isOpen = !t.outcome || t.outcome === "";
+    const isOpen       = !t.outcome || t.outcome === "";
+    const _tArchived   = t.is_archived === 1 || t.is_archived === true;
+    const manualArchBtn = `<button class="outcome-btn" title="${_tArchived ? 'Unarchive' : 'Archive'}"
+        style="padding:1px 5px;font-size:9px;color:${_tArchived ? 'var(--yellow)' : 'var(--text-muted)'};
+               border-color:rgba(255,255,255,.1);"
+        onclick="archiveManualTrade('${t.signal_id}',${_tArchived ? 'false' : 'true'},this)">${_tArchived ? '📦' : '🗂'}</button>`;
+
     const statusHtml = isOpen
       ? `<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
            <span style="color:var(--yellow);font-size:10px;font-family:'JetBrains Mono',monospace;">● MONITORING</span>
            <button class="outcome-btn" style="background:rgba(255,68,68,.08);border-color:rgba(255,68,68,.3);color:var(--red);padding:2px 7px;"
              onclick="openCloseModal('${t.signal_id}','${t.pair||''}','${t.direction||''}',${t.entry_price||0})">Close ✕</button>
+           ${manualArchBtn}
            <button class="outcome-btn" style="padding:2px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${t.signal_id}','manual',this)">DEL</button>
          </span>`
       : `<span style="display:inline-flex;align-items:center;gap:4px;">
            <span class="outcome-marked ${outCls}">${outTxt}</span>
+           ${manualArchBtn}
            <button class="outcome-btn" style="padding:1px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${t.signal_id}','manual',this)">DEL</button>
          </span>`;
+
+    // Mode badge for manual trades — next to pair name
+    const manualModeBadge = t.signal_mode
+      ? `<span class="${t.signal_mode === 'news_sniper' ? 'badge-sniper' : 'badge-normal'}">${t.signal_mode === 'news_sniper' ? '⚡ SNIPER' : '◈ NORMAL'}</span>`
+      : '';
 
     // Inline SL/TP edit for open trades — always visible, no modal needed
     const inlineEditHtml = isOpen ? `
@@ -3306,7 +3441,7 @@ function renderManualTrades(trades) {
         <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 1fr auto auto auto;cursor:pointer;"
              onclick="toggleChart('${t.signal_id}','${tvPair}','${t.entry_price||0}','${t.sl_price||0}','${t.tp1_price||0}','${t.direction||"bullish"}')">
           <span class="perf-log-time">${time}</span>
-          <span class="perf-log-pair">${(t.pair||"").replace("_","/")}</span>
+          <span class="perf-log-pair">${(t.pair||"").replace("_","/")}${manualModeBadge}</span>
           <span class="${dirCls}">${dirSym} ${(t.direction||"").slice(0,4).toUpperCase()}</span>
           <span style="color:var(--text-muted);font-size:10px;">
             Entry: <b style="color:var(--text-primary)">${t.entry_price||"—"}</b>

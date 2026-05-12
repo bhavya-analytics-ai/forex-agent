@@ -181,9 +181,21 @@ def run_live(interval_seconds: int = 300):
     while True:
         try:
             scan_count += 1
-            print(f"\n[{datetime.utcnow().strftime('%H:%M:%S')} UTC] Scan #{scan_count}")
 
-            for pair in PAIRS:
+            # ── MODE BRAIN SWITCH ─────────────────────────────────────────────
+            # News Sniper: only XAU_USD scanned — M5 sweep + M1 CHoCH brain
+            # Normal:      all pairs scanned — ICT gold/forex strategy brain
+            from filters.mode_manager import get_active_mode
+            active_mode   = get_active_mode()
+            pairs_to_scan = ["XAU_USD"] if active_mode == "news_sniper" else list(PAIRS)
+
+            print(
+                f"\n[{datetime.utcnow().strftime('%H:%M:%S')} UTC] "
+                f"Scan #{scan_count} | 🧠 {active_mode.upper()} | "
+                f"Pairs: {len(pairs_to_scan)}"
+            )
+
+            for pair in pairs_to_scan:
                 # Full scan
                 result, confluence = scan_pair(pair, return_confluence=True)
                 if result is None:

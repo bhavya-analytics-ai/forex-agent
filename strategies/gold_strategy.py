@@ -472,6 +472,36 @@ def apply_gold_strategy(scored: dict, confluence: dict, pair: str, candles: dict
 
     atr = _get_atr(confluence, pair)
 
+    # ── H1 CANDLE COLOR HARD BLOCK (NORMAL MODE) ─────────────────────────────
+    # If the last completed H1 candle closes AGAINST our trade direction → block.
+    # This gate runs in normal mode only (news_sniper never calls gold_strategy).
+    df_h1 = (candles or {}).get("H1")
+    if df_h1 is not None and len(df_h1) >= 2:
+        last_h1    = df_h1.iloc[-2]   # last *completed* H1 candle
+        h1_range   = last_h1["high"] - last_h1["low"]
+        body       = abs(last_h1["close"] - last_h1["open"])
+        body_pct   = round(body / h1_range * 100) if h1_range > 0 else 0
+        h1_bearish = last_h1["close"] < last_h1["open"]
+        h1_bullish = last_h1["close"] > last_h1["open"]
+
+        if (direction == "bullish" and h1_bearish) or (direction == "bearish" and h1_bullish):
+            h1_color  = "BEARISH" if h1_bearish else "BULLISH"
+            block_reason = (
+                f"H1 candle color block — last H1 closed {h1_color} "
+                f"({body_pct}% body) vs {direction} signal"
+            )
+            scored.update({
+                "dl_blocked":      True,
+                "dl_block_reason": block_reason,
+                "should_alert":    False,
+                "should_log":      False,
+                "flags":           [f"🚫 H1 COLOR BLOCK — {block_reason}"],
+                "entry_state":     "SKIP",
+                "gold_mode":       True,
+            })
+            logger.info(f"{pair} | H1 COLOR BLOCK | {block_reason}")
+            return scored
+
     # ── SNIPER SEQUENCE ───────────────────────────────────────────────────────
     sequence    = _detect_sniper_sequence(confluence, direction)
     entry_state = sequence["entry_state"]
