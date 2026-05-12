@@ -68,8 +68,6 @@ def fetch_candles_from(pair: str, timeframe: str, from_time: datetime) -> pd.Dat
     of any length. Paginates automatically (OANDA max 5000 candles per call).
     Returns DataFrame with columns: open, high, low, close, volume — indexed by UTC time.
     """
-    OANDA_MAX = 4999   # stay just under OANDA's 5000 limit
-
     now = datetime.now(timezone.utc)
     if from_time.tzinfo is None:
         from_time = from_time.replace(tzinfo=timezone.utc)
@@ -82,7 +80,6 @@ def fetch_candles_from(pair: str, timeframe: str, from_time: datetime) -> pd.Dat
             "granularity": timeframe,
             "from":        cursor.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "to":          now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "count":       OANDA_MAX,
             "price":       "M",
         }
         try:
@@ -111,8 +108,8 @@ def fetch_candles_from(pair: str, timeframe: str, from_time: datetime) -> pd.Dat
 
         all_rows.extend(rows)
 
-        # If we got fewer than max, we've reached now — done
-        if len(raw) < OANDA_MAX:
+        # OANDA max is 5000 per call — if less came back, we've reached now
+        if len(raw) < 5000:
             break
 
         # Advance cursor to last candle time + 1 second to avoid duplicates
