@@ -226,6 +226,53 @@ def send_presession_briefing(session: str, briefing_data: dict):
     return _send(webhook, payload) if webhook else False
 
 
+def send_sniper_alert(scored: dict, confluence: dict):
+    """
+    Dedicated Slack alert for News Sniper ENTER_NOW signals.
+    Shows M5 sweep, M1 CHoCH stats, SL/TP levels, RR.
+    """
+    pair      = scored["pair"]
+    direction = scored.get("direction", "").upper()
+    levels    = scored.get("trade_levels", {})
+    m5_sweep  = scored.get("m5_sweep", {})
+    choch     = scored.get("m1_choch", {})
+    marub     = scored.get("h1_marubozu") or {}
+    p_win     = scored.get("p_win", 0)
+    ev        = scored.get("ev", 0)
+    flags     = scored.get("flags", [])
+
+    dir_emoji   = "🔴 SELL" if direction == "BEARISH" else "🟢 BUY"
+    choch_label = "TREND REVERSAL CHoCH" if choch.get("is_reversal_choch") else "M1 CHoCH"
+
+    text = (
+        f"⚡ *NEWS SNIPER — {pair}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{dir_emoji} | ENTER NOW\n"
+        f"\n"
+        f"*Gate Sequence ✓*\n"
+        f"  M5 Sweep:  {m5_sweep.get('direction','').upper()} wick → swept `{m5_sweep.get('swept_level')}` | extreme `{m5_sweep.get('sweep_extreme')}`\n"
+        f"  {choch_label}: body `{round(choch.get('body',0)/0.01,1)}p` | wick `{int(choch.get('wick_pct',0)*100)}%` | disp `{choch.get('displacement_ratio',0)}x`\n"
+        + (f"  H1 Marubozu: {marub.get('direction','').upper()} {int(marub.get('body_pct',0)*100)}% → strict gate cleared\n" if marub.get('detected') else "")
+        + f"\n"
+        f"*Levels*\n"
+        f"  📍 Entry:  `{levels.get('entry_price','—')}`\n"
+        f"  🛑 SL:     `{levels.get('sl_price','—')}` ({levels.get('sl_pips','?')}p)\n"
+        f"  🎯 TP1:    `{levels.get('tp1_price','—')}` ({levels.get('tp1_pips','?')}p | {levels.get('rr1','?')})\n"
+        f"  🎯 TP2:    `{levels.get('tp2_price','—')}` ({levels.get('tp2_pips','?')}p | {levels.get('rr2','?')})\n"
+        f"\n"
+        f"P(win): `{round(p_win*100)}%` | EV: `{'+' if ev>=0 else ''}{ev}`\n"
+        f"\n"
+        f"_⏰ {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC_"
+    )
+
+    payload = {"text": text, "unfurl_links": False}
+    webhook = SLACK_CONFIG.get("webhook_url", "")
+    success = _send(webhook, payload) if webhook else False
+    if success:
+        logger.info(f"Sniper Slack alert sent: {pair} {direction}")
+    return success
+
+
 def send_error_alert(message: str):
     """Send a simple error notification to Slack."""
     payload = {"text": f"⚠️ *Scanner Error*\n{message}"}

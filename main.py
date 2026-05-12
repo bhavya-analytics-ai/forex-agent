@@ -209,8 +209,12 @@ def run_live(interval_seconds: int = 300):
                     _last_alerted[pair] = datetime.utcnow()
                     if slack_enabled:
                         try:
-                            from alerts.slack import send_signal_alert
-                            send_signal_alert(result, confluence)
+                            if active_mode == "news_sniper":
+                                from alerts.slack import send_sniper_alert
+                                send_sniper_alert(result, confluence)
+                            else:
+                                from alerts.slack import send_signal_alert
+                                send_signal_alert(result, confluence)
                         except Exception as e:
                             logger.error(f"Slack error: {e}")
 
