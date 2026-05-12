@@ -439,6 +439,42 @@
   .stat-value.alerts { color: var(--green); }
   .stat-divider { color: var(--text-dim); }
 
+  /* ── SIGNAL SUMMARY BAR ──────────────────── */
+  .signal-summary-bar {
+    background: var(--navy-dark);
+    border-bottom: 1px solid var(--navy-border);
+    padding: 8px 28px;
+    display: flex;
+    gap: 28px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .ssb-block {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+  }
+  .ssb-label {
+    color: var(--text-muted);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    min-width: 100px;
+  }
+  .ssb-item {
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .ssb-item span { color: var(--text-primary); font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+  .ssb-item .ssb-win  { color: var(--green); }
+  .ssb-item .ssb-loss { color: var(--red); }
+  .ssb-item .ssb-pct  { color: var(--blue-bright); }
+  .ssb-sep { color: var(--navy-border); margin: 0 2px; }
+  .ssb-divider { width: 1px; height: 20px; background: var(--navy-border); margin: 0 6px; }
+
   /* ── TABLE ───────────────────────────────── */
   .container { padding: 20px 28px; }
 
@@ -1381,6 +1417,29 @@
   <button class="log-trade-btn" onclick="openLogModal()">+ LOG TRADE</button>
 </div>
 
+<!-- SIGNAL SUMMARY BAR -->
+<div class="signal-summary-bar">
+  <div class="ssb-block">
+    <div class="ssb-label">Agent Signals</div>
+    <div class="ssb-item">Total <span id="ssb-agent-total">—</span></div>
+    <div class="ssb-sep">·</div>
+    <div class="ssb-item">Took It <span id="ssb-agent-took">—</span></div>
+    <div class="ssb-sep">·</div>
+    <div class="ssb-item"><span class="ssb-win" id="ssb-agent-wins">—</span>W / <span class="ssb-loss" id="ssb-agent-losses">—</span>L</div>
+    <div class="ssb-sep">·</div>
+    <div class="ssb-item"><span class="ssb-pct" id="ssb-agent-pct">—</span></div>
+  </div>
+  <div class="ssb-divider"></div>
+  <div class="ssb-block">
+    <div class="ssb-label">Manual Trades</div>
+    <div class="ssb-item">Total <span id="ssb-manual-total">—</span></div>
+    <div class="ssb-sep">·</div>
+    <div class="ssb-item"><span class="ssb-win" id="ssb-manual-wins">—</span>W / <span class="ssb-loss" id="ssb-manual-losses">—</span>L</div>
+    <div class="ssb-sep">·</div>
+    <div class="ssb-item"><span class="ssb-pct" id="ssb-manual-pct">—</span></div>
+  </div>
+</div>
+
 <!-- NEWS PANEL -->
 <div id="news-panel">
   <div class="news-panel-header" onclick="toggleNewsPanel()">
@@ -1756,6 +1815,39 @@ function buildRow(s) {
 
   const pairDisplay = s.pair.replace("_","/");
 
+  // Normalize trade levels to top-level — stored in window map so onclick can reference safely
+  const _tl = s.trade_levels || {};
+  window._scannerSigs = window._scannerSigs || {};
+  window._scannerSigs[s.pair] = Object.assign({}, s, {
+    entry_price: s.entry_price || _tl.entry_price || "",
+    sl_price:    s.sl_price    || _tl.sl_price    || "",
+    tp1_price:   s.tp1_price   || _tl.tp1_price   || "",
+    sl_pips:     s.sl_pips     || _tl.sl_pips     || "",
+    tp1_pips:    s.tp1_pips    || _tl.tp1_pips    || "",
+  });
+  const _isTopGrade = (s.grade === "A+" || s.grade === "A");
+  const _hasLevels  = !!(_tl.entry_price || _tl.sl_price);
+  const _pairKey    = s.pair.replace(/'/g, "\\'");
+
+  // 🚀 Take + ⚡ Debate — shown in scanner detail row for A/A+ signals with a logged signal_id
+  const scannerActionHtml = (s.signal_id && _isTopGrade) ? `
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+      ${_hasLevels ? `<button
+          onclick="event.stopPropagation();openTradeModal(window._scannerSigs['${_pairKey}'])"
+          style="background:rgba(0,230,118,.12);border:1px solid rgba(0,230,118,.4);color:var(--green);
+                 font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;
+                 padding:4px 14px;border-radius:4px;cursor:pointer;white-space:nowrap;
+                 box-shadow:0 0 8px rgba(0,230,118,.15);">🚀 TAKE TRADE</button>` : ""}
+      <button
+          id="scan-debate-btn-${s.signal_id}"
+          onclick="event.stopPropagation();runDebate('${s.signal_id}',this,'scan-debate-result-${s.signal_id}')"
+          style="background:rgba(138,43,226,.12);border:1px solid rgba(138,43,226,.4);color:#b57bee;
+                 font-family:'JetBrains Mono',monospace;font-size:10px;
+                 padding:4px 12px;border-radius:4px;cursor:pointer;white-space:nowrap;">⚡ AI Debate</button>
+      <span style="font-size:9px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;">ID: ${s.signal_id}</span>
+    </div>
+    <div id="scan-debate-result-${s.signal_id}" style="display:none;margin-top:6px;"></div>` : "";
+
   // WIN/LOSS buttons — only for logged ENTER_NOW signals
   const markHtml = s.signal_id ? `
     <div class="mark-outcome-row">
@@ -1764,9 +1856,6 @@ function buildRow(s) {
         onclick="event.stopPropagation();markOutcome('${s.signal_id}','WIN',this)">✓ WIN</button>
       <button class="outcome-btn outcome-btn-loss"
         onclick="event.stopPropagation();markOutcome('${s.signal_id}','LOSS',this)">✗ LOSS</button>
-      <span style="font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">
-        ID: ${s.signal_id}
-      </span>
     </div>` : "";
 
   const mainRow = `
@@ -1797,6 +1886,7 @@ function buildRow(s) {
             ${gradeMeaning}
             ${flagsHtml}
           </div>
+          ${scannerActionHtml}
           ${markHtml}
         </div>
       </td>
@@ -2052,6 +2142,19 @@ function renderPerformance(perf, recentSignals) {
       `<div style="color:var(--text-muted);font-size:11px;">${perf.error}</div>`;
     return;
   }
+
+  // Signal summary bar
+  const ag = perf.agent  || {};
+  const mn = perf.manual || {};
+  document.getElementById("ssb-agent-total").textContent   = perf.total_signals ?? "—";
+  document.getElementById("ssb-agent-took").textContent    = perf.taken_count   ?? "—";
+  document.getElementById("ssb-agent-wins").textContent    = ag.wins    ?? "—";
+  document.getElementById("ssb-agent-losses").textContent  = ag.losses  ?? "—";
+  document.getElementById("ssb-agent-pct").textContent     = ag.win_rate != null ? ag.win_rate + "%" : "—";
+  document.getElementById("ssb-manual-total").textContent  = perf.total_manual ?? "—";
+  document.getElementById("ssb-manual-wins").textContent   = mn.wins    ?? "—";
+  document.getElementById("ssb-manual-losses").textContent = mn.losses  ?? "—";
+  document.getElementById("ssb-manual-pct").textContent    = mn.win_rate != null ? mn.win_rate + "%" : "—";
 
   // Count today's signals from recent list
   const todayCount = recentSignals.filter(s => isToday_NY(s.timestamp_utc||"")).length;
@@ -2363,14 +2466,16 @@ async function markOutcome(signalId, outcome, btn) {
   }
 }
 
-async function runDebate(signalId, btn) {
-  const resultEl = document.getElementById(`debate-result-${signalId}`);
+async function runDebate(signalId, btn, resultElId) {
+  const resultEl = document.getElementById(resultElId || `debate-result-${signalId}`);
   if (!resultEl) return;
+
+  const _origLabel = btn.textContent;
 
   // Toggle off if already showing
   if (resultEl.style.display !== "none") {
     resultEl.style.display = "none";
-    btn.textContent = "⚡ Debate";
+    btn.textContent = _origLabel;
     return;
   }
 
@@ -2419,18 +2524,18 @@ async function runDebate(signalId, btn) {
           ${keyRisk}
         </div>`;
       resultEl.style.display = "block";
-      btn.textContent = "⚡ Debate";
+      btn.textContent = _origLabel;
       btn.disabled = false;
     } else {
       showToast(`Debate failed: ${data.error || "unknown"}`, true);
-      btn.textContent = "⚡ Debate";
+      btn.textContent = _origLabel;
       btn.disabled = false;
     }
   } catch(e) {
     clearTimeout(_debateTimeout);
     const msg = e.name === "AbortError" ? "Debate timed out — try again" : "Debate failed: network error";
     showToast(msg, true);
-    btn.textContent = "⚡ Debate";
+    btn.textContent = _origLabel;
     btn.disabled = false;
   }
 }
@@ -2468,6 +2573,7 @@ async function deleteSignal(signalId, kind, btn) {
 }
 
 fetchAndRender();
+fetchPerformance();                     // populate summary bar immediately on load
 setInterval(fetchAndRender, REFRESH_MS);
 setInterval(fetchPerformance, 10000);   // performance stats refresh every 10s
 setInterval(updateClock, 1000);

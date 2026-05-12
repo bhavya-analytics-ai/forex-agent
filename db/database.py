@@ -475,12 +475,14 @@ def get_performance_summary_db() -> dict:
                 "win_rate": round(gw / len(g_rows) * 100, 1),
             }
 
-    taken_count = sum(1 for r in agent_rows if r["taken"])
-
+    # taken_count = all signals ever taken (not just labeled ones)
+    taken_count   = conn.execute("SELECT COUNT(*) FROM agent_signals WHERE taken = 1").fetchone()[0]
     total_signals = conn.execute("SELECT COUNT(*) FROM agent_signals").fetchone()[0]
+    total_manual  = conn.execute("SELECT COUNT(*) FROM manual_trades").fetchone()[0]
 
     return {
         "total_signals": total_signals,
+        "total_manual":  total_manual,
         "agent":         agent_stats,
         "manual":        manual_stats,
         "taken_count":   taken_count,
