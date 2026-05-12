@@ -338,39 +338,37 @@ def _get_log_time(signal_id: str) -> str:
 
 
 def _close_trade(signal_id, pair, direction, entry, sl, tp1, pip, result):
-    """Write outcome + post-mortem note to CSV."""
-    import pandas as pd
+    """Write outcome + post-mortem note. SQLite first (always), CSV best-effort."""
+    pips = round(abs(tp1 - entry) / pip, 1) if result == "WIN" else round(abs(sl - entry) / pip, 1)
+    if result == "LOSS":
+        pips = -pips
+    note = _build_post_mortem(direction, result, entry, sl, tp1, pips)
 
-    path = _get_log_path()
+    # ── SQLite first — source of truth ────────────────────────────────────────
     try:
+        from db.database import update_manual_trade_outcome
+        update_manual_trade_outcome(signal_id, result, pips, note)
+        logger.info(f"Manual trade closed: {signal_id} → {result} ({pips:+.1f} pips)")
+        logger.info(f"Post-mortem: {note}")
+    except Exception as e:
+        logger.warning(f"SQLite outcome update failed for {signal_id}: {e}")
+
+    # ── CSV best-effort (Railway has no CSV — that's fine) ───────────────────
+    try:
+        import pandas as pd
+        path = _get_log_path()
+        if not __import__("os").path.exists(path):
+            return
         df   = pd.read_csv(path)
         mask = df["signal_id"] == signal_id
         if not mask.any():
             return
-
-        pips = round(abs(tp1 - entry) / pip, 1) if result == "WIN" else round(abs(sl - entry) / pip, 1)
-        if result == "LOSS":
-            pips = -pips
-
-        note = _build_post_mortem(direction, result, entry, sl, tp1, pips)
-
         df.loc[mask, "outcome"]      = result
         df.loc[mask, "outcome_pips"] = pips
         df.loc[mask, "post_mortem"]  = note
         df.to_csv(path, index=False)
-
-        # SQLite
-        try:
-            from db.database import update_manual_trade_outcome
-            update_manual_trade_outcome(signal_id, result, pips, note)
-        except Exception as e:
-            logger.warning(f"SQLite outcome update failed for {signal_id}: {e}")
-
-        logger.info(f"Manual trade closed: {signal_id} → {result} ({pips:+.1f} pips)")
-        logger.info(f"Post-mortem: {note}")
-
     except Exception as e:
-        logger.warning(f"Could not close manual trade {signal_id}: {e}")
+        logger.debug(f"CSV close skipped (non-fatal): {e}")
 
 
 def _build_post_mortem(direction: str, result: str, entry: float,
