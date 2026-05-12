@@ -62,10 +62,15 @@ def label_pending_signals() -> int:
         sig_id    = sig["signal_id"]
         pair      = sig["pair"]
         direction = (sig["direction"] or "").lower()
-        entry_px  = _safe_float(sig["entry_price"])
-        user_sl   = _safe_float(sig["user_sl"])
-        user_tp1  = _safe_float(sig["user_tp1"])
-        sig_time  = _parse_utc(sig["timestamp_utc"])
+        entry_px = _safe_float(sig["entry_price"])
+        # Use user levels → actual levels → scanner levels (whichever is set first)
+        user_sl  = (_safe_float(sig.get("user_sl"))  or
+                    _safe_float(sig.get("actual_sl")) or
+                    _safe_float(sig.get("sl_price")))
+        user_tp1 = (_safe_float(sig.get("user_tp1"))  or
+                    _safe_float(sig.get("actual_tp1")) or
+                    _safe_float(sig.get("tp1_price")))
+        sig_time = _parse_utc(sig["timestamp_utc"])
 
         if not all([pair, direction, entry_px, user_sl, user_tp1, sig_time]):
             logger.warning(f"[labeler] {sig_id} — missing fields, skipping")

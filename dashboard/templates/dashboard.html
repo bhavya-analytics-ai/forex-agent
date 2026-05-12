@@ -2230,6 +2230,7 @@ function renderPerformance(perf, recentSignals) {
       ? `<span style="display:inline-flex;align-items:center;gap:4px;">
            <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--blue-bright);font-weight:700;">TOOK IT${userLevels}</span>
            ${chartBtn}
+           ${(!s.outcome || s.outcome === '' || s.outcome === 'NEUTRAL') ? `<button class="outcome-btn" style="padding:1px 6px;font-size:9px;color:var(--yellow);border-color:rgba(255,200,0,.3);margin-left:2px;" onclick="openCloseAgentModal('${s.signal_id}','${s.pair||''}',${s.entry_price||0})">Close ✕</button>` : ''}
          </span>`
       : `<span style="display:inline-flex;gap:3px;">
            <button class="outcome-btn" id="taken-btn-${s.signal_id}"
@@ -2537,6 +2538,33 @@ async function runDebate(signalId, btn, resultElId) {
     showToast(msg, true);
     btn.textContent = _origLabel;
     btn.disabled = false;
+  }
+}
+
+function openCloseAgentModal(signalId, pair, entryPrice) {
+  const exitStr = prompt(`Close ${pair} trade early\nEntry: ${entryPrice}\n\nEnter your exit price:`);
+  if (!exitStr) return;
+  const exitPrice = parseFloat(exitStr);
+  if (isNaN(exitPrice) || exitPrice <= 0) { alert("Invalid exit price."); return; }
+  closeAgentTrade(signalId, exitPrice);
+}
+
+async function closeAgentTrade(signalId, exitPrice) {
+  try {
+    const resp = await fetch("/api/close_agent_trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: signalId, exit_price: exitPrice }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      console.log(`[close] ${signalId} → ${data.outcome} ${data.outcome_pips > 0 ? '+' : ''}${data.outcome_pips}p`);
+      if (!_perfPanelCollapsed) fetchPerformance();
+    } else {
+      alert("Close failed: " + (data.error || "unknown error"));
+    }
+  } catch(e) {
+    alert("Close failed: " + e.message);
   }
 }
 

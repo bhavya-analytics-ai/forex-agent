@@ -408,6 +408,42 @@ def api_close_manual_trade():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/close_agent_trade", methods=["POST"])
+def api_close_agent_trade():
+    """
+    Close an agent signal mid-trade at a specific exit price.
+    Body: { "signal_id": "...", "exit_price": 4620.5 }
+    Calculates WIN/LOSS + pips direction-aware, saves exit_price to DB.
+    """
+    try:
+        from db.database import close_agent_trade, get_agent_signal
+        from core.fetcher import pip_size
+        body       = request.get_json(silent=True) or {}
+        signal_id  = body.get("signal_id", "").strip()
+        exit_price = float(body.get("exit_price", 0))
+
+        if not signal_id:
+            return jsonify({"ok": False, "error": "signal_id required"}), 400
+        if exit_price <= 0:
+            return jsonify({"ok": False, "error": "exit_price required"}), 400
+
+        sig = get_agent_signal(signal_id)
+        if not sig:
+            return jsonify({"ok": False, "error": "signal not found"}), 404
+
+        entry_price = float(sig.get("entry_price") or 0)
+        direction   = sig.get("direction", "")
+        pip         = pip_size(sig.get("pair", ""))
+
+        if not entry_price:
+            return jsonify({"ok": False, "error": "entry_price missing on signal"}), 400
+
+        result = close_agent_trade(signal_id, exit_price, entry_price, direction, pip)
+        return jsonify({"ok": True, "signal_id": signal_id, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/update_trade_levels", methods=["POST"])
 def api_update_trade_levels():
     """

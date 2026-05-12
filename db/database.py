@@ -150,6 +150,7 @@ def init_db():
         ("actual_sl",      "REAL"),
         ("actual_tp1",     "REAL"),
         ("oanda_trade_id", "TEXT"),   # OANDA fill trade ID — needed to update GTC orders
+        ("exit_price",     "REAL"),   # actual close price if closed early/mid-trade
     ]:
         try:
             conn.execute(f"ALTER TABLE agent_signals ADD COLUMN {col} {typedef}")
@@ -390,21 +391,50 @@ def get_recent_agent_signals(limit: int = 20) -> list[dict]:
 
 def get_unlabeled_taken_signals() -> list[dict]:
     """
-    All taken signals with no outcome and valid user SL/TP set.
-    These are the candidates for auto-labeling.
+    All signals with no outcome, no early exit, and SL/TP resolvable.
+    Taken or not — if SL/TP is set, price will hit one eventually.
+    Uses user_sl/tp1 when available, falls back to actual_sl/tp1, then sl_price/tp1_price.
     """
     conn = _get_conn()
     rows = conn.execute("""
         SELECT signal_id, pair, direction, timestamp_utc, entry_price,
-               user_sl, user_tp1, sl_price, tp1_price
+               user_sl, user_tp1, actual_sl, actual_tp1, sl_price, tp1_price, exit_price
         FROM agent_signals
-        WHERE taken = 1
-          AND (outcome IS NULL OR outcome = '')
-          AND user_sl  IS NOT NULL AND user_sl  > 0
-          AND user_tp1 IS NOT NULL AND user_tp1 > 0
+        WHERE (outcome IS NULL OR outcome = '')
+          AND (exit_price IS NULL OR exit_price = 0)
+          AND COALESCE(user_sl,   actual_sl,   sl_price)  > 0
+          AND COALESCE(user_tp1,  actual_tp1,  tp1_price) > 0
         ORDER BY timestamp_utc ASC
     """).fetchall()
     return [dict(r) for r in rows]
+
+
+def close_agent_trade(signal_id: str, exit_price: float, entry_price: float,
+                      direction: str, pip: float) -> dict:
+    """
+    Close an agent signal mid-trade at exit_price.
+    Calculates outcome + pips direction-aware, writes to DB.
+    Returns {outcome, outcome_pips}.
+    """
+    is_bull = "bull" in direction.lower()
+    if is_bull:
+        pips = round((exit_price - entry_price) / pip, 1)
+    else:
+        pips = round((entry_price - exit_price) / pip, 1)
+
+    outcome = "WIN" if pips > 0 else "LOSS"
+    note = f"[early close] {outcome} {pips:+.1f}p @ {exit_price}"
+
+    conn = _get_conn()
+    with _write_lock:
+        conn.execute("""
+            UPDATE agent_signals
+            SET exit_price=?, outcome=?, outcome_pips=?, notes=?
+            WHERE signal_id=?
+        """, (exit_price, outcome, pips, note, signal_id))
+        conn.commit()
+
+    return {"outcome": outcome, "outcome_pips": pips}
 
 
 def get_agent_signal(signal_id: str) -> dict | None:
