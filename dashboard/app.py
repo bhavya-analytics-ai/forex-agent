@@ -28,7 +28,9 @@ def _sanitize(obj):
     return obj
 
 _signal_store = {}
+_audit_store  = {}          # XAU/XAG only — full proof payload
 _store_lock   = threading.Lock()
+_GOLD_PAIRS   = {"XAU_USD", "XAG_USD"}
 
 
 def update_dashboard(pair: str, scored: dict, confluence: dict, ict: dict = None):
@@ -64,6 +66,189 @@ def update_dashboard(pair: str, scored: dict, confluence: dict, ict: dict = None
             "signal_id":     scored.get("signal_id", ""),
             "entry_state":   scored.get("entry_state", ""),
         }
+
+        # For gold pairs: build full audit proof from data already in scope
+        if pair in _GOLD_PAIRS:
+            _audit_store[pair] = _build_audit_payload(pair, scored, confluence, ict or {})
+
+
+def _build_audit_payload(pair: str, scored: dict, confluence: dict, ict: dict) -> dict:
+    """
+    Assemble signal audit proof for XAU/XAG.
+    Reads ONLY from scored/confluence/ict already passed into update_dashboard.
+    No engine calls, no new computation, no logic files touched.
+    Missing fields → None (rendered as 'not available' in UI).
+    """
+    # ── SWEEP ─────────────────────────────────────────────────────────────────
+    sweep = (ict.get("recent_sweep") or {})
+    sweep_out = {
+        "found":         bool(sweep),
+        "type":          sweep.get("type"),            # "buy_side" | "sell_side"
+        "time":          str(sweep.get("time")) if sweep.get("time") else None,
+        "swept_level":   sweep.get("swept_level"),     # the swing price that was swept
+        "candle_high":   sweep.get("candle_high"),     # wick extreme (buy-side)
+        "candle_low":    sweep.get("candle_low"),      # wick extreme (sell-side)
+        "candle_close":  sweep.get("candle_close"),
+        "wick_size":     round(float(sweep["wick_size"]), 3) if sweep.get("wick_size") else None,
+        "bars_ago":      sweep.get("bars_ago"),
+        "bias":          sweep.get("bias"),            # "bullish" | "bearish"
+        "description":   sweep.get("description"),
+    }
+
+    # ── CHoCH ─────────────────────────────────────────────────────────────────
+    choch_m5  = ict.get("choch_m5",  {}) or {}
+    choch_m15 = ict.get("choch_m15", {}) or {}
+    if choch_m5.get("detected"):
+        choch_raw, choch_src = choch_m5, "M5"
+    elif choch_m15.get("detected"):
+        choch_raw, choch_src = choch_m15, "M15"
+    else:
+        choch_raw, choch_src = {}, None
+    choch_out = {
+        "found":       bool(choch_raw.get("detected")),
+        "source":      choch_src,
+        "type":        choch_raw.get("type"),          # "bullish" | "bearish"
+        "level":       choch_raw.get("level"),
+        "bars_ago":    choch_raw.get("bars_ago"),
+        "description": choch_raw.get("description"),
+    }
+
+    # ── OB ────────────────────────────────────────────────────────────────────
+    ob = ict.get("top_ob") or {}
+    ob_out = {
+        "found":      bool(ob),
+        "type":       ob.get("type"),
+        "high":       ob.get("high"),
+        "low":        ob.get("low"),
+        "mid":        ob.get("mid"),
+        "formed_at":  str(ob.get("formed_at")) if ob.get("formed_at") else None,
+        "timeframe":  ob.get("timeframe"),
+    }
+
+    # ── H1 CONTEXT ────────────────────────────────────────────────────────────
+    h1         = (confluence.get("h1") or {})
+    h1_struct  = h1.get("structure") or {}
+    h1_ema     = confluence.get("h1_ema_50")
+    price      = confluence.get("current_price", 0)
+    below_ema  = confluence.get("price_below_h1_ema")   # bool or None
+    h1_out = {
+        "bias":            h1.get("bias"),
+        "trend":           h1_struct.get("trend"),
+        "phase":           h1_struct.get("phase"),
+        "strength":        h1_struct.get("strength"),
+        "last_high":       h1_struct.get("last_high"),
+        "last_low":        h1_struct.get("last_low"),
+        "ema_50":          round(float(h1_ema), 2) if h1_ema else None,
+        "price":           round(float(price),  2) if price  else None,
+        "price_vs_ema":    (
+            "BELOW" if below_ema is True  else
+            "ABOVE" if below_ema is False else
+            None
+        ),
+        "ema_dist_pct":    round(abs(price - h1_ema) / h1_ema * 100, 2)
+                           if (h1_ema and price) else None,
+        # H1 candle color lives in gold_strategy — if it blocked, reason string has it
+        "block_reason":    scored.get("dl_block_reason") or None,
+    }
+
+    # ── PREMIUM / DISCOUNT ────────────────────────────────────────────────────
+    pd = (ict.get("premium_discount") or {})
+    pd_out = {
+        "zone":        pd.get("zone"),
+        "pct":         round(float(pd["pct"]) * 100, 1) if pd.get("pct") is not None else None,
+        "swing_high":  pd.get("swing_high"),
+        "swing_low":   pd.get("swing_low"),
+        "equilibrium": pd.get("equilibrium"),
+        "description": pd.get("description"),
+    }
+
+    # ── SESSION / KILLZONE ────────────────────────────────────────────────────
+    sess     = (scored.get("session_ctx") or {})
+    kz_label = None
+    kz_mins  = None
+    in_kz    = (scored.get("conditions") or {}).get("in_killzone", False)
+    # Richer killzone data from ict flags if available
+    kz_out = {
+        "session":         sess.get("session"),
+        "in_killzone":     in_kz,
+        "killzone_label":  kz_label,
+        "mins_left":       kz_mins,
+    }
+
+    # ── NEWS ──────────────────────────────────────────────────────────────────
+    news    = (scored.get("news_check") or {})
+    news_out = {
+        "safe":        news.get("safe"),
+        "caution":     news.get("caution"),
+        "spike_watch": news.get("spike_watch"),
+        "reason":      news.get("reason"),
+    }
+
+    # ── SCORE PROOF ───────────────────────────────────────────────────────────
+    # Likelihood table is a constant in scorer — import it read-only
+    try:
+        from alerts.scorer import STANDARD_LIKELIHOODS, BASE_RATES
+        lk_table   = STANDARD_LIKELIHOODS
+        base_rates = BASE_RATES
+    except Exception:
+        lk_table   = {}
+        base_rates = {}
+
+    conditions  = (scored.get("conditions") or {})
+    bayes_setup = scored.get("bayes_setup", "default")
+    base_rate   = base_rates.get(bayes_setup, base_rates.get("default", 0.45))
+
+    cond_rows = []
+    for cname, present in conditions.items():
+        if cname not in lk_table:
+            continue
+        mult = lk_table[cname]["yes" if present else "no"]
+        cond_rows.append({
+            "name":      cname,
+            "present":   present,
+            "mult":      mult,
+            "effect":    "boost" if mult > 1.0 else ("penalty" if mult < 1.0 else "neutral"),
+        })
+    # Sort: biggest penalties first, then biggest boosts last
+    cond_rows.sort(key=lambda r: r["mult"])
+
+    score_out = {
+        "setup_type":    bayes_setup,
+        "base_rate":     base_rate,
+        "base_rate_pct": round(base_rate * 100, 1),
+        "conditions":    cond_rows,
+        "p_win":         scored.get("p_win"),
+        "p_win_pct":     round(scored.get("p_win", 0) * 100, 1),
+        "ev":            scored.get("ev"),
+        "grade":         scored.get("grade"),
+    }
+
+    # ── VERDICT ───────────────────────────────────────────────────────────────
+    tl = (scored.get("trade_levels") or {})
+    verdict_out = {
+        "entry_state":  scored.get("entry_state"),
+        "blocked":      scored.get("dl_blocked", False),
+        "block_reason": scored.get("dl_block_reason"),
+        "grade":        scored.get("grade"),
+        "score":        scored.get("score"),
+        "trade_levels": tl,
+        "flags":        scored.get("flags", []),
+        "signal_id":    scored.get("signal_id"),
+    }
+
+    return {
+        "pair":       pair,
+        "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "sweep":      sweep_out,
+        "choch":      choch_out,
+        "ob":         ob_out,
+        "h1":         h1_out,
+        "pd":         pd_out,
+        "session":    kz_out,
+        "news":       news_out,
+        "score":      score_out,
+        "verdict":    verdict_out,
+    }
 
 
 def _ict_summary(ict: dict) -> str:
@@ -364,6 +549,20 @@ def api_sync_status_post():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/audit/<pair>")
+def api_audit(pair: str):
+    """
+    Signal audit for XAU_USD / XAG_USD.
+    Returns the full proof payload from the last scan — no new computation.
+    """
+    key = pair.upper().replace("-", "_")
+    with _store_lock:
+        payload = _audit_store.get(key)
+    if payload is None:
+        return jsonify({"error": f"No audit data for {key} — waiting for first scan"}), 404
+    return jsonify(_sanitize(payload))
 
 
 @app.route("/api/performance")

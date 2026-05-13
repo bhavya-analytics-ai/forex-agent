@@ -962,6 +962,121 @@
   .modal-feedback.ok   { color: var(--green); }
   .modal-feedback.err  { color: var(--red); }
 
+  /* ── AUDIT MODAL ───────────────────────────── */
+  .audit-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.82);
+    z-index: 600;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 32px 16px;
+  }
+  .audit-overlay.open { display: flex; }
+  .audit-box {
+    background: var(--navy-dark);
+    border: 1px solid var(--navy-border);
+    border-radius: 10px;
+    width: 720px; max-width: 100%;
+    box-shadow: 0 24px 80px rgba(0,0,0,.7);
+    overflow: hidden;
+  }
+  .audit-header {
+    background: var(--navy-mid);
+    border-bottom: 1px solid var(--navy-border);
+    padding: 14px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .audit-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; font-weight: 700; letter-spacing: 2px;
+    color: var(--yellow);
+  }
+  .audit-close {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 18px; cursor: pointer; line-height: 1;
+    padding: 0 4px;
+  }
+  .audit-close:hover { color: var(--text-primary); }
+  .audit-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .audit-section {
+    border: 1px solid var(--navy-border);
+    border-radius: 6px; overflow: hidden;
+  }
+  .audit-section-hdr {
+    background: rgba(255,255,255,.03);
+    border-bottom: 1px solid var(--navy-border);
+    padding: 7px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 700; letter-spacing: 1.8px;
+    color: var(--text-secondary);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .audit-section-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; }
+  .audit-row {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 12px;
+  }
+  .audit-lbl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: var(--text-muted);
+    min-width: 160px; flex-shrink: 0;
+  }
+  .audit-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; color: var(--text-primary);
+    word-break: break-all;
+  }
+  .audit-val.found   { color: var(--green); }
+  .audit-val.missing { color: var(--text-dim); font-style: italic; }
+  .audit-val.warn    { color: var(--yellow); }
+  .audit-val.bad     { color: var(--red); }
+  .audit-na { color: var(--text-dim); font-style: italic; font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+  /* score table */
+  .audit-score-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .audit-score-table th {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; letter-spacing: 1.5px; color: var(--text-muted);
+    text-align: left; padding: 4px 8px;
+    border-bottom: 1px solid var(--navy-border);
+  }
+  .audit-score-table td {
+    font-family: 'JetBrains Mono', monospace;
+    padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,.04);
+    font-size: 11px; color: var(--text-primary);
+  }
+  .audit-score-table tr:last-child td { border-bottom: none; }
+  .mult-boost  { color: var(--green); }
+  .mult-penalty{ color: var(--red); }
+  .mult-neutral{ color: var(--text-muted); }
+  .cond-yes { color: var(--green); font-weight: 700; }
+  .cond-no  { color: var(--text-dim); }
+  /* sequence strip */
+  .audit-seq {
+    display: flex; align-items: center; gap: 0;
+    padding: 10px 14px; flex-wrap: wrap; gap: 6px;
+  }
+  .audit-seq-step {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 700;
+    padding: 5px 12px; border-radius: 4px;
+    border: 1px solid;
+  }
+  .seq-done { background: rgba(0,230,118,.1); border-color: rgba(0,230,118,.4); color: var(--green); }
+  .seq-miss { background: rgba(255,68,68,.06); border-color: rgba(255,68,68,.3); color: var(--red); }
+  .seq-arrow { color: var(--text-dim); font-size: 14px; }
+  /* verdict badge */
+  .audit-verdict-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; font-weight: 700; letter-spacing: 1px;
+    padding: 6px 16px; border-radius: 4px; border: 1px solid;
+  }
+  .vb-enter { background: rgba(0,230,118,.12); border-color: rgba(0,230,118,.5); color: var(--green); }
+  .vb-wait  { background: rgba(255,215,64,.08); border-color: rgba(255,215,64,.4); color: var(--yellow); }
+  .vb-skip  { background: rgba(255,68,68,.08);  border-color: rgba(255,68,68,.4);  color: var(--red); }
+  #audit-ts { font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+
   /* ── MANUAL TRADES TAB IN PERF PANEL ─────── */
   .perf-tabs { display: flex; gap: 0; margin-bottom: 14px; }
   .perf-tab {
@@ -1854,6 +1969,15 @@ function buildRow(s) {
   const _hasLevels  = !!(_tl.entry_price || _tl.sl_price);
   const _pairKey    = s.pair.replace(/'/g, "\\'");
 
+  // 🔍 Audit button — XAU/XAG only, always visible
+  const auditBtnHtml = (s.pair === "XAU_USD" || s.pair === "XAG_USD") ? `
+    <button
+      onclick="event.stopPropagation();openAudit('${s.pair}')"
+      style="background:rgba(255,215,64,.08);border:1px solid rgba(255,215,64,.35);color:var(--yellow);
+             font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;
+             padding:4px 12px;border-radius:4px;cursor:pointer;white-space:nowrap;">
+      🔍 AUDIT</button>` : "";
+
   // 🚀 Take + ⚡ Debate — shown in scanner detail row for A/A+ signals with a logged signal_id
   const scannerActionHtml = (s.signal_id && _isTopGrade) ? `
     <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
@@ -1910,6 +2034,9 @@ function buildRow(s) {
           <div class="flags-list">
             ${gradeMeaning}
             ${flagsHtml}
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+            ${auditBtnHtml}
           </div>
           ${scannerActionHtml}
           ${markHtml}
@@ -3942,6 +4069,238 @@ async function fetchVibe() {
     console.warn("Vibe fetch error:", e);
   }
 }
+
+
+/* ── SIGNAL AUDIT ──────────────────────────────────────────────────── */
+
+function av(val, cls) {
+  if (val === null || val === undefined || val === "") return `<span class="audit-na">not available</span>`;
+  return `<span class="audit-val ${cls||""}">${val}</span>`;
+}
+
+function auditRow(label, val, cls) {
+  return `<div class="audit-row"><span class="audit-lbl">${label}</span>${av(val, cls)}</div>`;
+}
+
+function openAudit(pair) {
+  const overlay = document.getElementById("audit-overlay");
+  const body    = document.getElementById("audit-body-inner");
+  body.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:12px;">Loading audit data…</div>`;
+  overlay.classList.add("open");
+
+  fetch("/api/audit/" + pair)
+    .then(r => r.json())
+    .then(d => { body.innerHTML = renderAuditModal(d); })
+    .catch(e => { body.innerHTML = `<div style="padding:20px;color:var(--red);font-family:'JetBrains Mono',monospace;">${e}</div>`; });
+}
+
+function closeAudit() {
+  document.getElementById("audit-overlay").classList.remove("open");
+}
+
+function renderAuditModal(d) {
+  if (d.error) return `<div style="padding:20px;color:var(--red);font-family:'JetBrains Mono',monospace;">${d.error}</div>`;
+
+  document.getElementById("audit-ts").textContent = d.scanned_at || "";
+
+  const sw  = d.sweep   || {};
+  const ch  = d.choch   || {};
+  const ob  = d.ob      || {};
+  const h1  = d.h1      || {};
+  const pd  = d.pd      || {};
+  const se  = d.session || {};
+  const nw  = d.news    || {};
+  const sc  = d.score   || {};
+  const vd  = d.verdict || {};
+  const tl  = vd.trade_levels || {};
+
+  // ── SEQUENCE STRIP ────────────────────────────────────────────────
+  const seqHtml = `
+    <div class="audit-section">
+      <div class="audit-section-hdr">⛓ ICT SNIPER SEQUENCE</div>
+      <div class="audit-seq">
+        <span class="audit-seq-step ${sw.found ? 'seq-done' : 'seq-miss'}">
+          ${sw.found ? '✓' : '✗'} SWEEP
+        </span>
+        <span class="seq-arrow">→</span>
+        <span class="audit-seq-step ${ch.found ? 'seq-done' : 'seq-miss'}">
+          ${ch.found ? '✓' : '✗'} CHoCH
+        </span>
+        <span class="seq-arrow">→</span>
+        <span class="audit-seq-step ${ob.found ? 'seq-done' : 'seq-miss'}">
+          ${ob.found ? '✓' : '✗'} OB/FVG
+        </span>
+      </div>
+    </div>`;
+
+  // ── SWEEP ─────────────────────────────────────────────────────────
+  let sweepBody = sw.found ? `
+    ${auditRow("timestamp",     sw.time)}
+    ${auditRow("type",          sw.type)}
+    ${auditRow("swept swing @", sw.swept_level)}
+    ${auditRow("candle high",   sw.candle_high)}
+    ${auditRow("candle low",    sw.candle_low)}
+    ${auditRow("candle close",  sw.candle_close)}
+    ${auditRow("wick size",     sw.wick_size)}
+    ${auditRow("bars ago",      sw.bars_ago)}
+    ${auditRow("bias",          sw.bias)}
+    ${auditRow("description",   sw.description)}
+  ` : `<div class="audit-na" style="padding:4px 0;">No sweep detected within lookback window</div>`;
+
+  const sweepHtml = `
+    <div class="audit-section">
+      <div class="audit-section-hdr">💧 SWEEP</div>
+      <div class="audit-section-body">${sweepBody}</div>
+    </div>`;
+
+  // ── CHoCH ─────────────────────────────────────────────────────────
+  let chochBody = ch.found ? `
+    ${auditRow("source TF",    ch.source)}
+    ${auditRow("type",         ch.type)}
+    ${auditRow("broken level", ch.level)}
+    ${auditRow("bars ago",     ch.bars_ago)}
+    ${auditRow("description",  ch.description)}
+    <div class="audit-row"><span class="audit-lbl">displacement body/wick</span><span class="audit-na">not available — requires raw candle data</span></div>
+  ` : `<div class="audit-na" style="padding:4px 0;">No CHoCH detected on M5 or M15</div>`;
+
+  const chochHtml = `
+    <div class="audit-section">
+      <div class="audit-section-hdr">⚡ CHoCH</div>
+      <div class="audit-section-body">${chochBody}</div>
+    </div>`;
+
+  // ── H1 CONTEXT ────────────────────────────────────────────────────
+  const h1BlockNote = h1.block_reason
+    ? `<div class="audit-row"><span class="audit-lbl">block reason</span><span class="audit-val bad">${h1.block_reason}</span></div>`
+    : "";
+
+  const emaRelColor = h1.price_vs_ema === "BELOW" ? "bad" : (h1.price_vs_ema === "ABOVE" ? "found" : "");
+  const h1Html = `
+    <div class="audit-section">
+      <div class="audit-section-hdr">📊 H1 CONTEXT</div>
+      <div class="audit-section-body">
+        ${auditRow("H1 bias",        h1.bias)}
+        ${auditRow("H1 trend",       h1.trend)}
+        ${auditRow("H1 phase",       h1.phase)}
+        ${auditRow("H1 strength",    h1.strength)}
+        ${auditRow("last swing high",h1.last_high)}
+        ${auditRow("last swing low", h1.last_low)}
+        ${auditRow("H1 EMA 50",      h1.ema_50)}
+        ${auditRow("current price",  h1.price)}
+        ${auditRow("price vs EMA",   h1.price_vs_ema, emaRelColor)}
+        ${auditRow("EMA dist %",     h1.ema_dist_pct != null ? h1.ema_dist_pct + "%" : null)}
+        <div class="audit-row"><span class="audit-lbl">H1 candle color</span><span class="audit-na">not available — requires raw candle data</span></div>
+        ${h1BlockNote}
+      </div>
+    </div>`;
+
+  // ── PREMIUM / DISCOUNT ────────────────────────────────────────────
+  const pdColor = pd.zone === "premium" ? "warn" : (pd.zone === "discount" ? "found" : "");
+  const pdHtml = `
+    <div class="audit-section">
+      <div class="audit-section-hdr">📐 PREMIUM / DISCOUNT</div>
+      <div class="audit-section-body">
+        ${auditRow("zone",        pd.zone,        pdColor)}
+        ${auditRow("position %",  pd.pct != null ? pd.pct + "%" : null)}
+        ${auditRow("swing high",  pd.swing_high)}
+        ${auditRow("swing low",   pd.swing_low)}
+        ${auditRow("equilibrium", pd.equilibrium)}
+        ${auditRow("description", pd.description)}
+      </div>
+    </div>`;
+
+  // ── SESSION + NEWS ────────────────────────────────────────────────
+  const kzColor = se.in_killzone ? "found" : "warn";
+  const newsColor = nw.safe === false ? "bad" : (nw.caution ? "warn" : "found");
+  const newsVal = nw.safe === false ? "BLOCKED" : (nw.caution ? "CAUTION" : (nw.safe === true ? "SAFE" : null));
+  const ctxHtml = `
+    <div class="audit-section">
+      <div class="audit-section-hdr">🕐 SESSION + NEWS</div>
+      <div class="audit-section-body">
+        ${auditRow("session",      se.session)}
+        ${auditRow("in killzone",  se.in_killzone != null ? (se.in_killzone ? "YES" : "NO") : null, kzColor)}
+        ${auditRow("news state",   newsVal, newsColor)}
+        ${auditRow("news reason",  nw.reason)}
+        ${auditRow("spike watch",  nw.spike_watch != null ? (nw.spike_watch ? "YES" : "no") : null)}
+      </div>
+    </div>`;
+
+  // ── SCORE PROOF ───────────────────────────────────────────────────
+  const condRows = (sc.conditions || []).map(c => {
+    const mCls   = c.effect === "boost" ? "mult-boost" : (c.effect === "penalty" ? "mult-penalty" : "mult-neutral");
+    const pCls   = c.present ? "cond-yes" : "cond-no";
+    const prefix = c.mult > 1 ? "+" : "";
+    const multDisp = c.mult === 1 ? "×1.00 (neutral)" : `×${c.mult.toFixed(2)}`;
+    return `<tr>
+      <td>${c.name.replace(/_/g, " ")}</td>
+      <td class="${pCls}">${c.present ? "YES" : "no"}</td>
+      <td class="${mCls}">${multDisp}</td>
+      <td class="${mCls}">${c.effect}</td>
+    </tr>`;
+  }).join("");
+
+  const scoreHtml = `
+    <div class="audit-section">
+      <div class="audit-section-hdr">🧮 SCORE PROOF</div>
+      <div class="audit-section-body">
+        ${auditRow("setup type",   sc.setup_type)}
+        ${auditRow("base rate",    sc.base_rate_pct != null ? sc.base_rate_pct + "%" : null)}
+        <table class="audit-score-table" style="margin-top:8px;">
+          <thead><tr>
+            <th>CONDITION</th><th>PRESENT</th><th>MULTIPLIER</th><th>EFFECT</th>
+          </tr></thead>
+          <tbody>${condRows || '<tr><td colspan="4" class="audit-na">No conditions available</td></tr>'}</tbody>
+        </table>
+        <div style="margin-top:10px;display:flex;gap:20px;flex-wrap:wrap;">
+          <div>${auditRow("P(win)",   sc.p_win_pct != null ? sc.p_win_pct + "%" : null)}</div>
+          <div>${auditRow("EV",       sc.ev)}</div>
+          <div>${auditRow("grade",    sc.grade)}</div>
+        </div>
+      </div>
+    </div>`;
+
+  // ── VERDICT ───────────────────────────────────────────────────────
+  const es = vd.entry_state || "";
+  const vbCls = es === "ENTER_NOW" ? "vb-enter" : (es === "WAIT_RETEST" ? "vb-wait" : "vb-skip");
+  const flagsHtml = (vd.flags || []).length
+    ? (vd.flags || []).map(f => `<div style="color:var(--text-muted);font-size:11px;font-family:'JetBrains Mono',monospace;padding:2px 0;">${f}</div>`).join("")
+    : `<span class="audit-na">no flags</span>`;
+
+  const verdictHtml = `
+    <div class="audit-section">
+      <div class="audit-section-hdr">🏁 VERDICT</div>
+      <div class="audit-section-body">
+        <div style="margin-bottom:10px;">
+          <span class="audit-verdict-badge ${vbCls}">${es || "—"}</span>
+          ${vd.blocked ? `<span style="margin-left:10px;color:var(--red);font-family:'JetBrains Mono',monospace;font-size:11px;">BLOCKED</span>` : ""}
+        </div>
+        ${vd.block_reason ? auditRow("block reason", vd.block_reason, "bad") : ""}
+        ${auditRow("final grade", vd.grade)}
+        ${auditRow("score",       vd.score)}
+        ${tl.entry_price ? auditRow("entry",  tl.entry_price) : ""}
+        ${tl.sl_price    ? auditRow("SL",     tl.sl_price + (tl.sl_pips  ? " (" + tl.sl_pips  + " pips)" : "")) : ""}
+        ${tl.tp1_price   ? auditRow("TP1",    tl.tp1_price + (tl.tp1_pips ? " (" + tl.tp1_pips + " pips)" : "")) : ""}
+        ${tl.rr1         ? auditRow("RR",     tl.rr1) : ""}
+        <div style="margin-top:8px;border-top:1px solid var(--navy-border);padding-top:8px;">${flagsHtml}</div>
+      </div>
+    </div>`;
+
+  return seqHtml + sweepHtml + chochHtml + h1Html + pdHtml + ctxHtml + scoreHtml + verdictHtml;
+}
+
 </script>
+
+<!-- AUDIT MODAL -->
+<div class="audit-overlay" id="audit-overlay" onclick="if(event.target===this)closeAudit()">
+  <div class="audit-box">
+    <div class="audit-header">
+      <span class="audit-title">🔍 SIGNAL AUDIT — XAU/USD</span>
+      <span id="audit-ts"></span>
+      <button class="audit-close" onclick="closeAudit()">✕</button>
+    </div>
+    <div class="audit-body" id="audit-body-inner"></div>
+  </div>
+</div>
+
 </body>
 </html>
