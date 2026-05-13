@@ -246,53 +246,63 @@ def _start_monitor(signal_id, pair, direction, entry, sl, tp1, sl_pips):
 
 def _monitor_trade(signal_id, pair, direction, entry, sl, tp1, sl_pips):
     """
-    Polls M5 candles every 5 minutes until TP1 or SL is hit.
+    Polls M5 candles every 60s until TP1 or SL is hit.
+    Reads SL/TP from DB on every cycle — picks up user edits automatically.
     No timeout — runs until one side is hit.
     """
     from core.fetcher import fetch_candles, pip_size
+    import pandas as pd
     pip = pip_size(pair)
 
-    logger.info(f"Monitoring {signal_id} | {pair} {direction} | SL={sl} TP1={tp1}")
+    # Wait 90s on startup — gives user time to save their real SL/TP before first check
+    time.sleep(90)
 
-    # On resume: check candle history since trade was logged — catch any missed SL/TP hits
+    # Read SL/TP from DB — always use whatever is currently saved
+    def _current_levels():
+        db = _get_levels_from_db(signal_id)
+        return db.get("sl", sl), db.get("tp1", tp1)
+
+    cur_sl, cur_tp1 = _current_levels()
+    logger.info(f"Monitoring {signal_id} | {pair} {direction} | SL={cur_sl} TP1={cur_tp1}")
+
+    # Catch-up check: look at candle history since trade was logged using DB levels
     try:
-        import pandas as pd
         log_time = _get_log_time(signal_id)
-        df_hist = fetch_candles(pair, "M5")
+        df_hist  = fetch_candles(pair, "M5")
         if df_hist is not None and not df_hist.empty and log_time:
             df_hist = df_hist[df_hist.index > pd.Timestamp(log_time, tz="UTC")]
             if not df_hist.empty:
                 if direction == "bullish":
-                    tp_hit = (df_hist["high"] >= tp1).any()
-                    sl_hit = (df_hist["low"]  <= sl).any()
+                    tp_hit = (df_hist["high"] >= cur_tp1).any()
+                    sl_hit = (df_hist["low"]  <= cur_sl).any()
                 else:
-                    tp_hit = (df_hist["low"]  <= tp1).any()
-                    sl_hit = (df_hist["high"] >= sl).any()
+                    tp_hit = (df_hist["low"]  <= cur_tp1).any()
+                    sl_hit = (df_hist["high"] >= cur_sl).any()
                 if tp_hit or sl_hit:
                     if tp_hit and sl_hit:
-                        tp_time = df_hist[df_hist["high"] >= tp1].index[0] if direction == "bullish" else df_hist[df_hist["low"] <= tp1].index[0]
-                        sl_time = df_hist[df_hist["low"]  <= sl ].index[0] if direction == "bullish" else df_hist[df_hist["high"] >= sl].index[0]
-                        result = "WIN" if tp_time <= sl_time else "LOSS"
+                        tp_time = df_hist[df_hist["high"] >= cur_tp1].index[0] if direction == "bullish" else df_hist[df_hist["low"] <= cur_tp1].index[0]
+                        sl_time = df_hist[df_hist["low"]  <= cur_sl ].index[0] if direction == "bullish" else df_hist[df_hist["high"] >= cur_sl].index[0]
+                        result  = "WIN" if tp_time <= sl_time else "LOSS"
                     elif tp_hit:
                         result = "WIN"
                     else:
                         result = "LOSS"
-                    logger.info(f"Resume check: {signal_id} already {result} from history")
-                    _close_trade(signal_id, pair, direction, entry, sl, tp1, pip, result)
+                    logger.info(f"Catch-up: {signal_id} → {result} | SL={cur_sl} TP={cur_tp1}")
+                    _close_trade(signal_id, pair, direction, entry, cur_sl, cur_tp1, pip, result)
                     return
     except Exception as e:
-        logger.warning(f"Resume history check failed for {signal_id}: {e}")
+        logger.warning(f"Catch-up check failed for {signal_id}: {e}")
 
     while True:
-        time.sleep(60)  # check every 60s (was 300s — too slow for gold)
+        time.sleep(60)
         try:
-            sig_time = datetime.utcnow()
+            # Always read fresh SL/TP from DB — picks up any user edits
+            cur_sl, cur_tp1 = _current_levels()
+
             df = fetch_candles(pair, "M5")
             if df is None or df.empty:
                 continue
 
-            # Only look at candles after trade was logged
-            import pandas as pd
             log_time = _get_log_time(signal_id)
             if log_time:
                 df = df[df.index > pd.Timestamp(log_time, tz="UTC")]
@@ -301,28 +311,27 @@ def _monitor_trade(signal_id, pair, direction, entry, sl, tp1, sl_pips):
                 continue
 
             if direction == "bullish":
-                tp_hit = (df["high"] >= tp1).any()
-                sl_hit = (df["low"]  <= sl).any()
+                tp_hit = (df["high"] >= cur_tp1).any()
+                sl_hit = (df["low"]  <= cur_sl).any()
             else:
-                tp_hit = (df["low"]  <= tp1).any()
-                sl_hit = (df["high"] >= sl).any()
+                tp_hit = (df["low"]  <= cur_tp1).any()
+                sl_hit = (df["high"] >= cur_sl).any()
 
             if tp_hit and not sl_hit:
-                _close_trade(signal_id, pair, direction, entry, sl, tp1, pip, "WIN")
+                _close_trade(signal_id, pair, direction, entry, cur_sl, cur_tp1, pip, "WIN")
                 break
             elif sl_hit and not tp_hit:
-                _close_trade(signal_id, pair, direction, entry, sl, tp1, pip, "LOSS")
+                _close_trade(signal_id, pair, direction, entry, cur_sl, cur_tp1, pip, "LOSS")
                 break
             elif tp_hit and sl_hit:
-                # Both hit — check which came first
                 if direction == "bullish":
-                    tp_time = df[df["high"] >= tp1].index[0]
-                    sl_time = df[df["low"]  <= sl ].index[0]
+                    tp_time = df[df["high"] >= cur_tp1].index[0]
+                    sl_time = df[df["low"]  <= cur_sl ].index[0]
                 else:
-                    tp_time = df[df["low"]  <= tp1].index[0]
-                    sl_time = df[df["high"] >= sl ].index[0]
+                    tp_time = df[df["low"]  <= cur_tp1].index[0]
+                    sl_time = df[df["high"] >= cur_sl ].index[0]
                 result = "WIN" if tp_time <= sl_time else "LOSS"
-                _close_trade(signal_id, pair, direction, entry, sl, tp1, pip, result)
+                _close_trade(signal_id, pair, direction, entry, cur_sl, cur_tp1, pip, result)
                 break
 
         except Exception as e:
@@ -344,6 +353,21 @@ def _get_log_time(signal_id: str) -> str:
     except Exception:
         pass
     return None
+
+
+def _get_levels_from_db(signal_id: str) -> dict:
+    """Read current sl_price and tp1_price from DB — picks up user edits."""
+    try:
+        from db.database import get_manual_trade
+        row = get_manual_trade(signal_id)
+        if row:
+            sl  = float(row.get("sl_price")  or 0)
+            tp1 = float(row.get("tp1_price") or 0)
+            if sl > 0 and tp1 > 0:
+                return {"sl": sl, "tp1": tp1}
+    except Exception as e:
+        logger.warning(f"_get_levels_from_db failed for {signal_id}: {e}")
+    return {}
 
 
 def _close_trade(signal_id, pair, direction, entry, sl, tp1, pip, result):
