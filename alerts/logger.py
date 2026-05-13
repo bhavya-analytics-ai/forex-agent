@@ -22,6 +22,15 @@ LOG_PATH = LOG_CONFIG["signal_log_path"]
 COOLDOWN_MINUTES = 15
 _last_logged     = {}  # pair → datetime
 
+
+def _get_signal_mode() -> str:
+    """Return the active strategy mode — 'normal' or 'news_sniper'. Never raises."""
+    try:
+        from filters.mode_manager import get_active_mode
+        return get_active_mode()
+    except Exception:
+        return "normal"
+
 COLUMNS = [
     "signal_id",
     "timestamp_utc",
@@ -65,6 +74,7 @@ COLUMNS = [
     "outcome",
     "outcome_pips",
     "notes",
+    "signal_mode",
 ]
 
 
@@ -108,9 +118,16 @@ def log_signal(scored_signal: dict, confluence: dict, alerted: bool) -> str:
     breakdown = scored_signal.get("breakdown", {})
     pattern   = scored_signal.get("entry_pattern") or {}
     session   = scored_signal.get("session_ctx", {}).get("session", "unknown")
-    kz        = scored_signal.get("kz_ctx", {}).get("killzone") or {}
-    kz_name   = kz.get("name", "") if isinstance(kz, dict) else ""
     levels    = scored_signal.get("trade_levels", {})
+
+    # kz_ctx is not in scored_signal output — call directly to get real killzone name
+    try:
+        from filters.killzones import get_killzone_context
+        _kz_ctx = get_killzone_context(pair)
+        _kz     = _kz_ctx.get("killzone") or {}
+        kz_name = _kz.get("name", "") if isinstance(_kz, dict) else ""
+    except Exception:
+        kz_name = ""
 
     row = {
         "signal_id":          signal_id,
@@ -127,14 +144,21 @@ def log_signal(scored_signal: dict, confluence: dict, alerted: bool) -> str:
         "tp1_pips":           levels.get("tp1_pips", ""),
         "tp2_pips":           levels.get("tp2_pips", ""),
         "score":              scored_signal.get("score", 0),
-        "score_zone":         breakdown.get("zone", 0),
-        "score_tf":           breakdown.get("tf", 0),
-        "score_pattern":      breakdown.get("pattern", 0),
-        "score_session":      breakdown.get("session", 0),
-        "score_news":         breakdown.get("news", 0),
-        "score_quality_bonus": breakdown.get("quality_bonus", 0),
-        "score_fvg":          breakdown.get("fvg", 0),
-        "score_ict":          breakdown.get("ict", 0),
+        # ── LEGACY BREAKDOWN FIELDS (dead) ────────────────────────────────────
+        # scorer.breakdown is now the boolean conditions dict, not a numeric
+        # sub-score dict. Keys "zone","tf","pattern","session","news",
+        # "quality_bonus","fvg","ict" do not exist in it.
+        # Logged as "" (empty) so training data is not polluted with fake zeros.
+        # TODO: replace with real boolean conditions once training pipeline is ready.
+        "score_zone":         breakdown.get("zone", ""),
+        "score_tf":           breakdown.get("tf", ""),
+        "score_pattern":      breakdown.get("pattern", ""),
+        "score_session":      breakdown.get("session", ""),
+        "score_news":         breakdown.get("news", ""),
+        "score_quality_bonus": breakdown.get("quality_bonus", ""),
+        "score_fvg":          breakdown.get("fvg", ""),
+        "score_ict":          breakdown.get("ict", ""),
+        # ──────────────────────────────────────────────────────────────────────
         "h1_zone_type":       top_zone.get("type", ""),
         "h1_zone_high":       top_zone.get("high", ""),
         "h1_zone_low":        top_zone.get("low", ""),
@@ -155,13 +179,18 @@ def log_signal(scored_signal: dict, confluence: dict, alerted: bool) -> str:
         "outcome":            "",
         "outcome_pips":       "",
         "notes":              "",
+        "signal_mode":        _get_signal_mode(),
     }
 
+    # TODO: SQLite is intended as the primary source of truth, but the write
+    # order here is CSV-first. A CSV write failure raises and skips SQLite
+    # entirely. A SQLite failure after CSV success is caught and swallowed,
+    # leaving the two stores permanently diverged. Flip order (SQLite-first,
+    # CSV as backup) once SQLite schema is confirmed stable.
     with open(LOG_PATH, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=COLUMNS)
         writer.writerow(row)
 
-    # SQLite (primary store going forward)
     try:
         from db.database import insert_agent_signal
         insert_agent_signal({**row, "outcome_pips": None})
