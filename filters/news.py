@@ -37,6 +37,19 @@ _NEAR_EVENT_WINDOW_MINS = 5
 _CACHE_FAILURE_SECS     = 300   # on total failure: wait 5 min before retrying
 _finnhub_403            = False  # latched True if Finnhub returns 403 (paid-only endpoint)
 
+# Finnhub uses ISO 2-letter country codes ("US", "GB") — not currency strings.
+# Map them to the currency codes the rest of the system expects.
+_COUNTRY_TO_CURRENCY = {
+    "US": "USD", "GB": "GBP", "EU": "EUR", "DE": "EUR",
+    "FR": "EUR", "IT": "EUR", "ES": "EUR", "NL": "EUR",
+    "JP": "JPY", "CA": "CAD", "AU": "AUD", "NZ": "NZD",
+    "CH": "CHF", "CN": "CNY", "KR": "KRW", "IN": "INR",
+    "SG": "SGD", "HK": "HKD", "NO": "NOK", "SE": "SEK",
+    "DK": "DKK", "ZA": "ZAR", "MX": "MXN", "BR": "BRL",
+    "TR": "TRY", "RU": "RUB", "PL": "PLN", "HU": "HUF",
+    "CZ": "CZK", "RO": "RON", "PH": "PHP", "SN": "XOF",
+}
+
 
 def _adaptive_ttl_seconds(cached_df) -> int:
     """
@@ -105,9 +118,13 @@ def _fetch_finnhub_raw() -> pd.DataFrame:
                 if not impact:
                     continue
 
+                # Finnhub uses "country" (ISO 2-letter: "US", "GB") — map to currency code
+                raw_country = item.get("country", item.get("currency", "")).upper()
+                currency    = _COUNTRY_TO_CURRENCY.get(raw_country, raw_country)
+
                 events.append({
                     "time":     dt,
-                    "currency": item.get("currency", "").upper(),
+                    "currency": currency,
                     "impact":   impact,
                     "event":    item.get("event", ""),
                     "forecast": str(item.get("estimate", "")) if item.get("estimate") is not None else "",
@@ -225,7 +242,7 @@ def fetch_forexfactory_calendar() -> pd.DataFrame:
 
                 events.append({
                     "time":     dt_utc,
-                    "currency": item.get("country", "").upper(),
+                    "currency": _COUNTRY_TO_CURRENCY.get(item.get("country", "").upper(), item.get("country", "").upper()),
                     "impact":   item.get("impact",  "").upper(),
                     "event":    item.get("title",   ""),
                     "forecast": item.get("forecast", ""),
