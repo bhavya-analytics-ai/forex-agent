@@ -164,6 +164,14 @@ def log_manual_trade(pair: str, direction: str, entry_price: float,
     except Exception:
         pass
 
+    # Capture current system mode — news_sniper or normal
+    signal_mode = "normal"
+    try:
+        from filters.mode_manager import get_active_mode
+        signal_mode = get_active_mode()
+    except Exception:
+        pass
+
     row = {
         "signal_id":     signal_id,
         "source":        "manual",
@@ -189,6 +197,7 @@ def log_manual_trade(pair: str, direction: str, entry_price: float,
         "m15_trend":     m15_trend,
         "m5_trend":      m5_trend,
         "news_safe":     news_safe,
+        "signal_mode":   signal_mode,
     }
 
     # Primary: SQLite
@@ -251,7 +260,7 @@ def _monitor_trade(signal_id, pair, direction, entry, sl, tp1, sl_pips):
         log_time = _get_log_time(signal_id)
         df_hist = fetch_candles(pair, "M5")
         if df_hist is not None and not df_hist.empty and log_time:
-            df_hist = df_hist[df_hist.index >= pd.Timestamp(log_time, tz="UTC")]
+            df_hist = df_hist[df_hist.index > pd.Timestamp(log_time, tz="UTC")]
             if not df_hist.empty:
                 if direction == "bullish":
                     tp_hit = (df_hist["high"] >= tp1).any()
@@ -286,7 +295,7 @@ def _monitor_trade(signal_id, pair, direction, entry, sl, tp1, sl_pips):
             import pandas as pd
             log_time = _get_log_time(signal_id)
             if log_time:
-                df = df[df.index >= pd.Timestamp(log_time, tz="UTC")]
+                df = df[df.index > pd.Timestamp(log_time, tz="UTC")]
 
             if df.empty:
                 continue
