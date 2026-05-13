@@ -16,7 +16,7 @@ import os
 logger = logging.getLogger(__name__)
 
 _NIM_BASE = "https://integrate.api.nvidia.com/v1"
-_MODEL    = "moonshotai/kimi-k2-instruct"
+_MODEL    = "meta/llama-3.3-70b-instruct"
 
 # ── SIGNAL CONTEXT BLOCK (shared across all 3 calls) ─────────────────────────
 
@@ -133,9 +133,14 @@ def debate_signal(signal: dict) -> dict:
         from openai import OpenAI
         client = OpenAI(base_url=_NIM_BASE, api_key=api_key, timeout=90.0)
 
-        sl   = float(signal.get("sl_pips")  or 0)
-        tp   = float(signal.get("tp1_pips") or 0)
-        rr   = round(tp / sl, 2) if sl > 0 else 0
+        sl              = float(signal.get("sl_pips")  or 0)
+        tp              = float(signal.get("tp1_pips") or 0)
+        rr              = round(tp / sl, 2) if sl > 0 else 0
+        zone_strength   = float(signal.get("h1_zone_strength") or 0)
+
+        # Flag incomplete input — judge rules 3 and 4 will auto-PASS on zero values,
+        # making the verdict unreliable regardless of actual trade quality.
+        debate_input_incomplete = (rr <= 0 or zone_strength <= 0)
 
         signal_block = _SIGNAL_BLOCK.format(
             pair             = signal.get("pair", "?"),
@@ -150,7 +155,7 @@ def debate_signal(signal: dict) -> dict:
             entry_pattern    = signal.get("entry_pattern") or "unknown",
             setup_type       = signal.get("setup_type") or "unknown",
             h1_zone_type     = signal.get("h1_zone_type") or "unknown",
-            h1_zone_strength = round(float(signal.get("h1_zone_strength") or 0), 1),
+            h1_zone_strength = round(zone_strength, 1),
             entry_price      = signal.get("entry_price", "?"),
             sl_price         = signal.get("sl_price", "?"),
             sl_pips          = sl,
@@ -210,29 +215,39 @@ def debate_signal(signal: dict) -> dict:
 
         verdict_data = json.loads(judge_raw)
 
+        # Normalize verdict — uppercase, strip, fallback WAIT if not a known option
+        _VALID_VERDICTS = {"TAKE", "PASS", "WAIT"}
+        raw_verdict = verdict_data.get("verdict", "WAIT")
+        verdict     = raw_verdict.strip().upper()
+        if verdict not in _VALID_VERDICTS:
+            logger.warning(f"[debate] unexpected verdict '{raw_verdict}' — defaulting to WAIT")
+            verdict = "WAIT"
+
         return {
-            "ok":         True,
-            "bull":       bull_arg,
-            "bear":       bear_arg,
-            "verdict":    verdict_data.get("verdict", "WAIT"),
-            "reason":     verdict_data.get("reason", ""),
-            "bull_score": verdict_data.get("bull_score", "?"),
-            "bear_score": verdict_data.get("bear_score", "?"),
-            "key_risk":   verdict_data.get("key_risk", ""),
+            "ok":                     True,
+            "bull":                   bull_arg,
+            "bear":                   bear_arg,
+            "verdict":                verdict,
+            "reason":                 verdict_data.get("reason", ""),
+            "bull_score":             verdict_data.get("bull_score", "?"),
+            "bear_score":             verdict_data.get("bear_score", "?"),
+            "key_risk":               verdict_data.get("key_risk", ""),
+            "debate_input_incomplete": debate_input_incomplete,
         }
 
     except json.JSONDecodeError as e:
         logger.error(f"debate judge JSON parse error: {e} | raw: {judge_raw[:300]}")
         # Still return bull/bear even if judge JSON failed
         return {
-            "ok":       True,
-            "bull":     bull_arg if "bull_arg" in dir() else "",
-            "bear":     bear_arg if "bear_arg" in dir() else "",
-            "verdict":  "WAIT",
-            "reason":   "Judge failed to parse — read bull/bear manually",
-            "bull_score": "?",
-            "bear_score": "?",
-            "key_risk":   "",
+            "ok":                     True,
+            "bull":                   bull_arg if "bull_arg" in dir() else "",
+            "bear":                   bear_arg if "bear_arg" in dir() else "",
+            "verdict":                "WAIT",
+            "reason":                 "Judge failed to parse — read bull/bear manually",
+            "bull_score":             "?",
+            "bear_score":             "?",
+            "key_risk":               "",
+            "debate_input_incomplete": debate_input_incomplete if "debate_input_incomplete" in dir() else True,
         }
     except Exception as e:
         logger.error(f"debate_signal error: {e}", exc_info=True)
