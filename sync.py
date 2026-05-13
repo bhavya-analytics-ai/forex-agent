@@ -87,7 +87,15 @@ def sync_table(conn: sqlite3.Connection, table: str, railway_rows: list,
     cols      = list(railway_rows[0].keys())
     ph        = ", ".join("?" * len(cols))
     col_str   = ", ".join(f'"{c}"' for c in cols)
-    update_ph = ", ".join(f'"{c}"=excluded."{c}"' for c in cols if c != id_col)
+
+    # These columns: if local already has a value, Railway blank never overwrites it
+    _PROTECT = {"outcome", "outcome_pips", "exit_price"}
+    update_ph = ", ".join(
+        (f'"{c}"=CASE WHEN excluded."{c}" IS NULL OR excluded."{c}"="" '
+         f'THEN "{table}"."{c}" ELSE excluded."{c}" END')
+        if c in _PROTECT else f'"{c}"=excluded."{c}"'
+        for c in cols if c != id_col
+    )
 
     inserted = updated = deleted = 0
 
@@ -167,6 +175,21 @@ def main():
 
     print_health(conn, rc)
     conn.close()
+
+    # Write sync status for local dashboard indicator
+    if not args.dry_run:
+        import json
+        status_file = os.path.join(os.path.dirname(__file__), "logs", "sync_status.json")
+        local_conn  = get_local_conn()
+        agent_n  = local_conn.execute("SELECT COUNT(*) FROM agent_signals").fetchone()[0]
+        manual_n = local_conn.execute("SELECT COUNT(*) FROM manual_trades").fetchone()[0]
+        local_conn.close()
+        with open(status_file, "w") as f:
+            json.dump({
+                "synced_at":     datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                "agent_signals": agent_n,
+                "manual_trades": manual_n,
+            }, f)
 
     log(f"Sync {'(dry run) ' if args.dry_run else ''}complete.")
     log("=" * 55)
