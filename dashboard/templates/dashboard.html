@@ -2156,19 +2156,15 @@ async function fetchLocalStatus() {
   const el = document.getElementById("ssb-local-text");
   if (!el) return;
   try {
-    const resp = await fetch("http://localhost:5001/local/status", { signal: AbortSignal.timeout(3000) });
+    const resp = await fetch("/api/sync_status", { signal: AbortSignal.timeout(5000) });
     const d = await resp.json();
-    if (d.error && !d.synced_at) {
+    if (!d.synced_at) {
       el.innerHTML = `<span class="ssb-local-offline">no sync yet</span>`;
       return;
     }
-    // Calculate how long ago sync ran
-    const syncedAt = d.synced_at ? new Date(d.synced_at.replace(" UTC","Z")) : null;
-    let agoStr = "—";
-    if (syncedAt) {
-      const mins = Math.floor((Date.now() - syncedAt) / 60000);
-      agoStr = mins < 60 ? `${mins}m ago` : `${Math.floor(mins/60)}h ${mins%60}m ago`;
-    }
+    const syncedAt = new Date(d.synced_at.replace(" UTC", "Z"));
+    const mins = Math.floor((Date.now() - syncedAt) / 60000);
+    const agoStr = mins < 60 ? `${mins}m ago` : `${Math.floor(mins/60)}h ${mins % 60}m ago`;
     el.innerHTML = `<span>${d.agent_signals ?? "—"} signals · ${d.manual_trades ?? "—"} trades</span> · synced ${agoStr}`;
   } catch(e) {
     el.innerHTML = `<span class="ssb-local-offline">offline</span>`;

@@ -176,20 +176,23 @@ def main():
     print_health(conn, rc)
     conn.close()
 
-    # Write sync status for local dashboard indicator
+    # POST local counts to Railway so dashboard can show them
     if not args.dry_run:
-        import json
-        status_file = os.path.join(os.path.dirname(__file__), "logs", "sync_status.json")
-        local_conn  = get_local_conn()
+        import requests as _req
+        local_conn = get_local_conn()
         agent_n  = local_conn.execute("SELECT COUNT(*) FROM agent_signals").fetchone()[0]
         manual_n = local_conn.execute("SELECT COUNT(*) FROM manual_trades").fetchone()[0]
         local_conn.close()
-        with open(status_file, "w") as f:
-            json.dump({
-                "synced_at":     datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-                "agent_signals": agent_n,
-                "manual_trades": manual_n,
-            }, f)
+        synced_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        try:
+            _req.post(
+                RAILWAY_URL.rstrip("/") + "/api/sync_status",
+                json={"agent_signals": agent_n, "manual_trades": manual_n, "synced_at": synced_at},
+                timeout=10,
+            )
+            log(f"Local counts posted to Railway: {agent_n} signals, {manual_n} trades")
+        except Exception as e:
+            log(f"Warning: could not post sync status to Railway: {e}")
 
     log(f"Sync {'(dry run) ' if args.dry_run else ''}complete.")
     log("=" * 55)

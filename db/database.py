@@ -140,6 +140,13 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_journal_date    ON journal_entries(entry_date);
             CREATE INDEX IF NOT EXISTS idx_journal_session ON journal_entries(session);
+
+            CREATE TABLE IF NOT EXISTS sync_status (
+                id             INTEGER PRIMARY KEY DEFAULT 1,
+                agent_signals  INTEGER DEFAULT 0,
+                manual_trades  INTEGER DEFAULT 0,
+                synced_at      TEXT
+            );
         """)
         conn.commit()
     # ── MIGRATIONS ────────────────────────────────────────────────────────────
@@ -151,6 +158,9 @@ def init_db():
         ("actual_tp1",     "REAL"),
         ("oanda_trade_id", "TEXT"),   # OANDA fill trade ID — needed to update GTC orders
         ("exit_price",     "REAL"),   # actual close price if closed early/mid-trade
+        ("h1_trend_at_entry", "TEXT"),  # H1 candle direction at signal time (for training)
+        ("is_archived",    "INTEGER DEFAULT 0"),  # soft-delete: hidden from dashboard, kept for training
+        ("signal_mode",    "TEXT"),   # "normal" or "news_sniper" — mode when signal fired
     ]:
         try:
             conn.execute(f"ALTER TABLE agent_signals ADD COLUMN {col} {typedef}")
@@ -160,12 +170,14 @@ def init_db():
 
     # manual_trades: model-training context fields
     for col, typedef in [
-        ("session",   "TEXT"),
-        ("killzone",  "TEXT"),
-        ("h1_trend",  "TEXT"),
-        ("m15_trend", "TEXT"),
-        ("m5_trend",  "TEXT"),
-        ("news_safe", "INTEGER"),
+        ("session",     "TEXT"),
+        ("killzone",    "TEXT"),
+        ("h1_trend",    "TEXT"),
+        ("m15_trend",   "TEXT"),
+        ("m5_trend",    "TEXT"),
+        ("news_safe",   "INTEGER"),
+        ("is_archived", "INTEGER DEFAULT 0"),  # soft-delete for manual trades
+        ("signal_mode", "TEXT"),               # "normal" or "news_sniper"
     ]:
         try:
             conn.execute(f"ALTER TABLE manual_trades ADD COLUMN {col} {typedef}")
@@ -206,6 +218,16 @@ def init_db():
         except Exception as e:
             logger.warning(f"level_edits migration failed (may already be done): {e}")
 
+    # Backfill: signal_mode NULL → 'normal' for all pre-existing rows
+    try:
+        r1 = conn.execute("UPDATE agent_signals SET signal_mode='normal' WHERE signal_mode IS NULL")
+        r2 = conn.execute("UPDATE manual_trades  SET signal_mode='normal' WHERE signal_mode IS NULL")
+        conn.commit()
+        if r1.rowcount or r2.rowcount:
+            logger.info(f"Backfilled signal_mode: agent_signals={r1.rowcount} manual_trades={r2.rowcount}")
+    except Exception as e:
+        logger.warning(f"signal_mode backfill failed (non-fatal): {e}")
+
     logger.info(f"SQLite DB ready at {_db_path()}")
 
 
@@ -219,13 +241,15 @@ def insert_manual_trade(row: dict):
             (signal_id, source, timestamp_utc, pair, direction, setup_type,
              entry_price, sl_price, tp1_price, tp2_price,
              sl_pips, tp1_pips, tp2_pips, rr1, outcome, outcome_pips,
-             post_mortem, notes, session, killzone, h1_trend, m15_trend, m5_trend, news_safe)
+             post_mortem, notes, session, killzone, h1_trend, m15_trend, m5_trend,
+             news_safe, signal_mode)
             VALUES
             (:signal_id, :source, :timestamp_utc, :pair, :direction, :setup_type,
              :entry_price, :sl_price, :tp1_price, :tp2_price,
              :sl_pips, :tp1_pips, :tp2_pips, :rr1, :outcome, :outcome_pips,
              :post_mortem, :notes,
-             :session, :killzone, :h1_trend, :m15_trend, :m5_trend, :news_safe)
+             :session, :killzone, :h1_trend, :m15_trend, :m5_trend,
+             :news_safe, :signal_mode)
         """, row)
         conn.commit()
 
@@ -647,4 +671,28 @@ def insert_journal_entry_row(row: dict) -> None:
             f"INSERT OR REPLACE INTO journal_entries ({','.join(cols)}) VALUES ({','.join('?'*len(cols))})",
             [row.get(c) for c in cols]
         )
+        conn.commit()
+
+
+def get_sync_status() -> dict:
+    """Return last known local sync counts posted by sync.py."""
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM sync_status WHERE id = 1").fetchone()
+    if not row:
+        return {"agent_signals": None, "manual_trades": None, "synced_at": None}
+    return dict(row)
+
+
+def set_sync_status(agent_signals: int, manual_trades: int, synced_at: str) -> None:
+    """Called by sync.py after every successful sync — stores local counts on Railway."""
+    conn = _get_conn()
+    with _write_lock:
+        conn.execute("""
+            INSERT INTO sync_status (id, agent_signals, manual_trades, synced_at)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                agent_signals = excluded.agent_signals,
+                manual_trades = excluded.manual_trades,
+                synced_at     = excluded.synced_at
+        """, (agent_signals, manual_trades, synced_at))
         conn.commit()

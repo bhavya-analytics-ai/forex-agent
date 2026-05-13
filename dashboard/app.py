@@ -341,6 +341,33 @@ def api_mark_outcome():
 
 
 @app.route("/api/performance")
+@app.route("/api/sync_status", methods=["GET"])
+def api_sync_status_get():
+    """Return last known local sync counts (posted by sync.py after each run)."""
+    try:
+        from db.database import get_sync_status
+        return jsonify(get_sync_status())
+    except Exception as e:
+        return jsonify({"error": str(e), "agent_signals": None, "manual_trades": None, "synced_at": None})
+
+
+@app.route("/api/sync_status", methods=["POST"])
+def api_sync_status_post():
+    """sync.py POSTs local counts here after every sync run."""
+    try:
+        from db.database import set_sync_status
+        body = request.get_json(silent=True) or {}
+        set_sync_status(
+            agent_signals = int(body.get("agent_signals", 0)),
+            manual_trades = int(body.get("manual_trades", 0)),
+            synced_at     = body.get("synced_at", ""),
+        )
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/performance")
 def api_performance():
     """Returns performance summary — SQLite first, CSV fallback."""
     try:
