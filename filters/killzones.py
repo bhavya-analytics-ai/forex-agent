@@ -6,7 +6,7 @@ Outside them = scanner stays quiet unless A+ setup.
 
 Killzone     EST             UTC             Best For
 ─────────────────────────────────────────────────────
-Asian        8pm – 12am      01:00 – 05:00   USDJPY, range builds
+Asian/Tokyo  7pm – 1am       00:00 – 06:00   USDJPY, range builds
 London Open  2am – 5am       07:00 – 10:00   GBP pairs, EUR pairs
 NY Open      7am – 10am      12:00 – 15:00   Gold, all pairs
 London Close 10am – 12pm     15:00 – 17:00   Reversals
@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 # Killzone definitions (UTC)
 KILLZONES = {
     "asian": {
-        "start":       time(1,  0),
-        "end":         time(5,  0),
-        "label":       "Asian Killzone",
+        "start":       time(0,  0),
+        "end":         time(6,  0),
+        "label":       "Asian/Tokyo Killzone",
         "best_pairs":  ["USD_JPY", "GBP_JPY", "EUR_JPY", "CHF_JPY", "CAD_JPY", "NZD_JPY"],
         "character":   "range",
-        "description": "Range builds, JPY pairs most active",
+        "description": "Tokyo/Asian session — range builds, JPY pairs most active",
     },
     "london_open": {
         "start":       time(7,  0),
