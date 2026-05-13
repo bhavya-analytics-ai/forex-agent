@@ -257,7 +257,7 @@ def _extract_conditions(confluence: dict, pair: str) -> dict:
         from filters.killzones import get_killzone_context
         kz_ctx = get_killzone_context(pair)
     except Exception:
-        kz_ctx = {"in_killzone": True}
+        kz_ctx = {"in_killzone": False}  # safe default — outside KZ penalty, not inside boost
 
     h1_bias  = h1.get("bias", "neutral")
     m15_bias = m15.get("bias", "neutral")
@@ -290,7 +290,7 @@ def _extract_conditions(confluence: dict, pair: str) -> dict:
         "fvg_overlap":      confluence.get("has_fvg_overlap", False),
         "sweep_present":    ict.get("has_sweep", False),
         "choch_present":    ict.get("has_choch", False),
-        "in_killzone":      kz_ctx.get("in_killzone", True),
+        "in_killzone":      kz_ctx.get("in_killzone", False),  # safe default — no boost on missing KZ data
         "news_safe":        news_check.get("safe", True),
         "ict_conflict":     confluence.get("ict_conflict", False),
         "pattern_conflict": pattern_conflict,
@@ -298,6 +298,37 @@ def _extract_conditions(confluence: dict, pair: str) -> dict:
         "choppy":           choppy,
         "m5_consolidating": m5_consol,
     }
+
+
+# ── RECENT LOSS CLUSTER PENALTY ──────────────────────────────────────────────
+
+def _recent_loss_penalty(pair: str, setup_type: str) -> float:
+    """
+    Query last 5 labeled signals for same pair + setup_type.
+    If 3+ were LOSS → apply 0.5x penalty to p_win.
+    Returns 0.5 if loss cluster detected, 1.0 otherwise.
+    """
+    try:
+        from db.database import _get_conn
+        conn = _get_conn()
+        rows = conn.execute('''
+            SELECT outcome FROM agent_signals
+            WHERE pair = ?
+              AND outcome IN ("WIN","LOSS")
+            ORDER BY timestamp_utc DESC LIMIT 5
+        ''', (pair,)).fetchall()
+
+        if len(rows) < 3:
+            return 1.0
+
+        losses = sum(1 for r in rows if r[0] == "LOSS")
+        if losses >= 3:
+            logger.info(f"[scorer] {pair} {setup_type} — {losses}/5 recent LOSS → 0.5x penalty applied")
+            return 0.5
+        return 1.0
+    except Exception as e:
+        logger.debug(f"[scorer] loss penalty check failed: {e}")
+        return 1.0
 
 
 # ── MAIN SCORER ───────────────────────────────────────────────────────────────
@@ -316,6 +347,28 @@ def score_signal(confluence: dict, pair: str, likelihoods: dict = None) -> dict:
     """
     if likelihoods is None:
         likelihoods = STANDARD_LIKELIHOODS
+
+    # ── NEWS_LIKELIHOODS GUARD ────────────────────────────────────────────────
+    # NEWS_LIKELIHOODS weights (×2.10/×1.90/×1.80) require sniper-specific
+    # conditions (news_spike_detected, wick_sweep, m1_choch) to be present in
+    # the confluence dict. _extract_conditions never produces these keys.
+    # Until the sniper path explicitly builds and passes those conditions,
+    # using NEWS_LIKELIHOODS silently degrades to STANDARD_LIKELIHOODS behavior
+    # (the high-weight keys are skipped) plus the inverted news_safe penalty.
+    # Guard: if NEWS_LIKELIHOODS is passed but sniper conditions are absent,
+    # fall back to STANDARD_LIKELIHOODS and flag the degradation.
+    news_likelihoods_degraded = False
+    if likelihoods is NEWS_LIKELIHOODS:
+        _sniper_keys = {"news_spike_detected", "wick_sweep", "m1_choch"}
+        _sniper_present = any(k in confluence for k in _sniper_keys)
+        if not _sniper_present:
+            logger.warning(
+                f"[scorer] {pair} — NEWS_LIKELIHOODS passed but sniper conditions "
+                f"(news_spike_detected/wick_sweep/m1_choch) not in confluence. "
+                f"Falling back to STANDARD_LIKELIHOODS to avoid inverted news_safe penalty."
+            )
+            likelihoods = STANDARD_LIKELIHOODS
+            news_likelihoods_degraded = True
 
     direction   = confluence.get("direction", "none")
     setup_type  = confluence.get("setup_type", "unknown")
@@ -336,10 +389,17 @@ def score_signal(confluence: dict, pair: str, likelihoods: dict = None) -> dict:
     # ── POSTERIOR ─────────────────────────────────────────────────────────────
     p_win = calculate_posterior(bayes_setup, conditions, likelihoods, base_rates)
 
+    # ── RECENT LOSS CLUSTER PENALTY ───────────────────────────────────────────
+    # Display-only until setup_type filtering is added to the DB query.
+    # Not applied to p_win — pair-only lookup is too blunt for strategy decisions.
+    loss_penalty_factor = _recent_loss_penalty(pair, bayes_setup)
+
     # ── RR for EV ─────────────────────────────────────────────────────────────
-    # Use 2.0 as default RR until decision layer sets real levels
-    rr    = 2.0
-    ev    = calculate_ev(p_win, rr)
+    # Hardcoded 2.0 — strategy layer has not supplied real SL/TP levels yet.
+    # EV is always estimated here. Do not treat as confirmed edge.
+    rr           = 2.0
+    ev           = calculate_ev(p_win, rr)
+    ev_estimated = True   # flipped to False only when real RR is supplied by strategy
 
     # ── GRADE ─────────────────────────────────────────────────────────────────
     grade, grade_meaning, data_suffix = _grade_from_p(p_win, ev, is_data_backed if is_data_backed else mode_label)
@@ -414,7 +474,7 @@ def score_signal(confluence: dict, pair: str, likelihoods: dict = None) -> dict:
             "rr2":         "1:3",
         }
 
-        # Update EV with real RR once levels exist
+        # RR still hardcoded — real levels built but EV remains estimated until strategy overrides rr
         rr = 2.0
         ev = calculate_ev(p_win, rr)
 
@@ -436,7 +496,8 @@ def score_signal(confluence: dict, pair: str, likelihoods: dict = None) -> dict:
         "p_win":            p_win,
         "p_win_pct":        f"{round(p_win * 100)}% ({mode_label})",
         "ev":               ev,
-        "ev_label":         f"EV: {'+' if ev >= 0 else ''}{ev}",
+        "ev_estimated":     ev_estimated,
+        "ev_label":         f"EV: {'+' if ev >= 0 else ''}{ev} {'(est 1:2)' if ev_estimated else ''}",
         "grade":            grade,
         "grade_meaning":    grade_meaning,
         "bayes_setup":      bayes_setup,
@@ -460,9 +521,11 @@ def score_signal(confluence: dict, pair: str, likelihoods: dict = None) -> dict:
         "session_ctx":      session_ctx,
         "has_fvg_overlap":  confluence.get("has_fvg_overlap", False),
         "active_fvgs":      confluence.get("active_fvgs", []),
-        "should_alert":     should_alert,
-        "should_log":       p_win >= 0.45,
-        "breakdown":        conditions,   # kept for dashboard compatibility
+        "should_alert":              should_alert,
+        "should_log":                p_win >= 0.45,
+        "breakdown":                 conditions,   # kept for dashboard compatibility
+        "news_likelihoods_degraded": news_likelihoods_degraded,
+        "loss_penalty_factor":       loss_penalty_factor,   # display-only, not applied to p_win
     }
 
     logger.info(
