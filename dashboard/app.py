@@ -340,7 +340,6 @@ def api_mark_outcome():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@app.route("/api/performance")
 @app.route("/api/sync_status", methods=["GET"])
 def api_sync_status_get():
     """Return last known local sync counts (posted by sync.py after each run)."""
