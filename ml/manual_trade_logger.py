@@ -126,17 +126,35 @@ def _calculate_levels(pair: str, direction: str, entry: float) -> dict:
 
 
 def log_manual_trade(pair: str, direction: str, entry_price: float,
-                     setup_type: str = "manual", notes: str = "") -> str:
+                     setup_type: str = "manual", notes: str = "",
+                     sl_price: float = None, tp1_price: float = None) -> str:
     """
-    Log a manual trade. Calculates SL/TP, writes to SQLite + CSV backup,
-    starts background monitor for TP/SL hit.
+    Log a manual trade. Uses provided SL/TP if given, otherwise calculates defaults.
+    Writes to SQLite + CSV backup, starts background monitor for TP/SL hit.
     Returns signal_id.
     """
     _ensure_log_file()
 
     now       = datetime.utcnow()
     signal_id = _make_signal_id(pair, now)
-    levels    = _calculate_levels(pair, direction, entry_price)
+
+    # Use provided SL/TP if valid, otherwise fall back to calculated defaults
+    if sl_price and tp1_price and sl_price > 0 and tp1_price > 0:
+        from core.fetcher import pip_size
+        pip      = pip_size(pair)
+        sl_dist  = abs(sl_price  - entry_price)
+        tp1_dist = abs(tp1_price - entry_price)
+        levels   = {
+            "sl_price":  round(sl_price,  5),
+            "tp1_price": round(tp1_price, 5),
+            "tp2_price": round(tp1_price, 5),  # tp2 same as tp1 when user sets manually
+            "sl_pips":   round(sl_dist  / pip, 1),
+            "tp1_pips":  round(tp1_dist / pip, 1),
+            "tp2_pips":  round(tp1_dist / pip, 1),
+            "rr1":       f"1:{round(tp1_dist / sl_dist, 1)}" if sl_dist > 0 else "1:2",
+        }
+    else:
+        levels = _calculate_levels(pair, direction, entry_price)
 
     # Capture session/killzone/trend context at time of entry (for model training)
     session = killzone = h1_trend = m15_trend = m5_trend = None

@@ -2727,6 +2727,58 @@ function prefillEntryPrice() {
   } else {
     document.getElementById("mt-entry").value = "";
   }
+  // Also prefill SL/TP if source is scanner
+  onSourceChange();
+}
+
+function onSourceChange() {
+  const pair      = document.getElementById("mt-pair").value;
+  const source    = document.getElementById("mt-source").value;
+  const signal    = prevSignals[pair];
+  const slInput   = document.getElementById("mt-sl");
+  const slHint    = document.getElementById("mt-sl-hint");
+  const tp1Input  = document.getElementById("mt-tp1");
+  const tp1Hint   = document.getElementById("mt-tp1-hint");
+
+  if (source === "scanner" && signal && signal.sl_price && signal.tp1_price) {
+    slInput.value    = signal.sl_price;
+    tp1Input.value   = signal.tp1_price;
+    slInput.readOnly = true;
+    slHint.textContent  = "from scanner";
+    tp1Hint.textContent = "from scanner";
+    document.getElementById("mt-rr").textContent = signal.rr1 || "—";
+  } else {
+    slInput.value    = "";
+    tp1Input.value   = "";
+    slInput.readOnly = false;
+    slHint.textContent  = "enter your SL";
+    tp1Hint.textContent = "auto 1:2";
+    document.getElementById("mt-rr").textContent = "—";
+  }
+}
+
+function recalcTP() {
+  const entry  = parseFloat(document.getElementById("mt-entry").value);
+  const sl     = parseFloat(document.getElementById("mt-sl").value);
+  const dir    = document.getElementById("mt-direction").value;
+  const tp1El  = document.getElementById("mt-tp1");
+  const rrEl   = document.getElementById("mt-rr");
+
+  // Only recalc if source is "analysis" (scanner pre-fills its own TP)
+  const source = document.getElementById("mt-source").value;
+  if (source === "scanner") return;
+
+  if (!isNaN(entry) && !isNaN(sl) && sl > 0) {
+    const slDist = Math.abs(entry - sl);
+    const tp1    = dir === "bullish"
+      ? parseFloat((entry + slDist * 2).toFixed(5))
+      : parseFloat((entry - slDist * 2).toFixed(5));
+    tp1El.value  = tp1;
+    rrEl.textContent = "1:2";
+  } else {
+    tp1El.value  = "";
+    rrEl.textContent = "—";
+  }
 }
 
 function openLogModal() {
@@ -2750,12 +2802,19 @@ async function submitManualTrade() {
   const pair      = document.getElementById("mt-pair").value;
   const direction = document.getElementById("mt-direction").value;
   const entry     = parseFloat(document.getElementById("mt-entry").value);
+  const sl        = parseFloat(document.getElementById("mt-sl").value);
+  const tp1       = parseFloat(document.getElementById("mt-tp1").value);
   const setup     = document.getElementById("mt-setup").value.trim() || "manual";
   const notes     = document.getElementById("mt-notes").value.trim();
   const fb        = document.getElementById("mt-feedback");
 
   if (!entry || isNaN(entry)) {
     fb.textContent = "Enter a valid entry price.";
+    fb.className   = "modal-feedback err";
+    return;
+  }
+  if (!sl || isNaN(sl) || !tp1 || isNaN(tp1)) {
+    fb.textContent = "Set SL and TP before logging.";
     fb.className   = "modal-feedback err";
     return;
   }
@@ -2767,7 +2826,7 @@ async function submitManualTrade() {
     const resp = await fetch("/api/log_manual_trade", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ pair, direction, entry_price: entry, setup_type: setup, notes }),
+      body:    JSON.stringify({ pair, direction, entry_price: entry, sl_price: sl, tp1_price: tp1, setup_type: setup, notes }),
     });
     const data = await resp.json();
 

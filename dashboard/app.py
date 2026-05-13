@@ -393,6 +393,8 @@ def api_log_manual_trade():
         pair        = body.get("pair", "").upper().strip()
         direction   = body.get("direction", "").lower().strip()
         entry_price = body.get("entry_price")
+        sl_price    = body.get("sl_price")
+        tp1_price   = body.get("tp1_price")
         setup_type  = body.get("setup_type", "manual").strip()
         notes       = body.get("notes", "")
 
@@ -403,7 +405,11 @@ def api_log_manual_trade():
         if not entry_price:
             return jsonify({"ok": False, "error": "entry_price required"}), 400
 
-        signal_id = log_manual_trade(pair, direction, float(entry_price), setup_type, notes)
+        sl_val  = float(sl_price)  if sl_price  else None
+        tp1_val = float(tp1_price) if tp1_price else None
+
+        signal_id = log_manual_trade(pair, direction, float(entry_price), setup_type, notes,
+                                     sl_price=sl_val, tp1_price=tp1_val)
         return jsonify({"ok": True, "signal_id": signal_id, "pair": pair,
                         "direction": direction, "entry_price": entry_price})
     except Exception as e:
