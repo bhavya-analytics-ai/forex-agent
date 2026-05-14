@@ -2161,7 +2161,15 @@ async function fetchAndRender() {
 
     document.getElementById("signal-body").innerHTML = signals.map(buildRow).join("");
     prevSignals = {};
-    signals.forEach(s=>prevSignals[s.pair]=s);
+    signals.forEach(s => {
+      const _tl = s.trade_levels || {};
+      prevSignals[s.pair] = Object.assign({}, s, {
+        sl_price:  s.sl_price  || _tl.sl_price  || "",
+        tp1_price: s.tp1_price || _tl.tp1_price || "",
+        sl_pips:   s.sl_pips   || _tl.sl_pips   || "",
+        tp1_pips:  s.tp1_pips  || _tl.tp1_pips  || "",
+      });
+    });
     // Keep live price lookup for performance panel
     window._livePrices = {};
     signals.forEach(s => { if (s.current_price) window._livePrices[s.pair] = s.current_price; });
@@ -3804,9 +3812,21 @@ function openTradeModal(signal) {
   document.getElementById("ttm-scan-sl").textContent= signal.sl_price  || "—";
   document.getElementById("ttm-scan-tp").textContent= signal.tp1_price || "—";
 
-  // Pre-fill SL/TP from scanner
-  document.getElementById("ttm-sl").value    = signal.sl_price  || "";
-  document.getElementById("ttm-tp").value    = signal.tp1_price || "";
+  // Pre-fill SL/TP from scanner levels.
+  // If scanner didn't produce levels (no entry price or direction), fall back to
+  // ATR-based estimate so the user never opens an empty modal.
+  let _sl = parseFloat(signal.sl_price)  || 0;
+  let _tp = parseFloat(signal.tp1_price) || 0;
+  if ((!_sl || !_tp) && signal.entry_price && signal.direction !== "none") {
+    const _atrDefaults = { "XAU_USD": 20.0, "XAG_USD": 1.0 };
+    const _atr  = _atrDefaults[signal.pair] || 0.0020;
+    const _bull = signal.direction === "bullish";
+    const _e    = parseFloat(signal.entry_price);
+    if (!_sl) _sl = _bull ? _e - _atr : _e + _atr;
+    if (!_tp) _tp = _bull ? _e + _atr * 2 : _e - _atr * 2;
+  }
+  document.getElementById("ttm-sl").value    = _sl || "";
+  document.getElementById("ttm-tp").value    = _tp || "";
   document.getElementById("ttm-units").value = "1";
   document.getElementById("ttm-feedback").textContent = "";
   document.getElementById("ttm-send-btn").disabled = false;
