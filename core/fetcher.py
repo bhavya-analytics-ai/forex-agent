@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 import logging
 from oandapyV20 import API
 from oandapyV20.endpoints.instruments import InstrumentsCandles
-from config import OANDA_API_KEY, OANDA_ENVIRONMENT, CANDLE_COUNTS, CANDLE_COUNTS_METALS, METAL_PAIRS
+from oandapyV20.endpoints.pricing import PricingInfo
+from config import OANDA_API_KEY, OANDA_ENVIRONMENT, OANDA_ACCOUNT_ID, CANDLE_COUNTS, CANDLE_COUNTS_METALS, METAL_PAIRS
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,24 @@ def get_current_price(pair: str) -> float:
     if df.empty:
         return None
     return df["close"].iloc[-1]
+
+
+def get_live_price(pair: str) -> float:
+    """
+    Fetch the current mid price for a pair via OANDA PricingInfo (real-time bid/ask).
+    Returns mid = (bid + ask) / 2, or None on failure.
+    Used by the real-time SL/TP monitor — faster than candle polling.
+    """
+    try:
+        req  = PricingInfo(accountID=OANDA_ACCOUNT_ID, params={"instruments": pair})
+        client.request(req)
+        px   = req.response["prices"][0]
+        bid  = float(px["bids"][0]["price"])
+        ask  = float(px["asks"][0]["price"])
+        return round((bid + ask) / 2, 5)
+    except Exception as e:
+        logger.warning(f"get_live_price({pair}) failed: {e}")
+        return None
 
 
 def pip_size(pair: str) -> float:

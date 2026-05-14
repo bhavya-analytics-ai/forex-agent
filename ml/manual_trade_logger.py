@@ -264,16 +264,17 @@ def _start_monitor(signal_id, pair, direction, entry, sl, tp1, sl_pips):
 
 def _monitor_trade(signal_id, pair, direction, entry, sl, tp1, sl_pips):
     """
-    Polls M5 candles every 60s until TP1 or SL is hit.
+    Real-time SL/TP monitor — polls live OANDA bid/ask price every 15s.
+    Falls back to M5 candle check if live price unavailable.
     Reads SL/TP from DB on every cycle — picks up user edits automatically.
     No timeout — runs until one side is hit.
     """
-    from core.fetcher import fetch_candles, pip_size
+    from core.fetcher import fetch_candles, get_live_price, pip_size
     import pandas as pd
     pip = pip_size(pair)
 
-    # Wait 90s on startup — gives user time to save their real SL/TP before first check
-    time.sleep(90)
+    # Wait 30s on startup — gives user time to save their real SL/TP before first check
+    time.sleep(30)
 
     # Read SL/TP from DB — always use whatever is currently saved
     def _current_levels():
@@ -311,20 +312,48 @@ def _monitor_trade(signal_id, pair, direction, entry, sl, tp1, sl_pips):
     except Exception as e:
         logger.warning(f"Catch-up check failed for {signal_id}: {e}")
 
+    # ── Live price polling loop ────────────────────────────────────────────────
+    # Checks every 15s using OANDA PricingInfo (real-time bid/ask mid).
+    # Falls back to M5 candle high/low if live price returns None.
     while True:
-        time.sleep(60)
+        time.sleep(15)
         try:
             # Always read fresh SL/TP from DB — picks up any user edits
             cur_sl, cur_tp1 = _current_levels()
 
+            # ── Primary: live price check ──────────────────────────────────────
+            live = get_live_price(pair)
+            if live is not None:
+                if direction == "bullish":
+                    tp_hit = live >= cur_tp1
+                    sl_hit = live <= cur_sl
+                else:
+                    tp_hit = live <= cur_tp1
+                    sl_hit = live >= cur_sl
+
+                if tp_hit and not sl_hit:
+                    logger.info(f"TP hit (live) {signal_id}: price={live} TP={cur_tp1}")
+                    _close_trade(signal_id, pair, direction, entry, cur_sl, cur_tp1, pip, "WIN")
+                    break
+                elif sl_hit and not tp_hit:
+                    logger.info(f"SL hit (live) {signal_id}: price={live} SL={cur_sl}")
+                    _close_trade(signal_id, pair, direction, entry, cur_sl, cur_tp1, pip, "LOSS")
+                    break
+                elif tp_hit and sl_hit:
+                    # Both at once — use direction to decide (price crossed both)
+                    result = "WIN" if direction == "bullish" else "LOSS"
+                    logger.info(f"Both hit (live) {signal_id}: price={live} → {result}")
+                    _close_trade(signal_id, pair, direction, entry, cur_sl, cur_tp1, pip, result)
+                    break
+                continue  # still open — loop
+
+            # ── Fallback: M5 candle check if live price unavailable ────────────
+            log_time = _get_log_time(signal_id)
             df = fetch_candles(pair, "M5")
             if df is None or df.empty:
                 continue
-
-            log_time = _get_log_time(signal_id)
             if log_time:
                 df = df[df.index > pd.Timestamp(log_time, tz="UTC")]
-
             if df.empty:
                 continue
 
@@ -354,7 +383,7 @@ def _monitor_trade(signal_id, pair, direction, entry, sl, tp1, sl_pips):
 
         except Exception as e:
             logger.warning(f"Monitor error for {signal_id}: {e}")
-            time.sleep(60)
+            time.sleep(15)
 
     with _monitor_lock:
         _active_monitors.pop(signal_id, None)

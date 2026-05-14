@@ -1236,7 +1236,7 @@
     </div>
     <div class="modal-field">
       <label class="modal-label">DIRECTION</label>
-      <select class="modal-select" id="mt-direction">
+      <select class="modal-select" id="mt-direction" onchange="onDirectionChange()">
         <option value="bullish">▲ BULLISH (Long)</option>
         <option value="bearish">▼ BEARISH (Short)</option>
       </select>
@@ -2909,6 +2909,10 @@ function onSourceChange() {
     slHint.textContent  = "from scanner";
     tp1Hint.textContent = "from scanner";
     document.getElementById("mt-rr").textContent = signal.rr1 || "—";
+    // Set direction to match scanner signal so SL/TP are correct for that direction
+    if (signal.direction && signal.direction !== "none") {
+      document.getElementById("mt-direction").value = signal.direction;
+    }
   } else {
     slInput.value    = "";
     tp1Input.value   = "";
@@ -2916,6 +2920,37 @@ function onSourceChange() {
     slHint.textContent  = "enter your SL";
     tp1Hint.textContent = "auto 1:2";
     document.getElementById("mt-rr").textContent = "—";
+  }
+}
+
+function onDirectionChange() {
+  const source = document.getElementById("mt-source").value;
+  const dir    = document.getElementById("mt-direction").value;
+
+  if (source === "scanner") {
+    // Scanner pre-filled SL/TP for the signal's original direction.
+    // User changed direction — flip both levels symmetrically around entry.
+    const entry = parseFloat(document.getElementById("mt-entry").value);
+    const sl    = parseFloat(document.getElementById("mt-sl").value);
+    const tp1   = parseFloat(document.getElementById("mt-tp1").value);
+    if (!isNaN(entry) && entry > 0 && !isNaN(sl) && sl > 0 && !isNaN(tp1) && tp1 > 0) {
+      const slDist  = Math.abs(entry - sl);
+      const tp1Dist = Math.abs(entry - tp1);
+      const newSl   = dir === "bullish"
+        ? parseFloat((entry - slDist).toFixed(5))
+        : parseFloat((entry + slDist).toFixed(5));
+      const newTp1  = dir === "bullish"
+        ? parseFloat((entry + tp1Dist).toFixed(5))
+        : parseFloat((entry - tp1Dist).toFixed(5));
+      document.getElementById("mt-sl").value  = newSl;
+      document.getElementById("mt-tp1").value = newTp1;
+      // Recalc RR display (distances didn't change, RR stays same)
+      const rr = slDist > 0 ? (tp1Dist / slDist).toFixed(1) : "2.0";
+      document.getElementById("mt-rr").textContent = "1:" + rr;
+    }
+  } else {
+    // Analysis mode — SL is set by user, TP auto-calcs from direction
+    recalcTP();
   }
 }
 
