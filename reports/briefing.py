@@ -50,14 +50,8 @@ def scan_pair(pair: str, return_confluence: bool = False):
         scored["approaching_warning"] = confluence.get("approaching_warning", "")
 
         signal_id = ""
-        _gold    = scored.get("gold_mode", False)
-        _log_now = (
-            (_gold     and scored.get("entry_state") == "ENTER_NOW")
-            or
-            (not _gold and scored.get("should_log", False))
-        )
-        if _log_now:
-            signal_id = log_signal(scored, confluence, alerted=scored.get("should_alert", False))
+        if scored.get("entry_state") == "ENTER_NOW":
+            signal_id = log_signal(scored, confluence, alerted=scored["should_alert"])
         scored["signal_id"] = signal_id   # empty string if not logged
 
         # Push to dashboard (non-blocking)
