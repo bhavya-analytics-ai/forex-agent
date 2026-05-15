@@ -6,7 +6,7 @@ Sessions: tokyo, london, new_york
 
 import logging
 from datetime import datetime
-from config import PAIRS
+from config import PAIRS, DEBUG_DECISIONS
 from core.fetcher import fetch_all_timeframes
 from core.confluence import check_confluence
 from alerts.scorer import score_signal
@@ -15,6 +15,39 @@ from filters.news import get_session_news_summary
 from filters.session import get_session_context
 
 logger = logging.getLogger(__name__)
+
+
+def _trace(scored: dict, signal_id: str) -> None:
+    """
+    Emit one compact INFO line per pair per scan when DEBUG_DECISIONS=true.
+    Zero effect on trading/logging behavior — read-only view of scored dict.
+    """
+    pair         = scored.get("pair", "?")
+    direction    = scored.get("direction", "?")
+    grade        = scored.get("grade", "?")
+    score        = scored.get("score", 0)
+    setup_type   = scored.get("setup_type", "?")
+    entry_state  = scored.get("entry_state", "—") or "—"
+    should_log   = scored.get("should_log", False)
+    should_alert = scored.get("should_alert", False)
+    logged       = "YES" if signal_id else "NO"
+
+    # Top block reason — dl_block_reason first, then approaching_warning, else blank
+    block = (
+        scored.get("dl_block_reason")
+        or scored.get("approaching_warning")
+        or ""
+    )
+    # Trim to keep line compact
+    if block and len(block) > 50:
+        block = block[:47] + "..."
+    block_part = f" | block={block}" if block else ""
+
+    logger.info(
+        f"TRACE {pair} | {direction} | {grade} | {score}/100 | {setup_type}"
+        f" | entry_state={entry_state} | should_log={should_log}"
+        f" | should_alert={should_alert} | logged={logged}{block_part}"
+    )
 
 
 def scan_pair(pair: str, return_confluence: bool = False):
@@ -63,6 +96,12 @@ def scan_pair(pair: str, return_confluence: bool = False):
         if _log_now:
             signal_id = log_signal(scored, confluence, alerted=scored.get("should_alert", False))
         scored["signal_id"] = signal_id   # empty string if not logged
+
+        if DEBUG_DECISIONS:
+            try:
+                _trace(scored, signal_id)
+            except Exception:
+                pass  # never crash scan on trace failure
 
         # Push to dashboard (non-blocking)
         try:

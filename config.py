@@ -136,6 +136,13 @@ DASHBOARD_CONFIG = {
     "refresh_seconds": 30,
 }
 
+# --- DECISION TRACE ---
+# Set DEBUG_DECISIONS=true in Railway env to emit one info line per pair per scan.
+# Shows: pair | direction | grade | score | setup_type | entry_state | should_log
+#        | should_alert | logged | top block/reason
+# Default OFF — zero performance impact when disabled.
+DEBUG_DECISIONS = os.getenv("DEBUG_DECISIONS", "false").lower() == "true"
+
 # --- LOGGING ---
 LOG_CONFIG = {
     "signal_log_path":  "logs/agent_signals.csv",   # agent ENTER_NOW signals
