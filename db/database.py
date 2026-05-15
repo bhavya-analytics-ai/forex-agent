@@ -408,7 +408,7 @@ def update_agent_signal_outcome(signal_id: str, outcome: str, pips: float, notes
 def get_recent_agent_signals(limit: int = 20) -> list[dict]:
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT * FROM agent_signals ORDER BY timestamp_utc DESC LIMIT ?", (limit,)
+        "SELECT * FROM agent_signals WHERE COALESCE(is_archived,0)=0 ORDER BY timestamp_utc DESC LIMIT ?", (limit,)
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -424,7 +424,8 @@ def get_unlabeled_taken_signals() -> list[dict]:
         SELECT signal_id, pair, direction, timestamp_utc, entry_price,
                user_sl, user_tp1, actual_sl, actual_tp1, sl_price, tp1_price, exit_price
         FROM agent_signals
-        WHERE (outcome IS NULL OR outcome = '')
+        WHERE COALESCE(is_archived,0)=0
+          AND (outcome IS NULL OR outcome = '')
           AND (exit_price IS NULL OR exit_price = 0)
           AND COALESCE(user_sl,   actual_sl,   sl_price)  > 0
           AND COALESCE(user_tp1,  actual_tp1,  tp1_price) > 0
@@ -512,7 +513,7 @@ def get_performance_summary_db() -> dict:
 
     # Agent signals stats
     agent_rows = conn.execute(
-        "SELECT outcome, outcome_pips, grade, taken FROM agent_signals WHERE outcome != ''"
+        "SELECT outcome, outcome_pips, grade, taken FROM agent_signals WHERE COALESCE(is_archived,0)=0 AND outcome != ''"
     ).fetchall()
 
     # Manual trades stats
@@ -549,8 +550,8 @@ def get_performance_summary_db() -> dict:
             }
 
     # taken_count = all signals ever taken (not just labeled ones)
-    taken_count   = conn.execute("SELECT COUNT(*) FROM agent_signals WHERE taken = 1").fetchone()[0]
-    total_signals = conn.execute("SELECT COUNT(*) FROM agent_signals").fetchone()[0]
+    taken_count   = conn.execute("SELECT COUNT(*) FROM agent_signals WHERE COALESCE(is_archived,0)=0 AND taken = 1").fetchone()[0]
+    total_signals = conn.execute("SELECT COUNT(*) FROM agent_signals WHERE COALESCE(is_archived,0)=0").fetchone()[0]
     total_manual  = conn.execute("SELECT COUNT(*) FROM manual_trades").fetchone()[0]
 
     return {
