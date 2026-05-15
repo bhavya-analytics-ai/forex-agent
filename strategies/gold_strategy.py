@@ -37,7 +37,20 @@ _MIN_RR       = 1.2    # Minimum RR for TP to be valid
 # ── ATR HELPER ────────────────────────────────────────────────────────────────
 
 def _get_atr(confluence: dict, pair: str) -> float:
-    """Estimate ATR from H1 swing range. Floor enforced per pair."""
+    """
+    Estimate ATR from H1 swing range. Floor enforced per pair.
+
+    Formula: max((last_high - last_low) / 20, floor)
+
+    NOTE — floor dominates in practice for XAU_USD:
+      The H1 swing range for gold is typically $50–$200.
+      (swing_range / 20) = $2.50–$10.00, which is below the $15 floor.
+      The formula only exceeds the floor when the H1 swing range > $300,
+      which is uncommon outside extreme volatility events.
+      Under normal conditions this function returns _ATR_FLOOR["XAU_USD"] = $15
+      as a constant, not a dynamic ATR. The formula is not a true 14-period ATR.
+      Do not tune SL buffers assuming this value reflects real intrabar volatility.
+    """
     structure = confluence.get("h1", {}).get("structure", {})
     last_high = structure.get("last_high", 0)
     last_low  = structure.get("last_low",  0)
@@ -185,6 +198,11 @@ def _calculate_sl(confluence: dict, direction: str, price: float, atr: float) ->
     # 1. Sweep extreme
     sweep   = ict.get("recent_sweep", {}) or {}
     extreme = sweep.get("extreme") or sweep.get("sweep_low") or sweep.get("sweep_high")
+    if extreme is None and sweep:
+        logger.debug(
+            f"[SL] sweep extreme key not found — tried 'extreme','sweep_low','sweep_high' "
+            f"| actual keys present: {list(sweep.keys())}"
+        )
     if extreme and sweep.get("bias") == direction:
         if direction == "bullish":
             sl, anchor = extreme - buf, "sweep low"
@@ -531,6 +549,8 @@ def apply_gold_strategy(scored: dict, confluence: dict, pair: str, candles: dict
     # ── SKIP ──────────────────────────────────────────────────────────────────
     if entry_state == "SKIP":
         early_flag = _check_early_entry(confluence, direction, atr)
+        if early_flag:
+            logger.debug(f"{pair} | EARLY INFO (on SKIP) | {early_flag}")
         flags      = [f"🚫 GOLD SKIP — {sequence['reason']}"]
         if early_flag:
             flags.append(early_flag)
@@ -639,6 +659,7 @@ def apply_gold_strategy(scored: dict, confluence: dict, pair: str, candles: dict
 
     early_flag = _check_early_entry(confluence, direction, atr)
     if early_flag:
+        logger.debug(f"{pair} | EARLY INFO ({entry_state}) | {early_flag}")
         flags.append(early_flag)
 
     flags = flags[:5]
