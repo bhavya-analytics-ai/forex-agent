@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from config import PAIRS, DEBUG_DECISIONS
 from filters.market_hours import market_hours_gate
+from filters.quality_gate import minimum_quality_gate
 from core.fetcher import fetch_all_timeframes
 from core.confluence import check_confluence
 from alerts.scorer import score_signal
@@ -105,13 +106,42 @@ def scan_pair(pair: str, return_confluence: bool = False):
                 scored.get("flags", []) + [f"{_mh_sym} {_mh['reason']}"]
             )[:5]
 
-        # ── LOGGING GATE ──────────────────────────────────────────────────────
-        signal_id = ""
+        # ── MINIMUM QUALITY GATE ──────────────────────────────────────────────
+        _qg = minimum_quality_gate(scored, confluence, pair)
+
+        if _qg["penalty_pts"]:
+            scored["score"] = max(
+                0, round((scored.get("score") or 0) - _qg["penalty_pts"], 1)
+            )
+        for _f in _qg["flags"]:
+            scored["flags"] = (scored.get("flags", []) + [_f])[:5]
+        if not _qg["passes"]:
+            scored["flags"] = (
+                scored.get("flags", []) + [f"🚫 {_qg['block_reason']}"]
+            )[:5]
+            scored["should_alert"] = False
+
+        # ── GRADE C METAL ENTER_NOW ALERT SUPPRESSION ─────────────────────────
+        # Grade C gold/silver ENTER_NOW still logs (strategy conviction) but
+        # never fires a Slack alert — too low confidence for user notification.
         _gold   = scored.get("gold_mode", False)
         _sniper = scored.get("signal_mode") == "news_sniper"
+        if (
+            _gold
+            and scored.get("entry_state") == "ENTER_NOW"
+            and scored.get("grade") == "C"
+        ):
+            scored["should_alert"] = False
+            scored["flags"] = (
+                scored.get("flags", [])
+                + ["⚠️ LOW CONFIDENCE ENTER_NOW — grade C, alert suppressed"]
+            )[:5]
 
-        if _mh["blocked"]:
-            # Hard block overrides all strategy gates
+        # ── LOGGING GATE ──────────────────────────────────────────────────────
+        signal_id = ""
+
+        if _mh["blocked"] or not _qg["passes"]:
+            # Market-hours hard block OR quality gate hard block
             _log_now = False
         elif _gold or _sniper:
             # Gold + news-sniper: ENTER_NOW is the gate (unchanged behavior)
