@@ -18,9 +18,14 @@ from config import LOG_CONFIG
 logger   = logging.getLogger(__name__)
 LOG_PATH = LOG_CONFIG["signal_log_path"]
 
-# Cooldown — don't log same pair more than once per N minutes
+# Legacy in-memory cooldown (fast pre-check, resets on restart)
 COOLDOWN_MINUTES = 15
 _last_logged     = {}  # pair → datetime
+
+# DB-backed forex dedup — survives deploy restarts
+# Fingerprint: (pair, signal_mode, direction, setup_type, h1_trend)
+# A new log is allowed only when the fingerprint changes OR window expires.
+FOREX_DEDUP_WINDOW_MINUTES = 60
 
 
 def _get_signal_mode() -> str:
@@ -87,6 +92,53 @@ def _ensure_log_file():
         logger.info(f"Created signal log at {LOG_PATH}")
 
 
+def _is_duplicate_forex_signal(
+    pair: str,
+    signal_mode: str,
+    direction: str,
+    setup_type: str,
+    h1_trend: str,
+) -> bool:
+    """
+    DB-backed fingerprint dedup for forex (non-gold, non-sniper) signals.
+
+    Fingerprint: (pair, signal_mode, direction, setup_type, h1_trend)
+    Returns True (block) if a non-archived signal with the same fingerprint
+    was logged within FOREX_DEDUP_WINDOW_MINUTES.
+
+    Fails OPEN on any DB error — allows logging if the check cannot run.
+    """
+    try:
+        from db.database import _get_conn
+        conn   = _get_conn()
+        cutoff = (
+            datetime.utcnow() - timedelta(minutes=FOREX_DEDUP_WINDOW_MINUTES)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        row = conn.execute(
+            """
+            SELECT MAX(timestamp_utc) FROM agent_signals
+            WHERE pair                          = ?
+              AND COALESCE(signal_mode, 'normal') = ?
+              AND direction                     = ?
+              AND setup_type                    = ?
+              AND h1_trend                      = ?
+              AND COALESCE(is_archived, 0)      = 0
+              AND timestamp_utc                 > ?
+            """,
+            (pair, signal_mode, direction, setup_type, h1_trend, cutoff),
+        ).fetchone()
+        is_dup = bool(row and row[0])
+        if is_dup:
+            logger.debug(
+                f"Dedup block {pair} [{signal_mode}] {direction}/{setup_type}/{h1_trend} "
+                f"— same fingerprint logged within {FOREX_DEDUP_WINDOW_MINUTES}m"
+            )
+        return is_dup
+    except Exception as e:
+        logger.warning(f"Dedup DB check failed for {pair}: {e} — allowing log")
+        return False
+
+
 def is_cooldown_active(pair: str) -> bool:
     """Returns True if this pair was logged too recently."""
     last = _last_logged.get(pair)
@@ -97,18 +149,36 @@ def is_cooldown_active(pair: str) -> bool:
 
 def log_signal(scored_signal: dict, confluence: dict, alerted: bool) -> str:
     """
-    Log a scored signal to CSV.
-    Skips if same pair logged within COOLDOWN_MINUTES.
-    Returns signal_id or empty string if skipped.
+    Log a scored signal to CSV + SQLite.
+
+    Dedup strategy:
+      Gold / news-sniper  — caller gate (entry_state == ENTER_NOW) is the dedup.
+                            Legacy in-memory cooldown also applies as a safety net.
+      Forex (all others)  — DB-backed fingerprint dedup via _is_duplicate_forex_signal().
+                            Fingerprint: (pair, signal_mode, direction, setup_type, h1_trend).
+                            Window: FOREX_DEDUP_WINDOW_MINUTES (60 min). Survives restarts.
+
+    Returns signal_id string, or "" if skipped.
     """
     _ensure_log_file()
 
-    pair = scored_signal["pair"]
+    pair        = scored_signal["pair"]
+    gold_mode   = scored_signal.get("gold_mode", False)
+    signal_mode = scored_signal.get("signal_mode") or _get_signal_mode()
+    is_sniper   = signal_mode == "news_sniper"
 
-    # Cooldown check — skip duplicate signals
-    if is_cooldown_active(pair):
-        logger.debug(f"Cooldown active for {pair} — skipping log")
-        return ""
+    if gold_mode or is_sniper:
+        # Gold / sniper path — legacy in-memory cooldown as safety net only
+        if is_cooldown_active(pair):
+            logger.debug(f"Cooldown active for {pair} [{signal_mode}] — skipping log")
+            return ""
+    else:
+        # Forex path — DB-backed fingerprint dedup
+        direction  = scored_signal.get("direction", "")
+        setup_type = scored_signal.get("setup_type", "")
+        h1_trend   = scored_signal.get("h1_trend", "")
+        if _is_duplicate_forex_signal(pair, signal_mode, direction, setup_type, h1_trend):
+            return ""
 
     now       = datetime.utcnow()
     signal_id = f"{pair}_{now.strftime('%Y%m%d_%H%M%S')}"

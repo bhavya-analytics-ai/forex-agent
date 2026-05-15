@@ -50,8 +50,18 @@ def scan_pair(pair: str, return_confluence: bool = False):
         scored["approaching_warning"] = confluence.get("approaching_warning", "")
 
         signal_id = ""
-        if scored.get("entry_state") == "ENTER_NOW":
-            signal_id = log_signal(scored, confluence, alerted=scored["should_alert"])
+        _gold   = scored.get("gold_mode", False)
+        _sniper = scored.get("signal_mode") == "news_sniper"
+
+        if _gold or _sniper:
+            # Gold + news-sniper: ENTER_NOW is the gate (unchanged behavior)
+            _log_now = scored.get("entry_state") == "ENTER_NOW"
+        else:
+            # Forex: should_log flag — dedup handled inside log_signal()
+            _log_now = scored.get("should_log", False)
+
+        if _log_now:
+            signal_id = log_signal(scored, confluence, alerted=scored.get("should_alert", False))
         scored["signal_id"] = signal_id   # empty string if not logged
 
         # Push to dashboard (non-blocking)

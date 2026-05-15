@@ -347,7 +347,7 @@ def insert_agent_signal(row: dict):
              h1_zone_type, h1_zone_high, h1_zone_low, h1_zone_strength,
              h1_trend, m15_trend, m5_trend,
              entry_pattern, session, killzone, news_safe, alerted,
-             taken, outcome, outcome_pips, notes)
+             taken, outcome, outcome_pips, notes, signal_mode)
             VALUES
             (:signal_id, :timestamp_utc, :pair, :direction, :grade, :setup_type,
              :entry_price, :sl_price, :tp1_price, :tp2_price,
@@ -357,7 +357,7 @@ def insert_agent_signal(row: dict):
              :h1_zone_type, :h1_zone_high, :h1_zone_low, :h1_zone_strength,
              :h1_trend, :m15_trend, :m5_trend,
              :entry_pattern, :session, :killzone, :news_safe, :alerted,
-             :taken, :outcome, :outcome_pips, :notes)
+             :taken, :outcome, :outcome_pips, :notes, :signal_mode)
         """, row)
         conn.commit()
 
