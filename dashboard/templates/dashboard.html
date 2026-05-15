@@ -1913,6 +1913,8 @@ function buildTradeLevels(s) {
   const tl = s.trade_levels;
   if (!tl || !tl.entry_price) return `<div style="color:var(--text-dim);font-size:12px">No trade levels — score too low or no direction</div>`;
 
+  const _pipLbl = (s.pair || "").includes("XAU") ? "pts" : "pips";
+
   return `
     <div class="trade-grid">
       <div class="trade-card tc-entry">
@@ -1923,17 +1925,17 @@ function buildTradeLevels(s) {
       <div class="trade-card tc-sl">
         <div class="tc-label">Stop Loss</div>
         <div class="tc-value">${tl.sl_price}</div>
-        <div class="tc-sub">${tl.sl_pips} pips risk</div>
+        <div class="tc-sub">${tl.sl_pips} ${_pipLbl} risk</div>
       </div>
       <div class="trade-card tc-tp1">
         <div class="tc-label">TP1 — ${tl.rr1||'1:2'}</div>
         <div class="tc-value">${tl.tp1_price}</div>
-        <div class="tc-sub">${tl.tp1_pips} pips</div>
+        <div class="tc-sub">${tl.tp1_pips} ${_pipLbl}</div>
       </div>
       <div class="trade-card tc-tp2">
         <div class="tc-label">TP2 — ${tl.rr2||'1:3'}</div>
         <div class="tc-value">${tl.tp2_price}</div>
-        <div class="tc-sub">${tl.tp2_pips} pips</div>
+        <div class="tc-sub">${tl.tp2_pips} ${_pipLbl}</div>
       </div>
     </div>
   `;
@@ -2554,6 +2556,7 @@ function _liveTracker(pair, direction, entryPx, slPx, tpPx) {
   if (!livePx || !entry || !sl || !tp) return "";
 
   const pip    = _ttmPipSize(pair);
+  const _lbl   = (pair || "").includes("XAU") ? "pts" : "p";
   const isBull = (direction||"").toLowerCase() === "bullish";
 
   // P&L pips from entry — positive = profitable
@@ -2584,11 +2587,11 @@ function _liveTracker(pair, direction, entryPx, slPx, tpPx) {
         <span style="font-size:8px;font-weight:700;letter-spacing:1.5px;color:#fff;
                      background:rgba(77,159,255,.2);padding:1px 6px;border-radius:3px;">LIVE</span>
         <span style="font-size:12px;font-weight:700;color:#4d9fff;">${livePx}</span>
-        <span style="font-size:12px;font-weight:700;color:${pipsClr};">${pipsSign}${pipsDiff.toFixed(1)}p</span>
+        <span style="font-size:12px;font-weight:700;color:${pipsClr};">${pipsSign}${pipsDiff.toFixed(1)}${_lbl}</span>
         <span style="margin-left:auto;font-size:9px;">
-          <span style="color:#ff4444;">SL ${distSL}p away</span>
+          <span style="color:#ff4444;">SL ${distSL}${_lbl} away</span>
           <span style="color:rgba(255,255,255,.3);margin:0 5px;">·</span>
-          <span style="color:#00e676;">TP ${distTP}p away</span>
+          <span style="color:#00e676;">TP ${distTP}${_lbl} away</span>
         </span>
       </div>
       <div style="position:relative;height:4px;background:rgba(255,255,255,.07);border-radius:2px;margin:0 6px;">
@@ -3151,6 +3154,7 @@ async function saveInlinelevels(signalId, pair) {
 // ── CLOSE TRADE MODAL ─────────────────────────────────────────────────────────
 
 let _closeSignalId = null;
+let _closePair     = null;
 
 function _pipSize(pair) {
   if (!pair) return 0.0001;
@@ -3162,6 +3166,7 @@ function _pipSize(pair) {
 
 async function openCloseModal(signalId, pair, direction, entryPrice) {
   _closeSignalId = signalId;
+  _closePair     = pair || "";
   const displayPair = (pair || "").replace("_", "/");
   document.getElementById("ct-pair-label").textContent = displayPair;
   document.getElementById("ct-notes").value  = "";
@@ -3185,8 +3190,9 @@ async function openCloseModal(signalId, pair, direction, entryPrice) {
 
       document.getElementById("ct-pips").value          = Math.abs(pips);
       document.getElementById("ct-outcome").value        = pips >= 0 ? "WIN" : "LOSS";
+      const _ctLbl = (pair || "").includes("XAU") ? "pts" : "pips";
       document.getElementById("ct-feedback").textContent =
-        `Current: ${currentPx} | Entry: ${entryPrice} | P&L: ${pips >= 0 ? "+" : ""}${pips} pips`;
+        `Current: ${currentPx} | Entry: ${entryPrice} | P&L: ${pips >= 0 ? "+" : ""}${pips} ${_ctLbl}`;
       document.getElementById("ct-feedback").className   = `modal-feedback ${pips >= 0 ? "ok" : "err"}`;
     } else {
       document.getElementById("ct-feedback").textContent = "Could not fetch price — enter pips manually";
@@ -3213,8 +3219,9 @@ async function submitCloseTrade() {
   const notes   = document.getElementById("ct-notes").value.trim();
   const fb      = document.getElementById("ct-feedback");
 
+  const _stLbl = (_closePair || "").includes("XAU") ? "pts" : "pips";
   if (!pips || isNaN(pips)) {
-    fb.textContent = "Enter how many pips.";
+    fb.textContent = `Enter how many ${_stLbl}.`;
     fb.className   = "modal-feedback err";
     return;
   }
@@ -3231,7 +3238,7 @@ async function submitCloseTrade() {
     const data = await resp.json();
 
     if (data.ok) {
-      fb.textContent = `✓ Closed as ${outcome} (${pips > 0 ? "+" : ""}${pips} pips)`;
+      fb.textContent = `✓ Closed as ${outcome} (${pips > 0 ? "+" : ""}${pips} ${_stLbl})`;
       fb.className   = "modal-feedback ok";
       setTimeout(() => {
         closeCloseModal();
@@ -3977,9 +3984,10 @@ function ttmRecalc() {
   const tpDist = Math.abs(tp  - entry) / pip;
   const rr     = slDist > 0 ? (tpDist / slDist).toFixed(2) : "—";
 
+  const _ttmLbl = (_ttmSignal.pair || "").includes("XAU") ? "pts" : "p";
   document.getElementById("ttm-rr").textContent      = rr !== "—" ? `1:${rr}` : "—";
-  document.getElementById("ttm-sl-dist").textContent = `${slDist.toFixed(1)}p`;
-  document.getElementById("ttm-tp-dist").textContent = `${tpDist.toFixed(1)}p`;
+  document.getElementById("ttm-sl-dist").textContent = `${slDist.toFixed(1)}${_ttmLbl}`;
+  document.getElementById("ttm-tp-dist").textContent = `${tpDist.toFixed(1)}${_ttmLbl}`;
 }
 
 async function ttmSendToOanda() {
@@ -4333,8 +4341,9 @@ function renderAuditModal(d) {
         ${auditRow("final grade", vd.grade)}
         ${auditRow("score",       vd.score)}
         ${tl.entry_price ? auditRow("entry",  tl.entry_price) : ""}
-        ${tl.sl_price    ? auditRow("SL",     tl.sl_price + (tl.sl_pips  ? " (" + tl.sl_pips  + " pips)" : "")) : ""}
-        ${tl.tp1_price   ? auditRow("TP1",    tl.tp1_price + (tl.tp1_pips ? " (" + tl.tp1_pips + " pips)" : "")) : ""}
+        ${(()=>{ const _auLbl = (d.pair||"").includes("XAU") ? "pts" : "pips"; return `
+        ${tl.sl_price    ? auditRow("SL",     tl.sl_price + (tl.sl_pips  ? " (" + tl.sl_pips  + " " + _auLbl + ")" : "")) : ""}
+        ${tl.tp1_price   ? auditRow("TP1",    tl.tp1_price + (tl.tp1_pips ? " (" + tl.tp1_pips + " " + _auLbl + ")" : "")) : ""}`; })()}
         ${tl.rr1         ? auditRow("RR",     tl.rr1) : ""}
         <div style="margin-top:8px;border-top:1px solid var(--navy-border);padding-top:8px;">${flagsHtml}</div>
       </div>
