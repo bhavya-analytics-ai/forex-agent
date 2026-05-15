@@ -7,6 +7,7 @@ Sessions: tokyo, london, new_york
 import logging
 from datetime import datetime
 from config import PAIRS, DEBUG_DECISIONS
+from filters.market_hours import market_hours_gate
 from core.fetcher import fetch_all_timeframes
 from core.confluence import check_confluence
 from alerts.scorer import score_signal
@@ -82,11 +83,37 @@ def scan_pair(pair: str, return_confluence: bool = False):
         # Approaching warning — wire into result so main.py and dashboard can read it
         scored["approaching_warning"] = confluence.get("approaching_warning", "")
 
+        # ── MARKET HOURS GATE ─────────────────────────────────────────────────
+        # Runs before all logging decisions. Modifies score/alert only — never
+        # touches strategy logic, confluence, or scoring internals.
+        _mh = market_hours_gate()
+
+        if _mh["penalty_pts"]:
+            scored["score"] = max(
+                0, round((scored.get("score") or 0) - _mh["penalty_pts"], 1)
+            )
+
+        if _mh["alert_suppressed"]:
+            scored["should_alert"] = False
+        elif _mh["alert_min_grade"] == "A+":
+            if scored.get("grade") != "A+":
+                scored["should_alert"] = False
+
+        if _mh["reason"]:
+            _mh_sym = "🚫" if _mh["blocked"] else "⚠️"
+            scored["flags"] = (
+                scored.get("flags", []) + [f"{_mh_sym} {_mh['reason']}"]
+            )[:5]
+
+        # ── LOGGING GATE ──────────────────────────────────────────────────────
         signal_id = ""
         _gold   = scored.get("gold_mode", False)
         _sniper = scored.get("signal_mode") == "news_sniper"
 
-        if _gold or _sniper:
+        if _mh["blocked"]:
+            # Hard block overrides all strategy gates
+            _log_now = False
+        elif _gold or _sniper:
             # Gold + news-sniper: ENTER_NOW is the gate (unchanged behavior)
             _log_now = scored.get("entry_state") == "ENTER_NOW"
         else:
