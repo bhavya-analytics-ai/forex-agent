@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 35 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035])
+**Examples collected:** 37 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -2594,7 +2594,169 @@ Derived from Examples 034–035. Applies whenever a clean directional impulse ap
 
 ---
 
-*Add next example below as Example 036*
+## Paired 15M / 5M HTF-Range No-Trade Context-Execution — Examples 036–037
+
+This pair teaches no-trade behavior inside a wide HTF range. The scanner must not force longs or shorts while price is trapped inside the purple range. A clean boundary event is required: breakdown, breakout, reclaim, rejection, retest, or follow-through. Until then, the correct action is `SKIP_CHOP` with `skip_reason = inside_range_chop`.
+
+---
+
+### Example 036
+
+- **example_id:** 036
+- **timeframe:** 15M
+- **layer:** context
+- **paired_with:** 037 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/036_15m_htf_range_consolidation_no_trade_until_breakdown.png`
+
+**Om notes:**
+- 15M shows a wide purple HTF range / consolidation zone.
+- Price trades inside the range repeatedly — no clean directional resolution.
+- Longs from the middle or lower part of the range are low-confidence because the range itself is not broken.
+- Scanner should mark this as a no-trade / wait state until price clearly breaks a boundary.
+- Bearish continuation becomes valid only after range support fails WITH displacement (not a wick, not a single test).
+- A single touch of the purple zone is never an entry while the range is active.
+
+**Observed setup moments:**
+- Multiple bars oscillating inside the purple range
+- Tests of both upper and lower boundaries with no follow-through
+- No clean displacement candle exits the range on either side
+- Range remains active — `htf_range_active = true`
+- A future displacement candle through a boundary would arm the breakdown/breakout context
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | inside_range_chop (no resolution) |
+| `htf_range_active` | true |
+| `htf_zone_type` | purple HTF range / consolidation band |
+| `range_boundary_high` | upper edge of purple range |
+| `range_boundary_low` | lower edge of purple range |
+| `no_trade_zone` | true (mid-range and untested-boundary states) |
+| `low_confidence_inside_range` | true for any entry attempt before boundary event |
+| `boundary_break_required` | true (no entry until breakout / breakdown signature) |
+| `htf_magnet` | undefined until range resolves |
+| `bias_source` | 15M — undecided while range active |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `htf_range_active = true` forces `setup_action = SKIP_CHOP` for all entries inside the range, regardless of candle strength or short-term momentum.
+- `no_trade_zone = true` overrides any 5M signature that would otherwise fire — boundary event is the gate.
+- A valid resolution requires ONE of: clean breakout above `range_boundary_high` + retest hold, OR clean breakdown below `range_boundary_low` + displacement + failed reclaim.
+- `low_confidence_inside_range = true` automatically degrades `entry_quality` to low for any candidate trigger inside the range.
+- `boundary_break_required = true` keeps the scanner in wait state until one of the two resolution signatures completes.
+- 15M does not generate entries here — it locks the no-trade state until the range resolves.
+
+**Action labels:**
+- `BIAS_ONLY` — 15M context, no entry trigger at this layer
+- `SKIP_CHOP` — propagated to 5M for any candidate inside the range
+- Pairs with Example 037 for execution
+
+---
+
+### Example 037
+
+- **example_id:** 037
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 036 (15M context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/037_5m_from_036_range_chop_failed_support_wait_breakdown.png`
+
+**Om notes:**
+- 5M shows the same range/chop behavior in detail — bars oscillating inside the purple range, no clean direction.
+- Failed support attempts are NOT enough by themselves. A wick into the lower edge that closes back inside is not a short trigger.
+- Scanner should wait for one of: clean breakdown, retest, reclaim failure, or follow-through.
+- Do NOT enter only because price touches the purple zone.
+- Do NOT enter only because one candle looks strong — appearance ≠ structural truth (see Definitions: candle color/size alone is never enough).
+- The valid action is `execution_wait_state = true` until the 15M range resolves.
+
+**Observed setup moments:**
+- 5M bars oscillating inside the 15M range
+- Wicks into lower boundary that close back inside — not breakdowns
+- Strong-looking green and red candles mid-range — none are entries
+- No body close beyond `range_boundary_low` with displacement
+- No retest of broken boundary, no failed reclaim
+- Continuation of chop, no signature → wait
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | inside_range_chop |
+| `htf_range_active` | true (inherited from 036) |
+| `no_trade_zone` | true |
+| `inside_range_chop` | true |
+| `low_confidence_inside_range` | true |
+| `boundary_break_required` | true |
+| `breakdown_confirmation_required` | true (body close below `range_boundary_low` + displacement) |
+| `execution_wait_state` | true |
+| `entry_quality` | low for any candidate inside the range |
+| `skip_reason` | inside_range_chop |
+| `ema200_relation` | mixed / flat — EMA inside the range, not directional |
+| `htf_context_id` | 036 |
+| `execution_pair_id` | 037 |
+| `paired_context_id` | 036 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Inside range | No entry — `SKIP_CHOP` with `skip_reason = inside_range_chop` |
+| Wick into boundary | Not a breakout / breakdown — body close required |
+| Breakdown candidate | Body close below `range_boundary_low` + displacement → arm short context |
+| Breakout candidate | Body close above `range_boundary_high` + displacement → arm long context |
+| Retest after break | Hold = good retest → entry valid; fail = fakeout → skip |
+| Reclaim failure | Body cannot close back inside after break → continuation short/long valid |
+| Follow-through | Next bar continues the break direction → confirms entry quality |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 5M `setup_action = SKIP_CHOP` is the default while `htf_range_active = true` AND price is inside `[range_boundary_low, range_boundary_high]`.
+- `breakdown_confirmation_required = true` blocks short entry until: body close below `range_boundary_low` AND displacement candle AND (retest hold OR reclaim failure OR follow-through bar).
+- Mirror rule for breakout: body close above `range_boundary_high` + displacement + (retest hold OR reclaim failure OR follow-through).
+- A single touch of a boundary is never an entry — `wick_only_touch = true` keeps `execution_wait_state = true`.
+- Strong candle inside the range is noise — `entry_quality = low`, `skip_reason = inside_range_chop`.
+- The scanner must explicitly log `skip_reason = inside_range_chop` so the audit shows the setup was seen and intentionally skipped, not missed.
+- Once a boundary event resolves the range, downstream signature rules (sweep+reclaim, break+failed-reclaim, etc.) apply normally on the breakout/breakdown side.
+
+**Action labels:**
+- `SKIP_CHOP` — inside the range, no boundary event (default state)
+- `WAIT_REACTION` — boundary touch printed, awaiting confirmation
+- `ENTER_NOW` (short) — only after breakdown + displacement + (retest hold / reclaim failure / follow-through)
+- `ENTER_NOW` (long) — only after breakout + displacement + (retest hold / reclaim failure / follow-through)
+- `SKIP_CHASE` — entering after price has already left the range and traveled most of the distance to the next level
+
+---
+
+## HTF-Range No-Trade Logic — PROPOSED
+
+Derived from Examples 036–037. Applies whenever a wide HTF range / purple consolidation zone is active and price is trapped inside it.
+
+- **HTF range active = default skip.** `htf_range_active = true` forces `SKIP_CHOP` for every candidate inside the range.
+- **Single touch is never an entry.** A wick into a boundary that closes back inside is not a breakout or breakdown.
+- **Resolution requires displacement + confirmation.** Body close beyond a boundary alone is not enough — need retest hold, reclaim failure, OR follow-through.
+- **Candle strength inside the range is noise.** Strong green or red mid-range = low `entry_quality` = skip.
+- **Skip with logged reason.** Always set `skip_reason = inside_range_chop` so the audit proves intentional inaction.
+- **No magnet until resolution.** `htf_magnet` stays undefined until the range resolves on one side.
+- **Once resolved, normal signature rules apply.** After breakdown / breakout + confirmation, sweep+reclaim and break+failed-reclaim rules from earlier examples take over.
+
+**Audit fields proposed (for HTF-range no-trade logic):**
+
+| Field | Purpose |
+|---|---|
+| `htf_range_active` | Bool — true while a wide HTF range / consolidation band is in effect |
+| `no_trade_zone` | Bool — true for any candidate inside the active range without boundary event |
+| `inside_range_chop` | Bool — true when 5M is oscillating inside the range without signature |
+| `range_boundary_high` | Price level of the upper edge of the HTF range |
+| `range_boundary_low` | Price level of the lower edge of the HTF range |
+| `boundary_break_required` | Bool — true until a clean breakout/breakdown signature completes |
+| `low_confidence_inside_range` | Bool — degrades `entry_quality` to low for inside-range candidates |
+| `breakdown_confirmation_required` | Bool — gates short entry on body close + displacement + (retest / failed reclaim / follow-through) |
+| `execution_wait_state` | Bool — 5M default state while range is unresolved |
+| `htf_context_id` | ID of the HTF example providing context (e.g. 036) |
+| `execution_pair_id` | ID of the LTF example providing the trigger (e.g. 037) |
+
+---
+
+*Add next example below as Example 038*
 
 **Next planned batch:**
 - TBD by Om
