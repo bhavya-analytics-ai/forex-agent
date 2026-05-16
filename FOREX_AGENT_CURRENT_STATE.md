@@ -87,9 +87,13 @@ All items below are committed and deployed on Railway.
 - Not starting until labeled examples are collected
 
 **Screenshot calibration:**
-- **Started — Example 001 stored** (`docs/om_gold_scalp/examples/001_1h_bearish_freefall_context.png`)
-- Example 001: 1H bearish freefall context — XAU/USD below both purple S/R zones and 200 EMA. Context only, not a direct entry.
-- Rulebook started: `docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`
+- **In progress — 5 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
+- Example 001: 1H bearish freefall context — price below both purple zones + 200 EMA. Context only.
+- Example 002: 1H FVG magnet / imbalance fill — FVG as reaction zone, not automatic entry. IMAGE FILE PENDING.
+- Example 003: 1H zone flip — purple zone dynamic support/resistance flip. IMAGE FILE PENDING.
+- Example 004: 1H news/breakout impulse + continuation — large impulse candle, wait for FVG/pullback. IMAGE FILE PENDING.
+- Example 005: 1H liquidity sweep/takeout into zone + reversal risk. IMAGE FILE PENDING.
+- Core OM Concepts added: zone_flip, failed_reclaim, reclaim_success, freefall_context, fvg_magnet, fvg_rejection, liquidity_sweep, liquidity_takeout, breakout_impulse, news_impulse, fakeout, reversal_candidate, continuation_pullback
 - Scanner reads OHLC candle data only — no pixel/image reading
 - Screenshots are needed to translate Om's visual trading logic into measurable candle rules
 
