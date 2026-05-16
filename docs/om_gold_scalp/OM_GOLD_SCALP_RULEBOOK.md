@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 25 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025])
+**Examples collected:** 27 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -1730,9 +1730,145 @@ Derived from Examples 022–025. These rules apply across all paired context-exe
 
 ---
 
-*Add next example below as Example 026*
+## Paired 15M / 5M News-Displacement Context-Execution — Examples 026–027
+
+This pair shows how the scanner must read 15M as a structural map and 5M as the execution trigger when a news impulse distorts the chart. The lesson: a news displacement candle is not an entry — it is a re-bias event that must be confirmed by structure before any scalp.
+
+---
+
+### Example 026
+
+- **example_id:** 026
+- **timeframe:** 15M
+- **layer:** context
+- **paired_with:** 027 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/026_15m_sr_retest_failed_breakout_news_sweep_context.png`
+
+**Om notes:**
+- S/R band on 15M was respected by multiple touches before any directional resolution.
+- Price attempted a breakout above resistance but failed to hold the higher level — body could not close and accept above.
+- News / liquidity-style displacement candle pushed price down sharply, away from the band.
+- Lower purple zone became the active downside magnet during the displacement.
+- Later, structure changed again when price reclaimed the broken resistance and accepted above it — bias flipped from bearish back to bullish.
+- The 15M layer is the map. Each phase (respect → failed breakout → displacement → reclaim) sets a different 5M execution context.
+
+**Observed setup moments:**
+- Repeated touches at the same S/R band (zone respected, accumulating tests)
+- Failed breakout attempt: wick beyond resistance, body close back inside
+- News/displacement candle: oversized body, range expansion in one direction
+- Lower purple zone reached as displacement magnet
+- Later reclaim: body close back above broken resistance + acceptance candle
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | sr_band: respected → failed_breakout → broken_support (post-displacement) → reclaimed_zone (later) |
+| `zone_tests_count` | sr_band ≥ 3 before displacement (weakened) |
+| `displacement_source` | news / liquidity (range expansion candle) |
+| `htf_magnet` | lower purple zone during displacement; flips to upside on reclaim |
+| `bias_source` | 15M structure — phase-dependent (bearish during displacement, bullish after reclaim) |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 15M `zone_tests_count ≥ 3` raises breakdown probability — treat next failed breakout as a setup signal, not noise.
+- `displacement_source = news` candle on 15M sets `news_impulse = true` and locks `setup_action = WAIT_REACTION` on 5M for N bars (proposed: 3 bars).
+- Failed breakout = wick above resistance + body close back inside the band → bias remains range until break confirms.
+- Reclaim of broken resistance + acceptance candle flips `htf_magnet` to upside and clears `news_impulse` lock.
+- 15M does not generate entries on this example — it sets the phase-dependent execution context for 5M.
+
+**Action labels:**
+- `BIAS_ONLY` — 15M context, no entry trigger at this layer
+- Pairs with Example 027 for execution
+
+---
+
+### Example 027
+
+- **example_id:** 027
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 026 (15M context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/027_5m_news_breakdown_retest_resistance_then_bullish_breakout.png`
+
+**Om notes:**
+- Do NOT enter immediately on the news displacement candle. That is the chase trap.
+- Wait for 3-candle continuation OR structure confirmation before short scalp.
+- If price retests broken support (now resistance) and cannot break back above, short scalp is valid toward lower magnet.
+- If price later breaks back above resistance AND retests AND accepts, the bearish idea is invalidated — long continuation becomes valid.
+- Scanner must distinguish a news impulse (one expansion candle, unconfirmed) from a structural breakdown (impulse + confirmation + failed reclaim).
+
+**Observed setup moments:**
+- News displacement candle on 5M (oversized body) — no entry yet
+- 3-candle continuation in the displacement direction = first valid short trigger
+- Retest of old support (now resistance) from below: wick into level, body close back below = short scalp valid
+- Later: 5M reclaim of resistance + acceptance candle + retest from above that holds → long continuation trigger
+- The same level acts as resistance during one phase and as support after reclaim — phase, not price, defines the scalp
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | broken_support → underside_retest → failed_reclaim (short phase) → reclaimed_zone → topside_retest (long phase) |
+| `news_impulse` | true during displacement; cleared after structural confirmation |
+| `confirmation_signal` | 3-candle continuation OR underside_retest + failed_reclaim |
+| `ema200_relation` | below_ema200 during short phase; above_ema200 after reclaim |
+| `paired_context_id` | 026 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| News candle | Observation only — no entry |
+| Short entry (phase 1) | After 3-candle continuation OR retest of old support that fails to reclaim |
+| Short SL | Above failed reclaim wick + 2 pts |
+| Short TP | Lower purple zone (15M magnet from 026) |
+| Reclaim invalidation | Body close above old resistance + acceptance candle = exit short, no new short |
+| Long entry (phase 2) | Retest of reclaimed level from above + body close holds → long scalp |
+| Long SL | Below retest wick + 2 pts |
+| Long TP | Next 15M structure level above |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `news_impulse = true` locks `setup_action = WAIT_REACTION` on the first displacement candle. No `ENTER_NOW` until confirmation.
+- Confirmation = `three_candle_continuation = true` OR (`underside_retest = true` AND `failed_reclaim = true`).
+- On confirmation in the displacement direction → `setup_action = ENTER_NOW` (continuation scalp).
+- `reclaimed_zone = true` AND `topside_retest = true` AND `body_holds_next_candle = true` → flip bias, `setup_action = ENTER_NOW` opposite direction.
+- Without confirmation, treat the displacement as chop and skip — `setup_action = SKIP_CHASE`.
+- A single news candle is never an entry. The scanner must wait for structural proof to separate impulse from continuation.
+
+**Action labels:**
+- `WAIT_REACTION` — news candle just printed, no confirmation yet
+- `ENTER_NOW` (short) — 3-candle continuation OR failed reclaim of old support confirmed
+- `SKIP_CHASE` — entering on the displacement candle itself before confirmation
+- `ENTER_NOW` (long) — reclaim of resistance + topside retest + acceptance
+- `BIAS_FLIP` — when reclaim invalidates the prior short phase
+
+---
+
+## News-Displacement Logic — PROPOSED
+
+Derived from Examples 026–027. Applies whenever a news or liquidity-style displacement candle appears on 15M or 5M.
+
+- **News displacement is a re-bias event, not an entry.** The first oversized candle sets attention, never `ENTER_NOW`.
+- **Confirmation is required.** Either `three_candle_continuation` OR (`underside_retest` + `failed_reclaim`) must be true before an entry fires in the displacement direction.
+- **Old support becomes resistance immediately after displacement breakdown** — until reclaim is proven, longs at that level are filtered out.
+- **Reclaim flips bias cleanly.** Body close back above + retest from above that holds = the short phase is invalidated, long continuation becomes valid.
+- **Same level, different phase, opposite scalp.** The scanner must phase-track the level, not just its price.
+- **Scanner must not confuse news impulse with structural continuation.** One candle is impulse; impulse + confirmation is continuation.
+
+**Audit fields proposed (for news-displacement logic):**
+
+| Field | Purpose |
+|---|---|
+| `news_impulse` | Bool — true on detection of displacement candle |
+| `three_candle_continuation` | Bool — true when 3 consecutive bars extend the displacement |
+| `confirmation_signal` | Enum: `three_candle_continuation` / `failed_reclaim` / `none` |
+| `displacement_source` | Enum: `news` / `liquidity` / `unknown` |
+| `bias_flip_event` | Bool — true when reclaim invalidates the prior phase |
+
+---
+
+*Add next example below as Example 028*
 
 **Next planned batch:**
-- 026 / 027 = 15M failed reclaim → 5M short
 - 028 / 029 = 15M sweep reclaim → 5M long
 - 030 / 031 = 15M chop / EMA conflict → 5M skip
