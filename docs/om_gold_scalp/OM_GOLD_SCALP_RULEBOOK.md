@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 29 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029])
+**Examples collected:** 31 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -2013,7 +2013,155 @@ Derived from Examples 028–029. Applies to any range support or S-R zone that b
 
 ---
 
-*Add next example below as Example 030*
+## Paired 15M / 5M Countertrend-Green-Failure Context-Execution — Examples 030–031
+
+This pair teaches that healthy-looking green candles inside a bearish context are NOT bullish signals on their own. Reclaim + hold + follow-through is required to flip bias. Until then, every bullish pullback is a continuation-short reentry opportunity, not a long.
+
+---
+
+### Example 030
+
+- **example_id:** 030
+- **timeframe:** 15M
+- **layer:** context
+- **paired_with:** 031 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/030_15m_broken_support_countertrend_green_failure_continuation.png`
+
+**Om notes:**
+- 15M shows a broken support / S-R zone where price attempts recovery with healthy-looking green candles.
+- The green candles look strong individually — but price fails to reclaim and hold above the broken support / structure.
+- Red candles that follow may look weak at first, but structure remains bearish because reclaim never succeeded.
+- Scanner must NOT judge candle color or size alone — structural acceptance is the trigger, not bar appearance.
+- Countertrend green inside bearish context = risky scalp attempt only. Treat as continuation reentry zone unless reclaim + hold + follow-through confirms reversal.
+- Bias on 15M remains bearish throughout. The next lower 15M structure level stays as the active magnet.
+
+**Observed setup moments:**
+- Prior breakdown through 15M support → broken_support state established
+- Recovery attempt: one or more healthy green candles pushing into the broken level
+- Reclaim attempt fails — body cannot close back above and hold
+- Red follow-through prints, structure preserved as bearish (no higher high)
+- Continuation toward lower 15M magnet resumes
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | broken_support → underside_retest → countertrend_green_attempt → reclaim_failed |
+| `broken_support_context` | true (prior 15M break still active) |
+| `countertrend_green_attempt` | true (healthy green pushing into the broken level) |
+| `reclaim_failed` | true (body close cannot hold above) |
+| `bearish_context_preserved` | true (no higher high printed; structure intact) |
+| `htf_magnet` | next lower 15M structure level |
+| `bias_source` | 15M structure — bearish remains valid despite countertrend appearance |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 15M `broken_support_context = true` + `countertrend_green_attempt = true` does NOT arm a long trigger by itself.
+- Bias only flips when `reclaim_failed = false` AND body holds above the broken level AND follow-through prints a higher high.
+- While `bearish_context_preserved = true`, every countertrend green is treated as a continuation-short reentry zone for 5M.
+- The size or color of a single candle is not a structural signal — only acceptance above the broken level is.
+- 15M does not generate entries on this example — it sets the context for paired 5M trigger.
+
+**Action labels:**
+- `BIAS_ONLY` — 15M context, no entry trigger at this layer
+- Pairs with Example 031 for execution
+
+---
+
+### Example 031
+
+- **example_id:** 031
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 030 (15M context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/031_5m_from_030_failed_bullish_pullback_short_continuation.png`
+
+**Om notes:**
+- Execution view of the 030 context.
+- 5M shows bullish pullback attempts with healthy green candles — but each attempt fails to reclaim and hold above the broken structure.
+- EMA 200 and structure on 5M stay bearish throughout the recovery attempts.
+- Continuation short remains the higher-probability trade. Every failed bullish pullback is a reentry short, not a reversal long.
+- This is the textbook `candle_strength_mismatch`: a healthy bullish candle CAN still lose when HTF structure and zone behavior remain bearish.
+- Do NOT take the long off the green candle alone. Wait for failure proof, then short the continuation.
+
+**Observed setup moments:**
+- 5M pullback prints healthy-looking green candles into the broken support / structure
+- Pullback fails: body cannot close above broken level OR EMA 200 OR prior swing high
+- Red continuation candle prints, structure remains bearish
+- Lower-high or equal-high forms — `bullish_pullback_failed = true`
+- Short entry valid on close of the failed-pullback continuation candle
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | broken_support → underside_retest → countertrend_green_attempt → reclaim_failed |
+| `broken_support_context` | true (from 030) |
+| `countertrend_green_attempt` | true (5M pullback green) |
+| `reclaim_failed` | true |
+| `bullish_pullback_failed` | true |
+| `candle_strength_mismatch` | true — green appeared strong, structure says otherwise |
+| `bearish_context_preserved` | true (no 5M higher high, below EMA 200) |
+| `continuation_short_valid` | true |
+| `ema200_relation` | below_ema200 |
+| `htf_context_id` | 030 |
+| `execution_pair_id` | 031 |
+| `paired_context_id` | 030 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Countertrend green pullback | Observation only — no long entry on appearance |
+| Reclaim check | Did body close hold above broken level + EMA 200? If no → reclaim_failed |
+| Failed pullback confirm | Lower-high or equal-high after the green attempt |
+| Short entry | Close of the failed-pullback continuation candle |
+| Short SL | Above the highest pullback wick + 2 pts |
+| Short TP | Next 15M structure level below (htf_magnet from 030) |
+| Reversal condition | Body close above broken level + EMA 200 + higher high — invalidates short |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 5M long entry requires ALL of: `reclaim_failed = false`, body holds above broken level, holds above EMA 200, higher high prints. Missing any → long skipped.
+- 5M `setup_action = ENTER_NOW` (short) requires: `broken_support_context = true` AND `bullish_pullback_failed = true` AND `bearish_context_preserved = true`.
+- `candle_strength_mismatch = true` audit flag fires whenever a healthy-looking pullback candle is followed by structural failure. Used as calibration metric only, not entry gate.
+- Every countertrend green inside a bearish context becomes a `continuation_short_valid` candidate once the pullback proves it cannot reclaim.
+- Bias and target derive from paired 15M context (Example 030) — 5M does not invalidate 15M bias without full reversal proof.
+
+**Action labels:**
+- `WAIT_REACTION` — countertrend green printed, no pullback failure confirmed yet
+- `ENTER_NOW` (short) — bullish pullback failed + bearish context preserved
+- `SKIP_CHASE` (long) — entering long on the green pullback candle alone, without reclaim proof
+- `BIAS_FLIP` — reclaim succeeds + higher high prints + body holds above EMA 200
+
+---
+
+## Countertrend-Green-Failure Logic — PROPOSED
+
+Derived from Examples 030–031. Applies whenever a bullish pullback appears inside an established bearish context (broken support, below EMA 200).
+
+- **Candle color and size are not signals.** A healthy green inside bearish context is a setup for a continuation short, not a long.
+- **Reversal requires structural acceptance.** Reclaim + hold above broken level + hold above EMA 200 + higher high — all four must be true to flip bias.
+- **Failed pullback = continuation short.** Once `bullish_pullback_failed = true` and `bearish_context_preserved = true`, the short reentry trigger arms.
+- **HTF context wins ties.** When 15M says bearish and 5M prints countertrend green, the 5M trigger only fires shorts (or skips). Long requires full HTF flip.
+- **`candle_strength_mismatch` is a learning metric.** It tracks how often appearance contradicts structural outcome — used to calibrate weight of bar-appearance features in scoring.
+- **No long inside bearish HTF without reclaim proof.** This is the rule that prevents chasing pullbacks.
+
+**Audit fields proposed (for countertrend-green-failure logic):**
+
+| Field | Purpose |
+|---|---|
+| `broken_support_context` | Bool — true while a prior support break remains unreclaimed |
+| `countertrend_green_attempt` | Bool — true on healthy green into broken level inside bearish context |
+| `reclaim_failed` | Bool — body cannot close and hold above broken level |
+| `bullish_pullback_failed` | Bool — lower or equal high after countertrend green |
+| `candle_strength_mismatch` | Bool — bar color/size contradicts structural outcome (calibration metric) |
+| `bearish_context_preserved` | Bool — no higher high, structure remains bearish |
+| `continuation_short_valid` | Bool — true when all confirmation conditions for short reentry are met |
+| `htf_context_id` | ID of the HTF example providing context (e.g. 030) |
+| `execution_pair_id` | ID of the LTF example providing the trigger (e.g. 031) |
+
+---
+
+*Add next example below as Example 032*
 
 **Next planned batch:**
-- 030 / 031 = 15M chop / EMA conflict → 5M skip
+- TBD by Om

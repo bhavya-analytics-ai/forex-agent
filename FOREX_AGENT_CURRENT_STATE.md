@@ -87,15 +87,16 @@ All items below are committed and deployed on Railway.
 - Not starting until labeled examples are collected
 
 **Screenshot calibration:**
-- **In progress — 29 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
+- **In progress — 31 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
 - Examples 001–005: 1H standalone/context examples (bearish freefall, FVG magnet, zone flip, news impulse, liquidity sweep)
 - Examples 006–013: 15M setup layer (failed retest, bearish continuation into lower zone, bullish breakout pullback, sweep reclaim reversal, zone-to-zone continuation, breakdown impulse, FVG fill rejection, zone magnet reclaim)
 - Examples 014–021: 5M trigger layer (failed reclaim short/long reversal, zone reclaim bullish multi-TP, trend pullback reentry, range breakdown flip, news fakeout reclaim impulse, multi-setup zone-to-zone, chop skip, bearish breakdown retest continuation) — all PROPOSED scanner rules, no code written
 - Examples 022–025: paired 1H/5M context-execution examples (022+023 = multi-zone breakdown + upper rejection → lower sweep reclaim; 024+025 = repeated S1 breakdown + failed reclaim → S2 magnet). Introduces 1H → 5M pair logic and audit fields `htf_zone_map`, `htf_magnet`, `zone_tests_count`, `zone_strength_decay`, `zone_role_flip`, `paired_context_id`
 - Examples 026–027: paired 15M/5M news-displacement context-execution. 026 = 15M S/R band respected → failed breakout → news displacement → lower magnet → later reclaim. 027 = 5M no-entry on news candle, wait for 3-candle continuation or failed reclaim of old support before short; reclaim + topside retest flips to long. Introduces news-displacement logic and audit fields `news_impulse`, `three_candle_continuation`, `confirmation_signal`, `displacement_source`, `bias_flip_event`
 - Examples 028–029: paired 15M/5M range-break failed-reclaim context-execution. 028 = 15M range support breaks, reclaim attempt fails, lower-high continuation confirms bearish bias. 029 = 5M shows healthy-looking green retest candle that cannot reclaim, then red continuation candle that holds structure — teaches `candle_strength_mismatch` (bar color/size ≠ structural truth). Introduces range-break failed-reclaim logic and audit fields `support_hold_failed`, `reclaim_attempt`, `reclaim_failed`, `candle_strength_mismatch`, `follow_through_confirmed`, `continuation_entry`, `htf_context_id`, `execution_pair_id`
-- All screenshot files committed — 5M batch `9793c93`, paired 1H/5M `f2c8b34`, news-displacement `ade3127`
-- Next planned: 030/031 (15M chop/EMA conflict → 5M skip)
+- Examples 030–031: paired 15M/5M countertrend-green-failure context-execution. 030 = 15M broken support with healthy green recovery attempts that fail to reclaim and hold; bearish context preserved. 031 = 5M bullish pullbacks fail under EMA 200, every failed pullback is a continuation-short reentry, not a reversal long. Reinforces `candle_strength_mismatch` — appearance ≠ structural truth. Introduces countertrend-green-failure logic and audit fields `broken_support_context`, `countertrend_green_attempt`, `bullish_pullback_failed`, `bearish_context_preserved`, `continuation_short_valid`
+- All screenshot files committed — 5M batch `9793c93`, paired 1H/5M `f2c8b34`, news-displacement `ade3127`, range-break failed-reclaim `c015638`
+- Next planned: TBD by Om
 - Core OM Concepts: zone_flip, failed_reclaim, fvg_magnet, liquidity_sweep, breakout_impulse, news_impulse, fakeout, reversal_candidate, continuation_pullback (14 total)
 - 15M Setup Layer Rules section added: zone_state enum, setup_action enum, chase filter, fvg_relation enum, reaction-zone logic, continuation setup logic, proposed thresholds
 - Scanner reads OHLC candle data only — no pixel/image reading
