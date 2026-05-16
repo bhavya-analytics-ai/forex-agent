@@ -1,0 +1,231 @@
+# FOREX AGENT CURRENT STATE — May 2026
+
+---
+
+## 1. Current System Purpose
+
+Forex Agent is a scanner and decision-support system. It is not a blind auto-trader.
+
+It scans 11 forex and metals pairs across four timeframes (H1, M15, M5, M1), evaluates confluence using ICT/SMC concepts, grades signals, and presents them for manual review. Om decides whether to take a trade. The system does not execute orders.
+
+**Core functions:**
+- Continuous 5-min scan cycle across 11 pairs
+- ICT confluence scoring: zones, structure, killzones, FVG, pattern, news clearance
+- Three strategy streams: `normal` (gold_strategy / forex_strategy), `news_sniper` (XAU only), mode switchable
+- Signal logging to SQLite DB and CSV — with dedup, archival, and labeling
+- Dashboard (Flask) for live signal review, manual trade logging, P&L tracking, audit panel
+- Slack alerts for qualifying signals
+- Railway live deployment, SQLite DB as source of truth
+
+**Operating principle:** System surfaces high-confluence setups. Om reviews. Om labels outcomes. No auto-execution at any stage.
+
+---
+
+## 2. Stabilization Work Completed
+
+All items below are committed and deployed on Railway.
+
+| Fix | Commit | Description |
+|---|---|---|
+| Archived spam excluded from all read paths | `e9bd0a4` | `get_recent_agent_signals`, `get_performance_summary_db`, `get_unlabeled_taken_signals` now filter `COALESCE(is_archived,0)=0`. 107 spam rows quarantined via API. |
+| Forex logging restored without spam | `f486303` | Forex signals log via `should_log` flag. DB-backed 60-min fingerprint dedup prevents repeated logging. Fingerprint: `(pair, signal_mode, direction, setup_type, h1_trend)`. Gold/sniper unchanged — still require `entry_state=ENTER_NOW`. `signal_mode` now written to DB. |
+| Decision trace mode | `7771d4e` | `DEBUG_DECISIONS` env var (default `false`). When enabled: one compact INFO line per pair per scan showing grade, score, entry_state, should_log, should_alert, block reason. Zero effect on trading behavior. |
+| Friday/weekend market-hours guard | `6089318` | `filters/market_hours.py`. Friday 21:00–21:30 UTC: −10 pts, alerts suppressed. Friday 21:30–22:00 UTC: hard block, no log, no alert. Sunday 22:00–23:00 UTC: −15 pts, A+ alerts only. |
+| Minimum quality gate | `af467c4` | `filters/quality_gate.py`. Entry pattern gate (forex A/A+ with no candle confirmation → block). Zone-direction conflict gate (strong opposing zone → block, weak → −8 pts). Minimum SL gate (XAU < 150p, XAG < 200p, forex < 5p → block). Fails open on exception. |
+| Grade C metal ENTER_NOW alert suppression | `af467c4` | Gold/silver ENTER_NOW with grade C still logs (strategy conviction kept) but `should_alert=False`. No Slack noise on low-confidence entries. |
+| XAU pts display fixed in dashboard | `4dfb9c9` | SL/TP labels, live P&L tracker, close modal, take-trade modal, audit panel all show `pts` not `pips` for XAU/USD. Internal pip math unchanged. |
+| Breakout Slack routing fixed | `d0aca5b` | Breakout alerts use `send_sniper_alert` in news_sniper mode, `send_signal_alert` in normal mode. |
+| News filter country mapping fixed | `97d18be` | ForexFactory fallback now maps ISO country codes (`US` → `USD`) matching Finnhub path. XAU/USD news blocking now reliable even when Finnhub 403s. |
+| Scorer / logger integrity fixes | `f64a62d`, `f5c4f32` | Killzone safe default, EV labeled estimated, news likelihood guard, loss penalty display-only, `signal_mode` persisted, dead breakdown columns blank not fake-zero. |
+| News sniper sweep quality | `7b37809` | `_WICK_PCT_MIN` filters weak sweeps. SL anchored to sweep candle close. Explicit rejection reasons logged. |
+
+---
+
+## 3. Current Risk Controls
+
+**Market hours (live — `filters/market_hours.py`):**
+- Friday 21:00–21:30 UTC — caution: −10 pts, all alerts suppressed
+- Friday 21:30–22:00 UTC — hard block: no log, no alert for any pair
+- Sunday 22:00–23:00 UTC — caution: −15 pts, A+ grade alerts only
+- All other times: clean pass, no penalty
+
+**Quality gate (live — `filters/quality_gate.py`):**
+- Forex A/A+ with no candle confirmation pattern → hard block (no log, no alert)
+- Forex B with no pattern → logs with `⚠️ NO PATTERN` flag
+- Gold/sniper: pattern gate exempt (ICT sequence is the pattern)
+- Zone-direction conflict with zone strength ≥ 40 → hard block
+- Zone-direction conflict with zone strength < 40 → −8 pts penalty, flag
+- Bypass: `zone_flip=True` or `setup_type` in `{sr_flip, zone_tap}`
+- SL < minimum threshold → hard block (XAU: 150p, XAG: 200p, forex: 5p)
+
+**Signal dedup (live — `alerts/logger.py`):**
+- Forex: 60-min DB-backed fingerprint dedup prevents repeated same-signal spam
+- Gold/sniper: in-memory cooldown per pair (unchanged)
+
+**Grade C metal suppression (live — `reports/briefing.py`):**
+- Gold/silver ENTER_NOW grade C → `should_alert=False`, still logs
+
+---
+
+## 4. Current Known Weaknesses
+
+**Score saturation:**
+- Multiplicative Bayesian boosts in `alerts/scorer.py` can compound past 1.0
+- Score of 99/100 is currently appearing on multiple unrelated signals per scan
+- Scores are not being meaningfully differentiated at the top end
+- Fix designed, not implemented
+
+**OM Gold Scalp:**
+- Detailed spec finalized (see Section 5)
+- Strategy file `strategies/om_gold_scalp.py` does not exist yet
+- No code written
+
+**Learning layer (Sona/Hermes):**
+- Architecture discussed, not designed in detail
+- No code written
+- Not starting until labeled examples are collected
+
+**Screenshot calibration:**
+- Not started
+- Scanner reads OHLC candle data only — no pixel/image reading
+- Screenshots are needed to translate Om's visual trading logic into measurable candle rules
+
+**Live scanner vs screenshots:**
+- Current scanner cannot read screenshots
+- Screenshots are for rule extraction and training data only — not live execution input
+- v1 OM Gold Scalp will execute from market data, not image recognition
+
+---
+
+## 5. OM Gold Scalp Status
+
+**High-level architecture — finalized:**
+- Separate strategy stream from `gold_strategy` (structural) and `news_sniper` (news reversal)
+- `pair = XAU_USD` — no fake pair names
+- `signal_mode = om_gold_scalp`
+- `dashboard_label = OM SCALP`
+- File: `strategies/om_gold_scalp.py`
+- Killzone: no hard gate — scoring bonus only
+- News safety: penalty only (−15/−20/−10 pts depending on window) — not a hard block
+- H1/EMA opposing scalp direction: −25 pts penalty. Hard SKIP only if opposing AND `momentum_score < 35`
+- SL method: sweep wick extreme + 2 pt buffer, max SL = 20 pts
+- TP1: 15–25 pts (min 1:1.5 RR). TP2: up to 30 pts
+- `ENTER_NOW`: valid sweep + displacement ≥ 3 pts + `momentum_score ≥ 50`
+- `WAIT_RETEST`: sweep confirmed, displacement not yet closed or `momentum_score` 35–49
+- `SKIP`: no sweep, SL > 20 pts, H1 opposing + `momentum_score < 35`, or score < 50
+
+**Detailed spec — finalized:**
+- Momentum scoring: 4 components, weights defined, 100 pt scale
+- Sweep criteria: 4 gates (M5 swing within 20 bars, wick ≥ 1.5 pts, close inside, recency ≤ 5 bars)
+- Audit fields: 8 scalp-specific fields into `breakdown` JSON column
+- Entry state conditions: fully defined
+- Score thresholds: `should_log ≥ 50`, `should_alert ≥ 65` AND grade ≥ B
+
+**What must happen before implementation:**
+- Screenshot calibration (Section 6) must produce Om-approved examples
+- Rules must be validated against real setups Om would have taken
+- Implementation only begins after rulebook v1 is approved
+
+---
+
+## 6. Screenshot Calibration Workflow
+
+Om will send batches of chart screenshots. Claude processes each batch and produces a table.
+
+**Batch types:**
+- **1H batch** — market context, bias, purple S/R zones, trend direction
+- **15M batch** — setup location, sweep visibility, failed reclaim area
+- **5M batch** — scalp trigger, displacement candle, pullback quality
+- **1M batch** — execution timing, early-vs-late, confirmation candle
+
+**Output table per image:**
+
+| Field | Content |
+|---|---|
+| Image # | Sequential number |
+| Timeframe | 1H / 15M / 5M / 1M |
+| Take? | YES / NO / WAIT |
+| Direction | Bullish / Bearish |
+| Entry idea | Price level or candle |
+| Invalidation | Price level that breaks the idea |
+| Target idea | 15 / 20 / 25 / 30 pt level |
+| What Om likely sees | Describe the visual setup |
+| Scanner rule learned | What candle/zone condition maps to this |
+| Label | clean scalp / missed opportunity / trash / late entry / early entry / fakeout / chop |
+
+**Process:**
+1. Claude extracts patterns from each screenshot batch
+2. Om corrects or confirms Claude's read
+3. Agreed patterns accumulate into Rulebook v1
+4. Only after Rulebook v1 is approved does implementation begin
+
+Claude must not finalize trading rules from screenshots alone. Om's corrections are the source of truth.
+
+---
+
+## 7. How Screenshots Help the Scanner
+
+The current scanner reads OHLC candle data and computed indicators — it does not read pixels.
+
+Screenshots serve a different purpose: translating Om's visual pattern recognition into measurable, codeable candle and zone conditions.
+
+Examples:
+- Om sees "clean sweep + displacement" → Claude maps that to: M5 wick > 1.5 pts past level, close inside, body ≥ 3 pts in scalp direction
+- Om sees "choppy, avoid" → Claude maps that to: ATR ratio < threshold, no clean body directional bias
+- Om labels "late entry" → that becomes a recency gate (sweep candle age > N bars = disqualified)
+
+A future Sona/vision layer may store screenshots alongside audit JSON as training examples. v1 OM Gold Scalp will still execute from market data, not image recognition.
+
+---
+
+## 8. Sona / Learning Layer Status
+
+**Not started. Future phase only.**
+
+Goal: a learning system that reviews wins, losses, missed trades, screenshots, audit JSON, and Om's notes — and proposes threshold adjustments or rule changes.
+
+**Constraints that will apply when built:**
+- No auto-editing of live strategy files
+- No autonomous trading rule changes
+- All proposed changes require Om's explicit approval before implementation
+- Archived and spam rows must be excluded from all training data
+- Learning begins with labeled examples and trade reviews — not unsupervised threshold tuning
+- Sona is advisory only: surfaces patterns, does not act
+
+**Prerequisite:** 30+ labeled OM Gold Scalp examples collected before Sona design begins.
+
+---
+
+## 9. Next Execution Order
+
+1. ✅ This checkpoint README (current step)
+2. Begin screenshot calibration — Om sends batches, Claude produces analysis tables
+3. Build OM Gold Scalp Rulebook v1 from Om-approved examples
+4. Write OM Gold Scalp implementation plan only after Rulebook v1 approved
+5. Code `strategies/om_gold_scalp.py` — separately from all other strategy files
+6. Verify on paper observation (no live trades) — confirm ENTER_NOW fires correctly, dedup holds, dashboard label correct
+7. Design Sona learning capture layer around collected examples and labeled outcomes
+8. Score saturation fix — separate engineering task, does not block any of the above
+
+---
+
+## 10. Claude Operating Rules Going Forward
+
+Claude must:
+- Ask what phase we are in before writing any code
+- Never mix OM Gold Scalp logic with Sona design unless Om explicitly asks
+- Never implement strategy logic from assumptions — wait for Om-approved examples
+- Always list exact files that will be touched before editing
+- Always run syntax check and tests after any code change
+- Always show `git diff` before committing
+- Never deploy without Om's explicit approval
+- Treat Om's screenshot labels as source of truth for scalp rule calibration
+- Keep `gold_strategy.py` and `news_sniper.py` untouched unless explicitly instructed
+- Keep all 3 strategy streams (`normal`, `news_sniper`, `om_gold_scalp`) fully isolated from each other
+
+---
+
+*Last updated: 2026-05-15*
+*Quality gate live: af467c4*
+*Market hours guard live: 6089318*
+*Dedup/lifecycle live: f486303*
