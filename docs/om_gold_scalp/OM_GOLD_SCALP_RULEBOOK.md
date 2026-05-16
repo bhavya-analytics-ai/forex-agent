@@ -50,6 +50,42 @@ Every example below uses these terms with the meanings defined here. If a defini
 
 ---
 
+### Annotation handling
+
+Screenshot annotations may contain informal trader notes. The scanner must not treat informal text as direct trading logic. All examples must be interpreted through normalized audit fields and structured labels in this rulebook.
+
+The scanner learns from structured interpretation, not raw emotional wording on screenshots.
+
+When raw notes use informal phrases, they are mapped to normalized labels as follows. This list is the canonical translation — informal wording in any example or note refers to these structured terms, not to itself.
+
+| Informal note | Normalized scanner label |
+|---|---|
+| gambling trade / gambling / risky | `low_confidence_setup` + `avoid_entry` |
+| lucky trade | `low_confidence_setup` (do not generalize) |
+| maybe / unsure / ??? | `confirmation_missing` → `WAIT_REACTION` or `SKIP_CHOP` |
+| looks good / looks healthy / looks strong | `single_candle_strength` — not a trigger by itself |
+| looks weak | `low_momentum_candle` — not invalidation by itself |
+| chase trap / trap | `chase_entry` → `SKIP_CHASE` (or `liquidity_sweep_candidate` for the level) |
+| countertrend attempt | `countertrend_attempt_failed` once reclaim fails |
+| half-reclaim / barely held | `weak_reclaim` |
+| broke and came back | `failed_breakout` / `failed_breakdown` (per direction) |
+| swept the high/low | `liquidity_sweep_candidate` (becomes `sweep_reclaim_confirmed` once reclaim + hold) |
+| reclaim died / could not hold | `reclaim_failed` |
+| need confirmation | `structure_shift_required` / `retest_required` / `follow_through_required` |
+| range not broken | `range_not_broken` + `boundary_break_required` |
+| no setup here | `no_trade_zone` + `entry_invalid_without_confirmation` |
+| continuation but unsure | `continuation_not_confirmed` |
+
+Messy or unresolved examples are classified — never deleted — using one of:
+- `no_trade_zone`
+- `low_confidence_setup`
+- `avoid_entry`
+- `educational_negative_example`
+
+An example labeled `educational_negative_example` is kept in the rulebook as a teaching case (what NOT to take), not as a valid trade.
+
+---
+
 **1. Liquidity sweep**
 Price takes out a visible previous high/low or zone edge, then fails to continue in the sweep direction and returns back inside prior structure.
 - **Bullish sweep** = price takes a visible low / support edge, then reclaims back above it.
@@ -137,7 +173,7 @@ Bar color, body size, or single-candle strength is never sufficient to trigger a
 - Retest / follow-through (did the new direction get confirmed by a hold?)
 - Risk / reward location (is the trade still worth taking given SL and TP distance?)
 
-A green candle that looks healthy can still fail if zone context, structure, EMA, and follow-through disagree. A red candle that looks weak can be valid continuation if the same factors agree. The scanner reads the combination, not the appearance.
+A green candle with `single_candle_strength` can still fail if zone context, structure, EMA, and follow-through disagree. A `low_momentum_candle` (red or otherwise) can be valid continuation if the same factors agree. The scanner reads the combination, not the appearance.
 
 ---
 
@@ -1890,7 +1926,7 @@ This pair shows how the scanner must read 15M as a structural map and 5M as the 
 - **screenshot_path:** `docs/om_gold_scalp/examples/027_5m_news_breakdown_retest_resistance_then_bullish_breakout.png`
 
 **Om notes:**
-- Do NOT enter immediately on the news displacement candle. That is the chase trap.
+- Do NOT enter immediately on the news displacement candle. That is `chase_entry` → `SKIP_CHASE`.
 - Wait for 3-candle continuation OR structure confirmation before short scalp.
 - If price retests broken support (now resistance) and cannot break back above, short scalp is valid toward lower magnet.
 - If price later breaks back above resistance AND retests AND accepts, the bearish idea is invalidated — long continuation becomes valid.
@@ -2030,7 +2066,7 @@ This pair teaches that candle appearance alone does not trigger an entry. A gree
 **Om notes:**
 - Execution view of the 028 breakdown.
 - Support fails on 5M. A green candle prints that LOOKS healthy — but it cannot reclaim or hold above the broken level.
-- A red candle prints that may look weak — but structure remains bearish (lower high, body close below).
+- A red candle prints that has `low_momentum_candle` appearance — but structure remains bearish (lower high, body close below).
 - Candle appearance alone is misleading. The trigger is zone behavior: did the reclaim attempt succeed, or did it fail?
 - Short entry is valid only after failed reclaim or lower-high continuation — NOT on the first breakdown candle impulse.
 - This is the textbook example of `candle_strength_mismatch` — bar color and body size do not match the structural reality.
@@ -2114,7 +2150,7 @@ Derived from Examples 028–029. Applies to any range support or S-R zone that b
 
 ## Paired 15M / 5M Countertrend-Green-Failure Context-Execution — Examples 030–031
 
-This pair teaches that healthy-looking green candles inside a bearish context are NOT bullish signals on their own. Reclaim + hold + follow-through is required to flip bias. Until then, every bullish pullback is a continuation-short reentry opportunity, not a long.
+This pair teaches that green candles with `single_candle_strength` inside a bearish context are NOT bullish signals on their own. Reclaim + hold + follow-through is required to flip bias. Until then, every bullish pullback is a `countertrend_attempt_failed` candidate → continuation-short reentry opportunity, not a long.
 
 ---
 
@@ -2127,16 +2163,16 @@ This pair teaches that healthy-looking green candles inside a bearish context ar
 - **screenshot_path:** `docs/om_gold_scalp/examples/030_15m_broken_support_countertrend_green_failure_continuation.png`
 
 **Om notes:**
-- 15M shows a broken support / S-R zone where price attempts recovery with healthy-looking green candles.
+- 15M shows a broken support / S-R zone where price attempts recovery with green candles that show `single_candle_strength`.
 - The green candles look strong individually — but price fails to reclaim and hold above the broken support / structure.
-- Red candles that follow may look weak at first, but structure remains bearish because reclaim never succeeded.
+- Red candles that follow may present as `low_momentum_candle` at first, but structure remains bearish because reclaim never succeeded (`reclaim_failed`).
 - Scanner must NOT judge candle color or size alone — structural acceptance is the trigger, not bar appearance.
-- Countertrend green inside bearish context = risky scalp attempt only. Treat as continuation reentry zone unless reclaim + hold + follow-through confirms reversal.
+- Countertrend green inside bearish context = `low_confidence_setup` + `avoid_entry`. Treat as continuation reentry zone unless reclaim + hold + follow-through confirms reversal.
 - Bias on 15M remains bearish throughout. The next lower 15M structure level stays as the active magnet.
 
 **Observed setup moments:**
 - Prior breakdown through 15M support → broken_support state established
-- Recovery attempt: one or more healthy green candles pushing into the broken level
+- Recovery attempt: one or more green candles with `single_candle_strength` pushing into the broken level
 - Reclaim attempt fails — body cannot close back above and hold
 - Red follow-through prints, structure preserved as bearish (no higher high)
 - Continuation toward lower 15M magnet resumes
@@ -2147,7 +2183,7 @@ This pair teaches that healthy-looking green candles inside a bearish context ar
 |---|---|
 | `zone_state` | broken_support → underside_retest → countertrend_green_attempt → reclaim_failed |
 | `broken_support_context` | true (prior 15M break still active) |
-| `countertrend_green_attempt` | true (healthy green pushing into the broken level) |
+| `countertrend_green_attempt` | true (green with `single_candle_strength` pushing into the broken level) |
 | `reclaim_failed` | true (body close cannot hold above) |
 | `bearish_context_preserved` | true (no higher high printed; structure intact) |
 | `htf_magnet` | next lower 15M structure level |
@@ -2176,14 +2212,14 @@ This pair teaches that healthy-looking green candles inside a bearish context ar
 
 **Om notes:**
 - Execution view of the 030 context.
-- 5M shows bullish pullback attempts with healthy green candles — but each attempt fails to reclaim and hold above the broken structure.
+- 5M shows bullish pullback attempts with green candles that have `single_candle_strength` — but each attempt fails to reclaim and hold above the broken structure (`countertrend_attempt_failed`).
 - EMA 200 and structure on 5M stay bearish throughout the recovery attempts.
 - Continuation short remains the higher-probability trade. Every failed bullish pullback is a reentry short, not a reversal long.
 - This is the textbook `candle_strength_mismatch`: a healthy bullish candle CAN still lose when HTF structure and zone behavior remain bearish.
 - Do NOT take the long off the green candle alone. Wait for failure proof, then short the continuation.
 
 **Observed setup moments:**
-- 5M pullback prints healthy-looking green candles into the broken support / structure
+- 5M pullback prints green candles with `single_candle_strength` into the broken support / structure
 - Pullback fails: body cannot close above broken level OR EMA 200 OR prior swing high
 - Red continuation candle prints, structure remains bearish
 - Lower-high or equal-high forms — `bullish_pullback_failed = true`
@@ -2221,7 +2257,7 @@ This pair teaches that healthy-looking green candles inside a bearish context ar
 **scanner_rule_learned (PROPOSED — not approved):**
 - 5M long entry requires ALL of: `reclaim_failed = false`, body holds above broken level, holds above EMA 200, higher high prints. Missing any → long skipped.
 - 5M `setup_action = ENTER_NOW` (short) requires: `broken_support_context = true` AND `bullish_pullback_failed = true` AND `bearish_context_preserved = true`.
-- `candle_strength_mismatch = true` audit flag fires whenever a healthy-looking pullback candle is followed by structural failure. Used as calibration metric only, not entry gate.
+- `candle_strength_mismatch = true` audit flag fires whenever a pullback candle with `single_candle_strength` is followed by structural failure. Used as calibration metric only, not entry gate.
 - Every countertrend green inside a bearish context becomes a `continuation_short_valid` candidate once the pullback proves it cannot reclaim.
 - Bias and target derive from paired 15M context (Example 030) — 5M does not invalidate 15M bias without full reversal proof.
 
@@ -2237,7 +2273,7 @@ This pair teaches that healthy-looking green candles inside a bearish context ar
 
 Derived from Examples 030–031. Applies whenever a bullish pullback appears inside an established bearish context (broken support, below EMA 200).
 
-- **Candle color and size are not signals.** A healthy green inside bearish context is a setup for a continuation short, not a long.
+- **Candle color and size are not signals.** A green with `single_candle_strength` inside bearish context is a setup for a continuation short, not a long.
 - **Reversal requires structural acceptance.** Reclaim + hold above broken level + hold above EMA 200 + higher high — all four must be true to flip bias.
 - **Failed pullback = continuation short.** Once `bullish_pullback_failed = true` and `bearish_context_preserved = true`, the short reentry trigger arms.
 - **HTF context wins ties.** When 15M says bearish and 5M prints countertrend green, the 5M trigger only fires shorts (or skips). Long requires full HTF flip.
@@ -2249,7 +2285,7 @@ Derived from Examples 030–031. Applies whenever a bullish pullback appears ins
 | Field | Purpose |
 |---|---|
 | `broken_support_context` | Bool — true while a prior support break remains unreclaimed |
-| `countertrend_green_attempt` | Bool — true on healthy green into broken level inside bearish context |
+| `countertrend_green_attempt` | Bool — true on green with `single_candle_strength` into broken level inside bearish context |
 | `reclaim_failed` | Bool — body cannot close and hold above broken level |
 | `bullish_pullback_failed` | Bool — lower or equal high after countertrend green |
 | `candle_strength_mismatch` | Bool — bar color/size contradicts structural outcome (calibration metric) |
@@ -2325,7 +2361,7 @@ This pair teaches that a purple HTF zone is a decision zone, not an automatic en
 - Entries must be identified from level behavior — not candle appearance alone.
 - First valid trigger: liquidity sweep + reclaim on the lower edge, then follow-through up = scalp long.
 - Later: support breaks, attempts to reclaim, fails — bearish continuation toward Support 2.
-- Middle-of-range entries between the two triggers are gambling — `middle_range_risk = true`, skip.
+- Middle-of-range entries between the two triggers are `low_confidence_setup` + `avoid_entry` — `middle_range_risk = true`, skip.
 - The scanner must wait for one of two clean signatures (sweep+reclaim OR break+failed-reclaim). Anything else is `SKIP_CHOP` or `SKIP_CHASE`.
 
 **Observed setup moments:**
@@ -2396,7 +2432,7 @@ Derived from Examples 032–033. Applies whenever a purple HTF zone or S/R band 
 - **Strong candle in the middle is noise.** A big body bar between the two signatures is `middle_range_risk = true` — skip.
 - **Fast break-and-return = possible sweep / fakeout.** Body close back inside within one or two bars = treat as sweep, not breakout.
 - **Failed reclaim of broken support = continuation valid.** Once the upper zone cannot hold, Support 2 becomes the active magnet.
-- **Mark gambling conditions explicitly.** `middle_range_risk = true` and `skip_reason = mid_range_no_confirmation` must be logged so the audit shows the scanner saw the setup and chose to skip.
+- **Mark low-confidence conditions explicitly.** `middle_range_risk = true` and `skip_reason = mid_range_no_confirmation` (with `avoid_entry = true`) must be logged so the audit shows the scanner saw the setup and chose to skip.
 
 **Audit fields proposed (for decision-zone consolidation logic):**
 
@@ -2545,7 +2581,7 @@ This pair teaches that a clean bullish impulse is not permission to keep buying.
 - `top_sweep_or_exhaustion` + rejection close → arms `short_scalp_valid = true` for a fast scalp (exit at consolidation lower edge).
 - `consolidation_after_impulse = true` → `WAIT_REACTION` for all directions until range resolves.
 - `failed_push_higher = true` (range exit down, no new high) → arm short-continuation triggers.
-- `slow_level_fill = true` allows continuation entries even when momentum looks weak, provided structure remains bearish (no higher high, below EMA 200).
+- `slow_level_fill = true` allows continuation entries even when momentum is low (`low_momentum_candle`), provided structure remains bearish (no higher high, below EMA 200).
 - `late_long_risk = true` audit flag fires whenever a long would be entered above the impulse origin without a fresh higher low — used to suppress chase entries.
 - `exit_reason` audit field logs why a trade was closed or skipped: `upper_liquidity_reached` / `consolidation_at_top` / `failed_push_higher` / `chase_distance` / `mid_range_no_confirmation`.
 
@@ -2568,7 +2604,7 @@ Derived from Examples 034–035. Applies whenever a clean directional impulse ap
 - **Consolidation at the top = no new longs.** `consolidation_after_impulse = true` triggers `long_bias_exit = true`, regardless of candle color/size.
 - **Sweep at the top is an exhaustion signal, not an entry-up signal.** Watch for reversal or short scalp, not continuation long.
 - **Failed push higher confirms bearish read.** Range exit downward + no new high = `bearish_continuation_after_failure = true`.
-- **Slow bearish continuation is still valid.** If price keeps filling levels and cannot reclaim structure, short reentries remain valid even when momentum looks weak.
+- **Slow bearish continuation is still valid.** If price keeps filling levels and cannot reclaim structure, short reentries remain valid even when momentum is low (`low_momentum_candle`).
 - **Location-aware candle reading.** A strong green near the impulse origin is useful. The same strong green into prior high / liquidity is exhaustion risk.
 - **Separate early clean-impulse entries from late chase entries.** Always log `entry_quality` and `late_long_risk` so the audit shows which type of entry was considered.
 
@@ -2666,7 +2702,7 @@ This pair teaches no-trade behavior inside a wide HTF range. The scanner must no
 - Failed support attempts are NOT enough by themselves. A wick into the lower edge that closes back inside is not a short trigger.
 - Scanner should wait for one of: clean breakdown, retest, reclaim failure, or follow-through.
 - Do NOT enter only because price touches the purple zone.
-- Do NOT enter only because one candle looks strong — appearance ≠ structural truth (see Definitions: candle color/size alone is never enough).
+- Do NOT enter only because one candle shows `single_candle_strength` — appearance ≠ structural truth (see Definitions: candle color/size alone is never enough).
 - The valid action is `execution_wait_state = true` until the 15M range resolves.
 
 **Observed setup moments:**
