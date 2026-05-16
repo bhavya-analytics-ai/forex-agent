@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 33 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033])
+**Examples collected:** 35 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -2417,7 +2417,184 @@ Derived from Examples 032–033. Applies whenever a purple HTF zone or S/R band 
 
 ---
 
-*Add next example below as Example 034*
+## Paired 15M / 5M Impulse-Exhaustion Context-Execution — Examples 034–035
+
+This pair teaches that a clean bullish impulse is not permission to keep buying. Once price reaches the upper liquidity / prior-high area and starts consolidating, long bias must be retired. Failed push higher after consolidation flips the read to bearish continuation, even if the bearish move is slow.
+
+---
+
+### Example 034
+
+- **example_id:** 034
+- **timeframe:** 15M
+- **layer:** context
+- **paired_with:** 035 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/034_15m_clean_bullish_impulse_exhaustion_to_bearish_continuation.png`
+
+**Om notes:**
+- 15M shows a clean bullish impulse from a low origin — valid long context while the move has room.
+- The lesson is not "keep buying longs." Once price reaches the prior high / upper liquidity area, the impulse has spent its budget.
+- Exhaustion signature appears: smaller bodies, more wicks, overlap → consolidation at the top.
+- Once price exits the consolidation downward and fails to make a new high, bearish continuation becomes the better read.
+- Bias progresses through three phases: bullish-with-room → no-trade-at-top → bearish-after-failure.
+
+**Observed setup moments:**
+- Clean bullish impulse from origin: large bodies, little overlap, EMA support
+- Approach into prior high / upper liquidity area
+- Exhaustion candles: smaller bodies, longer wicks, overlap
+- Consolidation range printed below the prior high
+- Range exit downward — fail to push higher confirmed
+- Bearish continuation begins, level-by-level fill toward lower structure
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | impulse_origin → upper_liquidity_target → consolidation_after_impulse → failed_push_higher → bearish_continuation |
+| `clean_bullish_impulse` | true (phase 1) |
+| `impulse_origin` | lower 15M structure / EMA support |
+| `upper_liquidity_target` | prior 15M high / upper liquidity pool |
+| `top_sweep_or_exhaustion` | exhaustion (small bodies + wicks at top) |
+| `consolidation_after_impulse` | true |
+| `long_bias_exit` | true once consolidation prints at top |
+| `failed_push_higher` | true (range exit down, no new high) |
+| `bearish_continuation_after_failure` | true |
+| `htf_magnet` | next lower 15M structure level once failure confirms |
+| `bias_source` | 15M — phase-dependent (long → wait → short) |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `clean_bullish_impulse = true` arms long bias ONLY while price has unobstructed room to a meaningful target.
+- Approach into `upper_liquidity_target` automatically degrades long quality — `entry_quality` drops from high to low for any new long.
+- `consolidation_after_impulse = true` at the top → `long_bias_exit = true`, no new longs regardless of candle strength.
+- `failed_push_higher = true` (range exit downward, no new high) → flip to bearish bias for 5M execution.
+- `bearish_continuation_after_failure = true` arms short-continuation triggers on 5M; target = next lower 15M magnet.
+- 15M does not generate entries here — it sets the phase-dependent execution context for 5M.
+
+**Action labels:**
+- `BIAS_ONLY` — 15M context, no entry trigger at this layer
+- Pairs with Example 035 for execution
+
+---
+
+### Example 035
+
+- **example_id:** 035
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 034 (15M context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/035_5m_from_034_bullish_impulse_sweep_then_failed_push_bearish_continuation.png`
+
+**Om notes:**
+- 5M gives a cleaner long entry earlier in the impulse — origin pullback + EMA hold + continuation candle.
+- Near the top, a possible liquidity sweep prints. Long confidence must drop; watch for reversal or short scalp.
+- Short scalp valid once the sweep + rejection confirms — fast trade, do not hold past failed push.
+- Consolidation prints, then price fails to push higher → bearish continuation begins, slow but valid.
+- Slow bearish continuation can still be tradeable if price keeps filling levels and cannot reclaim structure.
+- The scanner must separate early clean-impulse longs from late chase longs. Strong green at origin = useful. Strong green into prior high / liquidity = exhaustion risk.
+
+**Observed setup moments:**
+- 5M long entry trigger: origin pullback + EMA 200 hold + continuation candle close
+- Long travel through clean trend space — pullbacks are reentries
+- Approach into upper liquidity — sweep wick takes prior 5M high
+- Rejection candle: body closes back below swept high → short scalp window
+- Short scalp closes quickly; consolidation prints
+- Failed push higher: smaller and smaller bodies, no new high
+- Bearish continuation: slow level-by-level fill toward lower structure
+- Pullbacks during bearish continuation are short reentries, not longs
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | impulse_origin (long phase) → upper_liquidity_target → liquidity_sweep → rejecting_resistance → consolidation_after_impulse → failed_push_higher → bearish_continuation → slow_level_fill |
+| `clean_bullish_impulse` | true (phase 1) |
+| `top_sweep_or_exhaustion` | sweep + exhaustion |
+| `short_scalp_valid` | true at sweep + rejection |
+| `consolidation_after_impulse` | true |
+| `failed_push_higher` | true |
+| `bearish_continuation_after_failure` | true |
+| `slow_level_fill` | true (continuation prints level-by-level, not impulsive) |
+| `late_long_risk` | true for any long entry after `upper_liquidity_target` is in view |
+| `entry_quality` | high for origin long and sweep-rejection short; low for chase longs after top |
+| `exit_reason` | upper_liquidity_reached / consolidation_at_top / failed_push_higher (depending on phase) |
+| `ema200_relation` | above_ema200 during long phase; below_ema200 once bearish continuation confirms |
+| `htf_context_id` | 034 |
+| `execution_pair_id` | 035 |
+| `paired_context_id` | 034 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Long entry (phase 1) | Origin pullback + EMA 200 hold + continuation candle close |
+| Long SL | Below pullback wick + 2 pts |
+| Long TP | Upper liquidity / prior high (15–30 pts) |
+| Long exit | At upper liquidity OR on first consolidation candle |
+| Short scalp (phase 2) | Sweep above prior high + rejection body close back below |
+| Short scalp SL | Above sweep wick + 2 pts |
+| Short scalp TP | Mid-range / lower edge of consolidation (10–20 pts) |
+| Consolidation phase | No new entries — `WAIT_REACTION` |
+| Short continuation (phase 3) | Range exit downward + body close below lower edge |
+| Continuation SL | Above last lower high + 2 pts |
+| Continuation TP | Next 15M structure level (htf_magnet from 034) |
+| Invalidation | New 15M high prints + body holds above prior high |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 5M long `ENTER_NOW` requires: `clean_bullish_impulse = true` AND price has room to `upper_liquidity_target` AND EMA 200 hold confirmed.
+- Once price enters the `upper_liquidity_target` zone, long `entry_quality` drops to low → `setup_action = SKIP_CHASE` for new longs.
+- `top_sweep_or_exhaustion` + rejection close → arms `short_scalp_valid = true` for a fast scalp (exit at consolidation lower edge).
+- `consolidation_after_impulse = true` → `WAIT_REACTION` for all directions until range resolves.
+- `failed_push_higher = true` (range exit down, no new high) → arm short-continuation triggers.
+- `slow_level_fill = true` allows continuation entries even when momentum looks weak, provided structure remains bearish (no higher high, below EMA 200).
+- `late_long_risk = true` audit flag fires whenever a long would be entered above the impulse origin without a fresh higher low — used to suppress chase entries.
+- `exit_reason` audit field logs why a trade was closed or skipped: `upper_liquidity_reached` / `consolidation_at_top` / `failed_push_higher` / `chase_distance` / `mid_range_no_confirmation`.
+
+**Action labels:**
+- `ENTER_NOW` (long) — origin pullback + EMA hold + continuation candle, with room to upper target
+- `SKIP_CHASE` (long) — entry near or above upper liquidity / prior high
+- `ENTER_NOW` (short, scalp) — top sweep + rejection close, fast trade
+- `WAIT_REACTION` — consolidation after impulse, no signature yet
+- `ENTER_NOW` (short, continuation) — failed push higher + range exit down
+- `BIAS_FLIP` — new HH prints + body holds above prior high, invalidates short
+
+---
+
+## Impulse-Exhaustion Logic — PROPOSED
+
+Derived from Examples 034–035. Applies whenever a clean directional impulse approaches a meaningful liquidity / prior-extreme area and begins to lose momentum.
+
+- **Clean impulse is not permission to keep buying / selling.** A bullish impulse is valid only while price has room to a target.
+- **Approach into upper liquidity / prior high degrades long quality.** `entry_quality` for new longs drops to low automatically.
+- **Consolidation at the top = no new longs.** `consolidation_after_impulse = true` triggers `long_bias_exit = true`, regardless of candle color/size.
+- **Sweep at the top is an exhaustion signal, not an entry-up signal.** Watch for reversal or short scalp, not continuation long.
+- **Failed push higher confirms bearish read.** Range exit downward + no new high = `bearish_continuation_after_failure = true`.
+- **Slow bearish continuation is still valid.** If price keeps filling levels and cannot reclaim structure, short reentries remain valid even when momentum looks weak.
+- **Location-aware candle reading.** A strong green near the impulse origin is useful. The same strong green into prior high / liquidity is exhaustion risk.
+- **Separate early clean-impulse entries from late chase entries.** Always log `entry_quality` and `late_long_risk` so the audit shows which type of entry was considered.
+
+**Audit fields proposed (for impulse-exhaustion logic):**
+
+| Field | Purpose |
+|---|---|
+| `clean_bullish_impulse` | Bool — true while impulse has room and structure intact |
+| `impulse_origin` | Reference level/price for the start of the impulse (used for `late_long_risk` distance check) |
+| `upper_liquidity_target` | Price level of the prior high / upper liquidity pool |
+| `top_sweep_or_exhaustion` | Enum: `sweep` / `exhaustion` / `both` / `none` |
+| `consolidation_after_impulse` | Bool — multiple bars with small bodies + overlap after impulse |
+| `long_bias_exit` | Bool — true once consolidation prints at top OR sweep + rejection prints |
+| `failed_push_higher` | Bool — range exit down + no new high (mirror: `failed_push_lower` for bearish impulses) |
+| `bearish_continuation_after_failure` | Bool — short continuation armed after failed push higher |
+| `slow_level_fill` | Bool — continuation prints level-by-level, low momentum, still valid |
+| `late_long_risk` | Bool — entry would land far from impulse origin without fresh higher low |
+| `short_scalp_valid` | Bool — top sweep + rejection close confirmed, fast scalp window open |
+| `entry_quality` | Enum: high / medium / low — degraded automatically near liquidity targets (reused from 032–033) |
+| `exit_reason` | Enum: `upper_liquidity_reached` / `consolidation_at_top` / `failed_push_higher` / `chase_distance` / `mid_range_no_confirmation` / `signature_invalidated` |
+| `htf_context_id` | ID of the HTF example providing context (e.g. 034) |
+| `execution_pair_id` | ID of the LTF example providing the trigger (e.g. 035) |
+
+---
+
+*Add next example below as Example 036*
 
 **Next planned batch:**
 - TBD by Om
