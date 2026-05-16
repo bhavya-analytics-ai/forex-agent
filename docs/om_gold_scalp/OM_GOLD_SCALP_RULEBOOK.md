@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 27 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027])
+**Examples collected:** 29 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -1867,8 +1867,153 @@ Derived from Examples 026–027. Applies whenever a news or liquidity-style disp
 
 ---
 
-*Add next example below as Example 028*
+## Paired 15M / 5M Range-Break Failed-Reclaim Context-Execution — Examples 028–029
+
+This pair teaches that candle appearance alone does not trigger an entry. A green candle that cannot reclaim is bearish. A red candle that holds structure is continuation. Zone behavior and follow-through — not bar color or size — decide the scalp.
+
+---
+
+### Example 028
+
+- **example_id:** 028
+- **timeframe:** 15M
+- **layer:** context
+- **paired_with:** 029 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/028_15m_range_support_break_failed_reclaim_bearish_continuation.png`
+
+**Om notes:**
+- 15M shows a range support / S-R zone that held repeatedly before resolving.
+- Support eventually breaks — but the initial bearish candle alone is not the entry trigger.
+- Scanner must wait for either reclaim failure or continuation confirmation on the lower timeframe before sizing the idea.
+- A break candle without follow-through is a fake-break risk. Follow-through is what separates fakeout from continuation.
+- After the failed reclaim, structure prints lower highs → bearish continuation confirmed.
+
+**Observed setup moments:**
+- Range support tested multiple times before resolution
+- Breakdown candle through support (body close below)
+- Reclaim attempt: price returns to support from below
+- Reclaim fails: body close back below the broken level
+- Lower-high continuation on 15M → bearish bias locked in
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | range_support: holding_support → broken_support → underside_retest → failed_reclaim |
+| `support_hold_failed` | true |
+| `reclaim_attempt` | true |
+| `reclaim_failed` | true |
+| `follow_through_confirmed` | true (lower-high prints after reclaim failure) |
+| `htf_magnet` | next 15M structure level below |
+| `bias_source` | 15M structure — bearish after failed reclaim + lower high |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 15M `support_hold_failed = true` alone does not arm `ENTER_NOW` — only sets `setup_action = WAIT_REACTION`.
+- Confirmation requires `reclaim_attempt = true` AND `reclaim_failed = true`, OR `follow_through_confirmed = true` (lower high after break).
+- Without confirmation, treat the break candle as fakeout risk — `setup_action = WAIT_REACTION`.
+- After confirmation, 15M sets `bias_source = bearish` and `htf_magnet` to the next lower 15M structure level for 5M execution.
+- 15M does not generate entries on this example — it sets context for paired 5M trigger.
+
+**Action labels:**
+- `BIAS_ONLY` — 15M context, no entry trigger at this layer
+- Pairs with Example 029 for execution
+
+---
+
+### Example 029
+
+- **example_id:** 029
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 028 (15M context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/029_5m_from_028_failed_reclaim_short_entry_continuation.png`
+
+**Om notes:**
+- Execution view of the 028 breakdown.
+- Support fails on 5M. A green candle prints that LOOKS healthy — but it cannot reclaim or hold above the broken level.
+- A red candle prints that may look weak — but structure remains bearish (lower high, body close below).
+- Candle appearance alone is misleading. The trigger is zone behavior: did the reclaim attempt succeed, or did it fail?
+- Short entry is valid only after failed reclaim or lower-high continuation — NOT on the first breakdown candle impulse.
+- This is the textbook example of `candle_strength_mismatch` — bar color and body size do not match the structural reality.
+
+**Observed setup moments:**
+- 5M breakdown candle through support (matches 15M break)
+- Green retest candle into broken support — body cannot close back above
+- Red continuation candle — body holds below the broken level
+- Structure: lower high prints on 5M → continuation entry confirmed
+- Short entry on the close of the lower-high continuation candle
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | broken_support → underside_retest → failed_reclaim |
+| `support_hold_failed` | true |
+| `reclaim_attempt` | true (green candle into level) |
+| `reclaim_failed` | true (body could not close above) |
+| `candle_strength_mismatch` | true — green looked strong but failed structurally; red looked weak but held bias |
+| `follow_through_confirmed` | true (lower high after retest failure) |
+| `continuation_entry` | true |
+| `htf_context_id` | 028 |
+| `execution_pair_id` | 029 |
+| `paired_context_id` | 028 |
+| `ema200_relation` | below_ema200 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Breakdown candle | Observation only — no entry on first impulse |
+| Reclaim attempt | Green retest candle into broken support |
+| Failed reclaim | Body close back below broken level — confirms bearish |
+| Short entry | After failed reclaim AND lower high on 5M |
+| Short SL | Above failed reclaim wick / above the reclaim attempt high + 2 pts |
+| Short TP | Next 15M structure level below (htf_magnet from 028) |
+| Invalidation | Body close back above broken support + acceptance candle |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 5M `setup_action = ENTER_NOW` (short) requires: `support_hold_failed = true` AND (`reclaim_failed = true` OR `follow_through_confirmed = true`).
+- First breakdown candle alone → `setup_action = WAIT_REACTION`. Never enter on the impulse bar.
+- `candle_strength_mismatch = true` audit flag set when bar color/size contradicts structural state — used as a calibration metric, not an entry gate.
+- A reclaim attempt is judged by close, not by wick or body size. Wick above the broken level + body close below = `reclaim_failed = true`.
+- `continuation_entry = true` requires a lower high after `reclaim_failed`. Until then, hold at `WAIT_REACTION`.
+- Bias and target derive from paired 15M context (Example 028) — 5M cannot generate this trigger without the 15M map.
+
+**Action labels:**
+- `WAIT_REACTION` — breakdown printed, no reclaim attempt or follow-through yet
+- `ENTER_NOW` (short) — failed reclaim + lower-high continuation confirmed
+- `SKIP_CHASE` — entering on the first breakdown candle before confirmation
+- `BIAS_FLIP` — body close back above broken support + acceptance candle = invalidate short
+
+---
+
+## Range-Break Failed-Reclaim Logic — PROPOSED
+
+Derived from Examples 028–029. Applies to any range support or S-R zone that breaks down on 15M and requires 5M confirmation before entry.
+
+- **A break candle alone is not an entry.** First breakdown bar sets attention, never `ENTER_NOW`.
+- **Confirmation has two valid forms:** reclaim attempt that fails (`reclaim_failed = true`), OR follow-through that prints a lower high (`follow_through_confirmed = true`).
+- **Candle color and size do not trigger.** A green retest candle that cannot reclaim is bearish. A red continuation candle that holds structure is bearish continuation.
+- **The reclaim is judged by close, not by wick.** Wick into the broken level + body close below = failure.
+- **15M owns context, 5M owns execution.** Bias and target come from the 15M map; entry signature comes from 5M zone behavior.
+- **No entry without follow-through.** `continuation_entry = true` is the gate; until then, hold at `WAIT_REACTION`.
+
+**Audit fields proposed (for range-break failed-reclaim logic):**
+
+| Field | Purpose |
+|---|---|
+| `support_hold_failed` | Bool — true when a previously respected support breaks |
+| `reclaim_attempt` | Bool — true when price returns to broken level from below |
+| `reclaim_failed` | Bool — true when reclaim body close cannot hold above |
+| `candle_strength_mismatch` | Bool — bar color/size contradicts structural state (calibration metric) |
+| `follow_through_confirmed` | Bool — true when a lower high (or higher low) prints after the break |
+| `continuation_entry` | Bool — true when all confirmation conditions for entry are met |
+| `htf_context_id` | ID of the HTF example providing context (e.g. 028) |
+| `execution_pair_id` | ID of the LTF example providing the trigger (e.g. 029) |
+
+---
+
+*Add next example below as Example 030*
 
 **Next planned batch:**
-- 028 / 029 = 15M sweep reclaim → 5M long
 - 030 / 031 = 15M chop / EMA conflict → 5M skip
