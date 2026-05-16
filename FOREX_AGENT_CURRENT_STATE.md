@@ -87,10 +87,11 @@ All items below are committed and deployed on Railway.
 - Not starting until labeled examples are collected
 
 **Screenshot calibration:**
-- **In progress — 13 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
+- **In progress — 21 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
 - Examples 001–005: 1H context layer (bearish freefall, FVG magnet, zone flip, news impulse, liquidity sweep)
 - Examples 006–013: 15M setup layer (failed retest, bearish continuation into lower zone, bullish breakout pullback, sweep reclaim reversal, zone-to-zone continuation, breakdown impulse, FVG fill rejection, zone magnet reclaim)
-- Images 006–013: IMAGE FILE PENDING (Om to place manually)
+- Examples 014–021: 5M trigger layer (failed reclaim short/long reversal, zone reclaim bullish multi-TP, trend pullback reentry, range breakdown flip, news fakeout reclaim impulse, multi-setup zone-to-zone, chop skip, bearish breakdown retest continuation) — all PROPOSED scanner rules, no code written
+- All screenshot files committed — `9793c93`
 - Core OM Concepts: zone_flip, failed_reclaim, fvg_magnet, liquidity_sweep, breakout_impulse, news_impulse, fakeout, reversal_candidate, continuation_pullback (14 total)
 - 15M Setup Layer Rules section added: zone_state enum, setup_action enum, chase filter, fvg_relation enum, reaction-zone logic, continuation setup logic, proposed thresholds
 - Scanner reads OHLC candle data only — no pixel/image reading
@@ -231,7 +232,8 @@ Claude must:
 
 ---
 
-*Last updated: 2026-05-15*
+*Last updated: 2026-05-16*
 *Quality gate live: af467c4*
 *Market hours guard live: 6089318*
 *Dedup/lifecycle live: f486303*
+*5M trigger layer examples committed: 9793c93*
