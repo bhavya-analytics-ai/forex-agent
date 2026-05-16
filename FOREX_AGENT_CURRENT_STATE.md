@@ -87,11 +87,13 @@ All items below are committed and deployed on Railway.
 - Not starting until labeled examples are collected
 
 **Screenshot calibration:**
-- **In progress — 21 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
-- Examples 001–005: 1H context layer (bearish freefall, FVG magnet, zone flip, news impulse, liquidity sweep)
+- **In progress — 25 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
+- Examples 001–005: 1H standalone/context examples (bearish freefall, FVG magnet, zone flip, news impulse, liquidity sweep)
 - Examples 006–013: 15M setup layer (failed retest, bearish continuation into lower zone, bullish breakout pullback, sweep reclaim reversal, zone-to-zone continuation, breakdown impulse, FVG fill rejection, zone magnet reclaim)
 - Examples 014–021: 5M trigger layer (failed reclaim short/long reversal, zone reclaim bullish multi-TP, trend pullback reentry, range breakdown flip, news fakeout reclaim impulse, multi-setup zone-to-zone, chop skip, bearish breakdown retest continuation) — all PROPOSED scanner rules, no code written
-- All screenshot files committed — `9793c93`
+- Examples 022–025: paired 1H/5M context-execution examples (022+023 = multi-zone breakdown + upper rejection → lower sweep reclaim; 024+025 = repeated S1 breakdown + failed reclaim → S2 magnet). Introduces 1H → 5M pair logic and audit fields `htf_zone_map`, `htf_magnet`, `zone_tests_count`, `zone_strength_decay`, `zone_role_flip`, `paired_context_id`
+- All screenshot files committed — 5M batch `9793c93`
+- Next planned: 026/027 (15M failed reclaim → 5M short), 028/029 (15M sweep reclaim → 5M long), 030/031 (15M chop/EMA conflict → 5M skip)
 - Core OM Concepts: zone_flip, failed_reclaim, fvg_magnet, liquidity_sweep, breakout_impulse, news_impulse, fakeout, reversal_candidate, continuation_pullback (14 total)
 - 15M Setup Layer Rules section added: zone_state enum, setup_action enum, chase filter, fvg_relation enum, reaction-zone logic, continuation setup logic, proposed thresholds
 - Scanner reads OHLC candle data only — no pixel/image reading

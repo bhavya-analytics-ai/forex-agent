@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 13 (5 × 1H context + 8 × 15M setup, examples 006–013)
+**Examples collected:** 25 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -1508,4 +1508,231 @@ For price moving between zones in a clear directional trend:
 
 ---
 
-*Add next example below as Example 022*
+## Paired 1H / 5M Context-Execution — Examples 022–025
+
+These four examples come in two pairs. Each pair shows the 1H context map alongside the 5M execution view of the same price action. They teach the scanner how higher-timeframe zones define magnets and bias, while 5M confirms whether to enter, wait, flip, or skip.
+
+---
+
+### Example 022
+
+- **example_id:** 022
+- **timeframe:** 1H
+- **layer:** context
+- **paired_with:** 023 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/022_1h_multi_zone_context_breakdown_sweep_reclaim_map.png`
+
+**Om notes:**
+- Multi-zone 1H map. Several HTF zones stacked above and below current price.
+- Price breaks down through an upper zone, travels toward a lower support, then later sweeps and reclaims.
+- 1H zones are the battlefield — they define directional magnets, not instant entries.
+- A 1H zone touch is never an entry by itself; it sets the bias and target for lower-timeframe execution.
+
+**Observed setup moments:**
+- Upper zone acts as resistance / breakdown level
+- Price travels through the gap toward lower zone
+- Lower zone shows sweep + reclaim reaction
+- 1H structure remains the magnet map — no execution decisions made at this layer
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | broken_resistance (upper) → magnet pull → sweep + reclaim (lower) |
+| `price_relation` | between stacked HTF zones |
+| `htf_zone_count` | multi (≥ 2 active zones) |
+| `htf_role` | upper = resistance/broken, lower = support/magnet |
+| `bias_source` | 1H zone map defines directional bias |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 1H multi-zone state populates `htf_zone_map` audit field with each zone's price, type, and last interaction.
+- 1H touches alone never set `setup_action = ENTER_NOW`. They only set bias and magnet targets for 5M.
+- After 1H breakdown of an upper zone, the next lower 1H zone becomes the magnet target until proven otherwise.
+- Reclaim of a broken 1H zone flips bias; failed reclaim confirms continuation toward lower magnet.
+
+**Action labels:**
+- `BIAS_ONLY` — 1H context, no entry trigger at this layer
+- Pairs with Example 023 for execution
+
+---
+
+### Example 023
+
+- **example_id:** 023
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 022 (1H context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/023_5m_upper_zone_rejection_short_to_lower_zone_sweep_reclaim_long.png`
+
+**Om notes:**
+- 5M view of the same price action mapped on 1H (022).
+- Upper-zone rejection on 5M → short continuation toward lower-zone magnet.
+- Lower-zone sweep + reclaim on 5M → flip bias to long only AFTER reclaim is confirmed.
+- The scanner must not flip long on first touch of the lower zone — wait for sweep + reclaim signature.
+
+**Observed setup moments:**
+- Upper zone touch + rejection candle on 5M → short entry
+- Continuation pullbacks during travel = short reentries, not reversals
+- Lower zone sweep (wick into zone) → not yet a long
+- Reclaim candle (body closes back above sweep level) → long flip valid
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | upper: rejecting_resistance → lower: liquidity_sweep → reclaimed_zone |
+| `price_relation` | traveling between HTF zones |
+| `ema200_relation` | follows 5M EMA 200 — short while below, long after reclaim above |
+| `reaction_signature` | wick into lower zone + body close back inside = reclaim confirmation |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Short entry | Upper zone rejection candle on 5M |
+| Short SL | Upper zone high + 2 pts |
+| Short TP | Lower zone (1H magnet from 022) |
+| Long entry | Lower zone sweep + reclaim candle close |
+| Long SL | Below sweep wick low + 2 pts |
+| Long TP | Mid-range or upper zone underside |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `rejecting_resistance` at HTF upper zone → `setup_action = ENTER_NOW` (short) when 5M body confirms rejection.
+- `liquidity_sweep` at HTF lower zone alone → `setup_action = WAIT_REACTION` (no entry yet).
+- `liquidity_sweep` + `reclaimed_zone` at HTF lower zone → `setup_action = ENTER_NOW` (long flip).
+- First touch of a lower zone is never an instant long — sweep + reclaim signature is required.
+- Bias derives from paired 1H context (Example 022) — 5M cannot override 1H magnet direction without reclaim proof.
+
+**Action labels:**
+- `ENTER_NOW` (short) — upper zone rejection on 5M
+- `WAIT_REACTION` — first touch of lower zone, no reclaim yet
+- `ENTER_NOW` (long) — lower zone sweep + reclaim confirmed
+- `SKIP_CHASE` — entering long mid-travel before sweep/reclaim signature
+
+---
+
+### Example 024
+
+- **example_id:** 024
+- **timeframe:** 1H
+- **layer:** context
+- **paired_with:** 025 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/024_1h_context_repeated_support1_breakdown_to_support2_magnet.png`
+
+**Om notes:**
+- 1H context showing Support 1 tested multiple times, then breaking down toward Support 2.
+- A repeatedly tested support weakens. Each test absorbs buyers and exposes the zone to a clean break.
+- Once Support 1 breaks AND fails to reclaim, Support 2 becomes the next 1H magnet.
+- Do not long a broken support just because price returns to it — once broken, treat it as resistance until reclaimed cleanly.
+
+**Observed setup moments:**
+- Multiple 1H touches at Support 1 (3+ tests in this example)
+- Eventual breakdown candle through Support 1
+- Failed reclaim attempt at Support 1 from underside
+- Continuation toward Support 2 magnet
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | Support 1: support → broken_support → underside_retest → failed_reclaim |
+| `zone_tests_count` | Support 1 ≥ 3 (weakened) |
+| `htf_role` | Support 1 = old support / now resistance; Support 2 = active magnet |
+| `bias_source` | 1H breakdown + failed reclaim = bearish bias toward Support 2 |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- Track `zone_tests_count` per HTF zone in audit. ≥ 3 tests = `zone_strength_decay = true`.
+- Once a weakened support breaks, `zone_role_flip` activates: old support becomes resistance.
+- Failed reclaim at old support → set `htf_magnet` to the next lower 1H zone (Support 2).
+- Repeated test count is a leading indicator of breakdown risk — do not weight first touch the same as fourth touch.
+
+**Action labels:**
+- `BIAS_ONLY` — 1H context, no entry trigger at this layer
+- Pairs with Example 025 for execution
+
+---
+
+### Example 025
+
+- **example_id:** 025
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 024 (1H context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/025_5m_from_024_failed_reclaim_support1_short_to_support2.png`
+
+**Om notes:**
+- 5M view of the same price action mapped on 1H (024).
+- After Support 1 breakdown, 5M shows failed reclaim attempt — body cannot close back above Support 1.
+- Failed reclaim confirms short continuation toward Support 2.
+- Do not long the return to Support 1. Once broken, it is resistance. Short on reclaim failure.
+
+**Observed setup moments:**
+- 5M breakdown candle through Support 1 (matches 1H breakdown)
+- Pullback to Support 1 from underside (underside_retest)
+- Reclaim attempt fails — body closes below Support 1 again
+- Continuation move toward Support 2
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | broken_support → underside_retest → failed_reclaim |
+| `price_relation` | below Support 1, traveling to Support 2 |
+| `ema200_relation` | below_ema200 throughout |
+| `htf_magnet` | Support 2 (from 024 context) |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Short entry | Failed reclaim of Support 1 confirmed (body closes below after retest) |
+| Short SL | Above Support 1 high + 2 pts (above failed reclaim wick) |
+| Short TP | Support 2 (1H magnet from 024) — 15–30 pts |
+| Pullback reentry | Any pullback to Support 1 underside = short reentry, not long |
+| Reversal condition | Body closes above Support 1 AND holds = invalidates short setup |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `underside_retest` + `failed_reclaim` at a recently broken HTF zone → `setup_action = ENTER_NOW` (short).
+- Long entries at a recently broken support are filtered out unless `reclaimed_zone` AND `body_close_above` AND `holds_next_candle` are all true.
+- Target = next lower HTF zone (Support 2) from paired 1H context.
+- Pullbacks during continuation are reentries in the same direction, not reversals.
+
+**Action labels:**
+- `ENTER_NOW` (short) — failed reclaim of Support 1
+- `SKIP_CHASE` (long) — touch of broken Support 1 from below without reclaim
+- `WAIT_BREAK_CONFIRMATION` (long) — would require clean reclaim above Support 1 + EMA 200
+
+---
+
+## 1H → 5M Pair Logic — PROPOSED
+
+Derived from Examples 022–025. These rules apply across all paired context-execution examples and govern how the scanner uses HTF context to qualify or disqualify 5M triggers.
+
+- **1H defines zones, magnets, and major bias.** It does not generate entries.
+- **5M confirms execution.** Entries fire on 5M only when the trigger aligns with 1H bias or with a clean 1H flip signal.
+- **A zone touch alone is not an entry.** Touch sets attention; entry requires a confirmation signature on 5M.
+- **Reclaim = possible reversal.** A clean reclaim of a broken zone (body close back inside + hold) flips bias.
+- **Failed reclaim = continuation.** An underside retest that closes back through the broken side confirms continuation in the breakdown direction.
+- **Repeated support tests weaken the level.** `zone_tests_count ≥ 3` raises breakdown risk and lowers the long entry priority at that zone.
+- **After breakdown, old support becomes resistance** unless reclaimed cleanly. Long entries at a recently broken support are filtered out until reclaim is proven.
+- **Lower HTF zone becomes magnet after failed reclaim.** Once Support 1 fails to reclaim, Support 2 (next 1H zone) becomes the active `htf_magnet` target.
+
+**Audit fields proposed (for paired logic):**
+
+| Field | Purpose |
+|---|---|
+| `htf_zone_map` | List of active 1H zones with price, type, last interaction |
+| `htf_magnet` | Current directional target derived from 1H state |
+| `zone_tests_count` | Per-zone touch counter (≥ 3 = weakened) |
+| `zone_strength_decay` | Bool — true when repeated tests weaken the level |
+| `zone_role_flip` | Bool — true when broken support is now acting as resistance |
+| `paired_context_id` | Cross-reference to the 1H example backing this 5M trigger |
+
+---
+
+*Add next example below as Example 026*
+
+**Next planned batch:**
+- 026 / 027 = 15M failed reclaim → 5M short
+- 028 / 029 = 15M sweep reclaim → 5M long
+- 030 / 031 = 15M chop / EMA conflict → 5M skip
