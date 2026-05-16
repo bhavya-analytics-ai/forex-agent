@@ -87,6 +87,7 @@ All items below are committed and deployed on Railway.
 - Not starting until labeled examples are collected
 
 **Screenshot calibration:**
+- **Core Market Structure Definitions layer added** to rulebook (top of file, before examples). Defines 14 operational terms: liquidity sweep, breakout, fake breakout, reclaim, failed reclaim, retest, continuation, reversal, CHoCH, BOS, range/chop, displacement, pullback, late entry/chase. Includes scanner principle: candle appearance alone is never enough — HTF zone + sweep/break/reclaim + EMA/trend + structure shift + retest/follow-through + R:R must combine before `ENTER_NOW`. All existing examples reference these definitions; future examples must reuse the same vocabulary.
 - **In progress — 31 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
 - Examples 001–005: 1H standalone/context examples (bearish freefall, FVG magnet, zone flip, news impulse, liquidity sweep)
 - Examples 006–013: 15M setup layer (failed retest, bearish continuation into lower zone, bullish breakout pullback, sweep reclaim reversal, zone-to-zone continuation, breakdown impulse, FVG fill rejection, zone magnet reclaim)

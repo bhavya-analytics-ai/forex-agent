@@ -42,6 +42,105 @@ Every example must include the following fields:
 
 ---
 
+## Core Market Structure Definitions
+
+These definitions are the operational vocabulary used by every example below and by every PROPOSED scanner rule in this document. They are written in plain operational language so future code can map each term directly to a candle/zone condition without guessing.
+
+Every example below uses these terms with the meanings defined here. If a definition needs to evolve, update it here first and re-validate the examples that depend on it.
+
+---
+
+**1. Liquidity sweep**
+Price takes out a visible previous high/low or zone edge, then fails to continue in the sweep direction and returns back inside prior structure.
+- **Bullish sweep** = price takes a visible low / support edge, then reclaims back above it.
+- **Bearish sweep** = price takes a visible high / resistance edge, then rejects back below it.
+- The wick beyond the level is the sweep. The close back inside is the proof.
+
+**2. Breakout**
+Price closes outside a key zone or level with displacement and does not immediately return inside.
+- Requires a body close outside the level (not just a wick).
+- A valid breakout requires hold + retest + follow-through.
+- Without follow-through, treat as fake breakout candidate.
+
+**3. Fake breakout**
+Price breaks a level but quickly returns inside the prior range or zone.
+- Treat as a sweep / trap until confirmed otherwise.
+- Often the start of a reversal in the opposite direction.
+
+**4. Reclaim**
+Price loses a level (closes through it), then recovers it (closes back on the original side) and holds.
+- Reclaim requires a body close back across the level AND a holding candle (next bar does not re-break).
+
+**5. Failed reclaim**
+Price attempts to recover a broken level but cannot hold it — body closes back on the broken side.
+- Strong evidence for continuation in the original breakout direction.
+- The failed reclaim wick + close marks the new resistance (after support break) or new support (after resistance break).
+
+**6. Retest**
+Price returns to a broken level or zone after a breakout.
+- **Good retest** — holds in the new role (broken support holds as resistance / broken resistance holds as support).
+- **Bad retest** — fails and re-enters the prior range. Warns of fakeout or reversal.
+
+**7. Continuation**
+Price resumes the same direction after a pullback, retest, or consolidation.
+- **Bullish continuation** = higher low + retest hold + follow-through up.
+- **Bearish continuation** = lower high + retest fail + follow-through down.
+
+**8. Reversal**
+Price stops continuing in the old direction and starts building opposite structure.
+- One candle is never enough to call a reversal.
+- **Bullish reversal** requires: sweep / reclaim OR bearish failure + break of a minor lower high + higher low + follow-through.
+- **Bearish reversal** requires: sweep / rejection OR bullish failure + break of a minor higher low + lower high + follow-through.
+
+**9. CHoCH (Change of Character)**
+First warning that price behavior may be shifting.
+- **Bullish CHoCH** = a bearish sequence breaks a recent lower high.
+- **Bearish CHoCH** = a bullish sequence breaks a recent higher low.
+- CHoCH is a warning, not an entry. Treat as `WAIT_REACTION` until BOS or retest confirms.
+
+**10. BOS (Break of Structure)**
+Stronger confirmation than CHoCH — confirms a new trend leg in the new direction.
+- **Bullish BOS** = breaks the prior swing high after a higher low prints.
+- **Bearish BOS** = breaks the prior swing low after a lower high prints.
+
+**11. Range / chop**
+Sideways price inside a zone with no clean direction.
+- EMA flat or crossing.
+- Repeated failed signals, multiple fakeouts.
+- Scanner should mark `setup_action = SKIP_CHOP` (no trade) or scalp-only with explicit chop flag.
+
+**12. Displacement**
+A strong directional move with large candles and little overlap between bars.
+- Displacement alone is not an entry — it must be judged together with zone context.
+- A displacement candle at a HTF zone edge is a setup; the same candle mid-range is noise.
+
+**13. Pullback**
+A temporary move against the main direction.
+- Useful only if it holds or fails at a meaningful zone, EMA, or structural level.
+- A pullback into open air (no level) is chop, not a setup.
+
+**14. Late entry / chase**
+The signal appears after price has already moved far from the origin level or zone.
+- Direction may still be correct, but the trade should be skipped if R:R is poor.
+- `SKIP_CHASE` fires when entry would require an SL beyond the configured maximum or TP too close.
+
+---
+
+### Scanner principle — candle appearance alone is never enough
+
+Bar color, body size, or single-candle strength is never sufficient to trigger an entry. The scanner must combine ALL of the following before arming `ENTER_NOW`:
+
+- HTF zone context (1H / 15M map: where is price relative to the active zones?)
+- Sweep / break / reclaim behavior (what did price do at the relevant level?)
+- EMA / trend state (is price aligned with or against EMA 200 and recent slope?)
+- Structure shift (CHoCH or BOS — has the structure actually changed?)
+- Retest / follow-through (did the new direction get confirmed by a hold?)
+- Risk / reward location (is the trade still worth taking given SL and TP distance?)
+
+A green candle that looks healthy can still fail if zone context, structure, EMA, and follow-through disagree. A red candle that looks weak can be valid continuation if the same factors agree. The scanner reads the combination, not the appearance.
+
+---
+
 ## Examples
 
 ---
