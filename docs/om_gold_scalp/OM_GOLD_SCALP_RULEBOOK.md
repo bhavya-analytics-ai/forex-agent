@@ -964,4 +964,548 @@ For price moving between zones in a clear directional trend:
 
 ---
 
-*Add next example below as Example 014*
+---
+
+## 5M Trigger Layer — Examples 014–021
+
+> These are 5M trigger-layer examples.
+> Purpose: identify exact entry candle conditions, multi-setup routing, and skip/wait logic at the 5M level.
+> All scanner_rule_learned entries are PROPOSED. None affect live scanner code.
+
+---
+
+### Example 014
+
+| Field | Value |
+|---|---|
+| `example_id` | 014 |
+| `screenshot_path` | `docs/om_gold_scalp/examples/014_5m_failed_reclaim_short_retest_continuation_long_reversal.png` |
+| `timeframe` | 5M |
+| `layer` | trigger |
+| `date_range_visible` | UNKNOWN |
+| `session_context` | UNKNOWN |
+| `news_context` | UNKNOWN |
+| `move_type` | dual — short continuation / long reversal |
+| `Om bias` | Short on failed reclaim; flip long on lower zone sweep + reclaim |
+| `label` | Failed reclaim short continuation → lower zone sweep → long reversal |
+| `use` | Trigger layer — entry logic for both short continuation and long reversal flip |
+| `code_status` | proposed |
+
+**Om notes:**
+- Price attempts to reclaim a broken zone from below — fails, closes back below
+- Failed reclaim on 5M confirms short continuation — enter or add short
+- Price then sweeps the lower purple zone (liquidity_sweep)
+- If sweep is followed by reclaim of lower zone from below → flip to long reversal
+- Two distinct setups on same chart — scanner must evaluate separately
+
+**Observed setup moments:**
+- Failed reclaim: wick into zone, body closes below → short continuation entry
+- Lower zone sweep: wick below lower zone, body reclaims → long reversal setup
+- Each setup has its own SL and TP
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `upper_zone_state` | broken_support → failed_reclaim (resistance confirmed) |
+| `lower_zone_state` | liquidity_sweep → reclaimed_zone (support candidate) |
+| `price_relation` | below upper zone / at lower zone |
+| `freefall_context` | true during short phase; reversing during long phase |
+| `fvg_nearby` | likely — impulse legs create imbalance |
+| `fvg_direction` | bearish (short phase) → bullish (long phase) |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Short entry | Failed reclaim of upper zone confirmed on 5M |
+| Short SL | Above upper zone (above failed reclaim wick high) |
+| Short TP | Lower zone level (15–30 pts) |
+| Long flip | Lower zone sweep + reclaim confirmed on 5M |
+| Long SL | Below lower zone (below sweep wick low) |
+| Long TP | Back toward upper zone or next resistance (15–25 pts) |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `failed_reclaim` on 5M + body below zone → `setup_action = ENTER_NOW` (short)
+- Short SL = upper zone high + buffer (2 pts)
+- After short TP hit or lower zone reached: switch evaluation to `liquidity_sweep` check
+- `liquidity_sweep` at lower zone + body reclaim → flip bias to long, `setup_action = ENTER_NOW` (long)
+- Scanner must not stay in short-continuation mode after lower zone sweep reclaim
+
+**Action labels:**
+- `ENTER_NOW` (short) — failed reclaim confirmed
+- `ENTER_NOW` (long) — lower zone sweep + reclaim confirmed
+- `WAIT_RETEST` — break confirmed but retest not yet occurred
+- `SKIP_CHASE` — extended > 25 pts from trigger
+
+---
+
+### Example 015
+
+| Field | Value |
+|---|---|
+| `example_id` | 015 |
+| `screenshot_path` | `docs/om_gold_scalp/examples/015_5m_zone_reclaim_bullish_continuation_multi_tp.png` |
+| `timeframe` | 5M |
+| `layer` | trigger |
+| `date_range_visible` | UNKNOWN |
+| `session_context` | UNKNOWN |
+| `news_context` | UNKNOWN |
+| `move_type` | long continuation |
+| `Om bias` | Bullish — zone reclaimed, hold for multiple TP levels |
+| `label` | Zone reclaim bullish continuation — multi-TP structure |
+| `use` | Trigger layer — entry after zone reclaim, scale out at TP1/TP2/TP3 |
+| `code_status` | proposed |
+
+**Om notes:**
+- Price reclaims purple zone on 5M (closes above and holds)
+- Bullish continuation — do not exit the full position at first target
+- Multiple TP levels: TP1 (15 pts), TP2 (25 pts), TP3 (35–40 pts)
+- Partial exit at TP1, hold runner to TP2/TP3
+- Don't exit too early on a strong reclaim move — let momentum play out
+
+**Observed setup moments:**
+- Zone reclaim: 5M body closes above zone and holds
+- Long entry on first pullback or confirmation candle after reclaim
+- TP1 at nearest resistance (15 pts)
+- TP2 at next purple zone (25 pts)
+- TP3 at extended zone or session high (35–40 pts)
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | reclaimed_zone → holding_support |
+| `price_relation` | above reclaimed zone |
+| `freefall_context` | false — bullish continuation |
+| `fvg_nearby` | possible below (created during break down before reclaim) |
+| `fvg_direction` | bullish |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Long entry | Zone reclaim + hold confirmed on 5M |
+| SL | Below reclaimed zone (below zone low − 2 pts buffer) |
+| TP1 | +15 pts from entry (partial exit) |
+| TP2 | +25 pts from entry (partial exit) |
+| TP3 | +35–40 pts from entry (runner / full close) |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `zone_state = reclaimed_zone` + hold confirmation → `setup_action = ENTER_NOW` (long)
+- Output TP1, TP2, TP3 as separate target levels based on next identified zones
+- TP1 = nearest resistance (15 pts floor)
+- TP2 = next purple zone above (25 pts floor)
+- TP3 = extended target (capped at 40 pts initially)
+- Scanner should flag multi-TP structure when zone distance supports it
+
+**Action labels:**
+- `ENTER_NOW` — reclaim + hold confirmed, momentum bullish
+- `WAIT_RETEST` — reclaim occurred but no pullback hold yet
+- `SKIP_CHASE` — price > 25 pts above zone without pullback
+
+---
+
+### Example 016
+
+| Field | Value |
+|---|---|
+| `example_id` | 016 |
+| `screenshot_path` | `docs/om_gold_scalp/examples/016_5m_trend_long_pullback_reentry_short_skip.png` |
+| `timeframe` | 5M |
+| `layer` | trigger |
+| `date_range_visible` | UNKNOWN |
+| `session_context` | UNKNOWN |
+| `news_context` | UNKNOWN |
+| `move_type` | trend long + countertrend short skip |
+| `Om bias` | Bullish trend — longs on pullback valid; countertrend shorts skip unless strong confirmation |
+| `label` | Trend long pullback reentry — countertrend short skip |
+| `use` | Trigger layer — long reentries in trend; skip shorts against trend unless confirmed |
+| `code_status` | proposed |
+
+**Om notes:**
+- Price in clear bullish trend on 5M (higher highs + higher lows)
+- Pullback to zone or EMA = long reentry opportunity
+- Countertrend shorts are low probability — skip unless strong rejection + displacement
+- Do not force shorts just because price pulled back into zone from above
+- Zone holds from above (topside retest) = long, not short
+
+**Observed setup moments:**
+- Bullish trend structure: higher highs + higher lows
+- Pullback to purple zone from above (topside retest)
+- Zone holds → long reentry
+- No short unless: full break below zone + body close + displacement
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | topside_retest → holding_support |
+| `price_relation` | above zone / pulling back to zone from above |
+| `freefall_context` | false — bullish trend |
+| `fvg_nearby` | possible below zone from prior leg |
+| `fvg_direction` | bullish |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Long reentry | Topside retest + zone holds on 5M |
+| Long SL | Below zone low − 2 pts buffer |
+| Long TP | Next resistance / previous high (15–25 pts) |
+| Short skip | Price at zone but trend is bullish → skip short unless full break + displacement |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- Detect trend bias: `h1_bias = bullish` + `m15_structure = higher_highs_higher_lows`
+- In bullish trend: `topside_retest` + `holding_support` → `setup_action = ENTER_NOW` (long)
+- In bullish trend: short setup at zone → `setup_action = SKIP_CHOP` unless `broken_support` + displacement > 15 pts
+- Countertrend short requires: full body close below zone + `breakout_impulse` flag
+- Default in trending market: align with trend, skip countertrend signals
+
+**Action labels:**
+- `ENTER_NOW` (long) — topside retest holds, bullish trend confirmed
+- `SKIP_CHOP` (short) — trend is bullish, countertrend short not confirmed
+- `WAIT_BREAK_CONFIRMATION` — zone being tested, no clear direction yet
+
+---
+
+### Example 017
+
+| Field | Value |
+|---|---|
+| `example_id` | 017 |
+| `screenshot_path` | `docs/om_gold_scalp/examples/017_5m_range_breakdown_short_then_long_reversal.png` |
+| `timeframe` | 5M |
+| `layer` | trigger |
+| `date_range_visible` | UNKNOWN |
+| `session_context` | UNKNOWN |
+| `news_context` | UNKNOWN |
+| `move_type` | short breakdown → long reversal flip |
+| `Om bias` | Short on range breakdown; flip long after lower sweep + reclaim |
+| `label` | Range breakdown short → lower zone sweep → long reversal |
+| `use` | Trigger layer — short on breakdown, flip long after sweep reclaim at lower level |
+| `code_status` | proposed |
+
+**Om notes:**
+- Price ranging between two zones
+- Range breaks down — short setup triggered
+- Price reaches lower zone, sweeps below it (liquidity_takeout)
+- Lower zone reclaimed → flip bias from short continuation to long reversal
+- Scanner must exit short mode and enter long evaluation after sweep reclaim
+
+**Observed setup moments:**
+- Range breakdown: price closes below lower range boundary
+- Short entry on breakdown or failed reclaim of range low
+- Price sweeps below lower purple zone
+- Sweep + reclaim → long reversal, short bias invalidated
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `upper_zone_state` | broken_support (range high → resistance) |
+| `lower_zone_state` | liquidity_sweep → reclaimed_zone |
+| `price_relation` | below range low → at lower zone |
+| `freefall_context` | true during short phase |
+| `fvg_nearby` | likely — created during breakdown leg |
+| `fvg_direction` | bearish (short) → bullish (long flip) |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Short entry | Range breakdown confirmed, body below range low |
+| Short SL | Above range low (failed break invalidation) |
+| Short TP | Lower purple zone level |
+| Long flip | Lower zone sweep + reclaim on 5M |
+| Long SL | Below sweep wick low − 2 pts |
+| Long TP | Back toward range mid or range high (15–30 pts) |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- Detect range: price oscillating between zone_high and zone_low for ≥ 5 candles
+- `range_breakdown = true` if 5M body closes below range low zone
+- `setup_action = ENTER_NOW` (short) on range breakdown confirmation
+- At lower zone: check for `liquidity_sweep` + reclaim
+- `liquidity_sweep` + reclaim → suppress short continuation, evaluate long
+- `setup_action = ENTER_NOW` (long) after lower zone reclaim confirmed
+
+**Action labels:**
+- `ENTER_NOW` (short) — range breakdown confirmed
+- `ENTER_NOW` (long) — lower zone sweep + reclaim confirmed
+- `WAIT_REACTION` — at lower zone, no sweep/reclaim confirmation yet
+- `SKIP_CHASE` — extended > 25 pts from breakdown trigger
+
+---
+
+### Example 018
+
+| Field | Value |
+|---|---|
+| `example_id` | 018 |
+| `screenshot_path` | `docs/om_gold_scalp/examples/018_5m_news_breakdown_fakeout_reclaim_long_impulse.png` |
+| `timeframe` | 5M |
+| `layer` | trigger |
+| `date_range_visible` | UNKNOWN |
+| `session_context` | UNKNOWN |
+| `news_context` | HIGH-impact event likely — news-style displacement visible |
+| `move_type` | news impulse → fakeout → reclaim → long impulse |
+| `Om bias` | Initial short bias from breakdown; flip long on strong reclaim impulse after fakeout |
+| `label` | News breakdown fakeout + reclaim → long impulse |
+| `use` | Trigger layer — news displacement can fake direction; strong reclaim impulse flips bias |
+| `code_status` | proposed |
+
+**Om notes:**
+- News event causes large displacement candle breaking structure
+- Price briefly breaks below zone — appears bearish
+- But reclaim comes fast and strong (large bullish candle through zone)
+- Fakeout confirmed: short bias was a trap
+- Strong reclaim impulse = long bias, continuation long
+- Do not fight the reclaim impulse — it is stronger than the initial breakdown
+
+**Observed setup moments:**
+- News impulse: large candle breaks zone (bearish displacement)
+- `fakeout` detected: price immediately reclaims zone with equal or larger bullish candle
+- Reclaim body close above zone + momentum → long entry
+- `news_impulse` flag active throughout
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | broken_support (briefly) → reclaimed_zone (fakeout confirmed) |
+| `price_relation` | above zone after reclaim |
+| `freefall_context` | false — fakeout, not continuation breakdown |
+| `fvg_nearby` | likely — news displacement creates imbalance |
+| `fvg_direction` | bullish (after reclaim) |
+| `news_impulse` | true |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Initial short (avoid) | News breakdown — do not enter short on first candle |
+| Fakeout confirmation | Strong reclaim candle closes above zone |
+| Long entry | First pullback after reclaim or continuation of reclaim impulse |
+| Long SL | Below fakeout wick low − 2 pts |
+| Long TP | Next resistance (15–25 pts) |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `news_impulse = true` if displacement occurs within ±60 min of HIGH-impact event
+- On `news_impulse`: do not auto-enter short on first candle — wait for confirmation
+- `fakeout = true` if price breaks zone AND reclaims within 3 candles with body close above
+- `fakeout` + `reclaimed_zone` → suppress short, `setup_action = ENTER_NOW` (long)
+- `news_impulse` flag should add caution period: wait 1–2 candles before entry decision
+
+**Action labels:**
+- `WAIT_BREAK_CONFIRMATION` — news impulse active, do not enter on first candle
+- `ENTER_NOW` (long) — fakeout confirmed, reclaim body close above zone
+- `SKIP_CHASE` — reclaim impulse already > 25 pts, wait for pullback
+
+---
+
+### Example 019
+
+| Field | Value |
+|---|---|
+| `example_id` | 019 |
+| `screenshot_path` | `docs/om_gold_scalp/examples/019_5m_multi_setup_zone_to_zone_s1_s2_l1_l2.png` |
+| `timeframe` | 5M |
+| `layer` | trigger |
+| `date_range_visible` | UNKNOWN |
+| `session_context` | UNKNOWN |
+| `news_context` | UNKNOWN |
+| `move_type` | multi-setup — S1, S2, L1, L2 |
+| `Om bias` | Multiple directional setups on one chart — each tracked independently |
+| `label` | Multi-setup zone-to-zone — S1/S2 (shorts), L1/L2 (longs), each with own SL/TP |
+| `use` | Trigger layer — scanner must track multiple sequential setup opportunities |
+| `code_status` | proposed |
+
+**Om notes:**
+- One chart can contain multiple valid setups in sequence
+- S1: first short opportunity (break + retest)
+- S2: second short opportunity (continuation or second failed reclaim)
+- L1: first long opportunity (lower zone reclaim or sweep reversal)
+- L2: second long opportunity (continuation of L1 or second zone reclaim)
+- Each has its own entry, SL, TP — they do not share risk parameters
+- Scanner must not stay locked in one setup mode after SL or TP hit
+
+**Observed setup moments:**
+- S1: first broken support + failed reclaim → short
+- S2: second rejection at resistance zone → short continuation or reentry
+- L1: lower zone sweep + reclaim → long reversal
+- L2: long continuation after L1 TP1 hit, pullback reentry
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `upper_zone_state` | broken_support → resistance (S1/S2 context) |
+| `lower_zone_state` | liquidity_sweep → reclaimed_zone (L1/L2 context) |
+| `price_relation` | moves between zones across all 4 setups |
+| `fvg_nearby` | likely between zones |
+| `fvg_direction` | bearish (S1/S2) → bullish (L1/L2) |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| S1 entry | First failed reclaim of upper zone |
+| S1 SL | Above upper zone high + 2 pts |
+| S1 TP | Lower zone level |
+| S2 entry | Second rejection at resistance (after S1 TP or S1 SL) |
+| S2 SL | Above rejection wick high + 2 pts |
+| S2 TP | Lower zone or new low |
+| L1 entry | Lower zone sweep + reclaim confirmed |
+| L1 SL | Below sweep wick low − 2 pts |
+| L1 TP1 | +15 pts / L1 TP2: +25 pts |
+| L2 entry | L1 TP1 hit → pullback to reclaimed lower zone → reentry long |
+| L2 SL | Below lower zone − 2 pts |
+| L2 TP | Next resistance (upper zone direction) |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- Scanner must track setup_sequence: `[S1, S2, L1, L2]` as independent evaluations
+- After each TP/SL: reset setup_action and re-evaluate current zone_state
+- `S1` and `S2` share same upper zone context but are separate entries
+- `L1` and `L2` share same lower zone context but are separate entries
+- Never assume previous setup is still active after TP or SL hit
+- Output: up to 4 concurrent setup candidates per zone pair per scan
+
+**Action labels:**
+- `ENTER_NOW` (S1/S2) — failed reclaim / rejection at upper zone confirmed
+- `ENTER_NOW` (L1) — lower zone sweep + reclaim confirmed
+- `ENTER_NOW` (L2) — L1 TP hit, pullback to lower zone holds
+- `WAIT_RETEST` — setup forming, retest not yet confirmed
+- `SKIP_CHASE` — extended > 25 pts from trigger
+
+---
+
+### Example 020
+
+| Field | Value |
+|---|---|
+| `example_id` | 020 |
+| `screenshot_path` | `docs/om_gold_scalp/examples/020_5m_range_chop_wait_skip_level_reactions.png` |
+| `timeframe` | 5M |
+| `layer` | trigger |
+| `date_range_visible` | UNKNOWN |
+| `session_context` | UNKNOWN — session boxes visible |
+| `news_context` | UNKNOWN |
+| `move_type` | chop / no trade |
+| `Om bias` | No trade — choppy around EMA and session boxes, no clear displacement |
+| `label` | Range chop — WAIT or SKIP, no entry, level reactions only |
+| `use` | Trigger layer — chop detection, suppress all entry signals |
+| `code_status` | proposed |
+
+**Om notes:**
+- Price oscillating around EMA and session box boundaries
+- No clear displacement in either direction
+- Multiple level reactions but no follow-through
+- EMA 200 acting as chop zone midpoint — not directional
+- Session boxes (Tokyo/London/NY) showing range behavior
+- Do not trade chop — wait for breakout of range or displacement candle
+
+**Observed setup moments:**
+- Price ranging inside session box boundaries
+- No candle body closes decisively outside range
+- EMA 200 flat or slightly sloping — price crossing it multiple times
+- Multiple small bounces at zone levels without continuation
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | decision_chop — price inside zone/range with no direction |
+| `price_relation` | at EMA / inside session box / at zone |
+| `freefall_context` | false |
+| `fvg_nearby` | possibly small FVGs but no significant imbalance |
+| `fvg_direction` | mixed |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| All entries | SKIP or WAIT — no valid trigger |
+| Condition to re-evaluate | Displacement candle breaks session box / zone with body close |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `decision_chop = true` if: last 5 candles all within same 15 pt range AND no body outside zone
+- `session_box_chop = true` if price oscillating within session high/low boundaries without breakout
+- `ema_chop = true` if price crossed EMA 200 more than 3 times in last 10 candles
+- Any of the above → `setup_action = SKIP_CHOP`
+- Reset when: 5M body closes > 5 pts outside session box OR displacement candle > 15 pts
+
+**Action labels:**
+- `SKIP_CHOP` — price choppy inside range/session box/EMA zone
+- `WAIT_BREAK_CONFIRMATION` — range tightening, watch for breakout candle
+- `ENTER_NOW` — only after clear breakout body close + displacement confirmed
+
+---
+
+### Example 021
+
+| Field | Value |
+|---|---|
+| `example_id` | 021 |
+| `screenshot_path` | `docs/om_gold_scalp/examples/021_5m_bearish_breakdown_retest_continuation.png` |
+| `timeframe` | 5M |
+| `layer` | trigger |
+| `date_range_visible` | UNKNOWN |
+| `session_context` | UNKNOWN |
+| `news_context` | UNKNOWN |
+| `move_type` | bearish continuation — breakdown + retest |
+| `Om bias` | Bearish — below EMA 200 + failed retest/reclaim + displacement = short continuation |
+| `label` | Bearish breakdown retest continuation — below EMA 200, pullbacks are short opportunities |
+| `use` | Trigger layer — short continuation below EMA, pullbacks = reentry not reversal |
+| `code_status` | proposed |
+
+**Om notes:**
+- Price below EMA 200 on 5M — macro bearish context
+- Price breaks below zone, retests zone from below (underside_retest)
+- Retest fails (failed_reclaim) → short continuation confirmed
+- Every pullback is a short reentry opportunity, not a reversal
+- Only flip bias if price reclaims zone AND holds above EMA 200
+
+**Observed setup moments:**
+- Price below EMA 200 (bearish macro context)
+- Zone breakdown: body close below zone
+- Retest: price returns to zone underside
+- Failed reclaim: body closes back below → short continuation
+- Bearish displacement candle confirms direction
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | broken_support → underside_retest → failed_reclaim |
+| `price_relation` | below zone / below EMA 200 |
+| `freefall_context` | true — below all structure |
+| `fvg_nearby` | likely above (created during breakdown) |
+| `fvg_direction` | bearish |
+| `ema200_relation` | below_ema200 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Short entry | Failed retest confirmed, body below zone |
+| Short SL | Above zone high + 2 pts (above failed reclaim) |
+| Short TP | Next lower zone or structure level (15–30 pts) |
+| Pullback reentry | Pullback to zone → short reentry (not reversal) |
+| Reversal condition | Only if price closes above zone AND above EMA 200 and holds |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `below_ema200` + `failed_reclaim` + bearish displacement → `setup_action = ENTER_NOW` (short)
+- Every pullback to zone while `below_ema200` → treat as short reentry opportunity, not long
+- `reversal_condition = true` only if: body closes above zone AND above EMA 200 AND holds next candle
+- Until `reversal_condition`, `setup_action` for long = `SKIP_CHOP` or `WAIT_BREAK_CONFIRMATION`
+- Short SL = zone high + 2 pts; TP = next structure below (15–30 pts)
+
+**Action labels:**
+- `ENTER_NOW` (short) — failed retest below EMA 200 confirmed
+- `WAIT_RETEST` — breakdown confirmed, no retest yet
+- `SKIP_CHOP` (long) — price below EMA 200, long not valid yet
+- `WAIT_BREAK_CONFIRMATION` (long) — watching for reclaim above zone + EMA 200
+
+---
+
+*Add next example below as Example 022*
