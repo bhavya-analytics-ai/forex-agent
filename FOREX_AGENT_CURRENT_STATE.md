@@ -87,13 +87,12 @@ All items below are committed and deployed on Railway.
 - Not starting until labeled examples are collected
 
 **Screenshot calibration:**
-- **In progress — 5 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
-- Example 001: 1H bearish freefall context — price below both purple zones + 200 EMA. Context only.
-- Example 002: 1H FVG magnet / imbalance fill — FVG as reaction zone, not automatic entry. IMAGE FILE PENDING.
-- Example 003: 1H zone flip — purple zone dynamic support/resistance flip. IMAGE FILE PENDING.
-- Example 004: 1H news/breakout impulse + continuation — large impulse candle, wait for FVG/pullback. IMAGE FILE PENDING.
-- Example 005: 1H liquidity sweep/takeout into zone + reversal risk. IMAGE FILE PENDING.
-- Core OM Concepts added: zone_flip, failed_reclaim, reclaim_success, freefall_context, fvg_magnet, fvg_rejection, liquidity_sweep, liquidity_takeout, breakout_impulse, news_impulse, fakeout, reversal_candidate, continuation_pullback
+- **In progress — 13 examples collected** (`docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`)
+- Examples 001–005: 1H context layer (bearish freefall, FVG magnet, zone flip, news impulse, liquidity sweep)
+- Examples 006–013: 15M setup layer (failed retest, bearish continuation into lower zone, bullish breakout pullback, sweep reclaim reversal, zone-to-zone continuation, breakdown impulse, FVG fill rejection, zone magnet reclaim)
+- Images 006–013: IMAGE FILE PENDING (Om to place manually)
+- Core OM Concepts: zone_flip, failed_reclaim, fvg_magnet, liquidity_sweep, breakout_impulse, news_impulse, fakeout, reversal_candidate, continuation_pullback (14 total)
+- 15M Setup Layer Rules section added: zone_state enum, setup_action enum, chase filter, fvg_relation enum, reaction-zone logic, continuation setup logic, proposed thresholds
 - Scanner reads OHLC candle data only — no pixel/image reading
 - Screenshots are needed to translate Om's visual trading logic into measurable candle rules
 
