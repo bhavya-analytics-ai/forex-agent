@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 31 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031])
+**Examples collected:** 33 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -2260,7 +2260,164 @@ Derived from Examples 030–031. Applies whenever a bullish pullback appears ins
 
 ---
 
-*Add next example below as Example 032*
+## Paired 15M / 5M Decision-Zone Consolidation Context-Execution — Examples 032–033
+
+This pair teaches that a purple HTF zone is a decision zone, not an automatic entry. Consolidation around the zone means wait. The valid trigger is either a sweep + reclaim + follow-through, OR a break + failed reclaim + continuation. Anything in between is middle-of-range risk and should be skipped.
+
+---
+
+### Example 032
+
+- **example_id:** 032
+- **timeframe:** 15M
+- **layer:** context
+- **paired_with:** 033 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/032_15m_support_resistance_consolidation_failed_hold_to_support2.png`
+
+**Om notes:**
+- 15M shows price spending time around a purple support/resistance zone.
+- Consolidation and messy failed attempts cluster around the level — not a clean instant entry area.
+- The zone behaves as a decision zone: price can fake below, fake above, consolidate, then later reveal direction.
+- Once the upper support/resistance area cannot hold, Support 2 (lower zone) becomes the downside magnet.
+- 15M does not generate entries on this example — it sets the decision context for 5M execution.
+
+**Observed setup moments:**
+- Multiple touches at the purple zone with no clean resolution (consolidation_at_zone)
+- Wicks on both sides of the zone — fake breakouts and fake breakdowns
+- Eventual failure to hold the zone — body close below sustained
+- Support 2 magnet activates as the next downside target
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | purple_zone: holding_support / rejecting_resistance → decision_chop → broken_support |
+| `htf_zone_type` | purple support/resistance band |
+| `decision_zone` | true (consolidation + mixed reaction at zone) |
+| `consolidation_at_zone` | true (multiple bars with overlap inside zone) |
+| `failed_support_hold` | true (zone could not hold after consolidation) |
+| `support2_magnet` | true (lower zone activates as downside target) |
+| `htf_magnet` | Support 2 |
+| `bias_source` | 15M — undecided during consolidation, bearish after zone fails |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- Purple HTF zone → `decision_zone = true` by default; treat as `BIAS_ONLY` until structural confirmation.
+- `consolidation_at_zone = true` + no sweep/reclaim signature → `setup_action = WAIT_REACTION` for 5M.
+- Valid resolution triggers are only: (a) sweep + reclaim + follow-through, OR (b) break + failed reclaim + continuation.
+- When the upper zone fails to hold, `support2_magnet = true` arms and `htf_magnet` flips to the next lower zone.
+- 15M does not generate entries here — it sets the gating context for paired 5M trigger.
+
+**Action labels:**
+- `BIAS_ONLY` — 15M context, no entry trigger at this layer
+- Pairs with Example 033 for execution
+
+---
+
+### Example 033
+
+- **example_id:** 033
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 032 (15M context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/033_5m_from_032_liquidity_sweep_reclaim_then_failed_support_breakdown.png`
+
+**Om notes:**
+- Entries must be identified from level behavior — not candle appearance alone.
+- First valid trigger: liquidity sweep + reclaim on the lower edge, then follow-through up = scalp long.
+- Later: support breaks, attempts to reclaim, fails — bearish continuation toward Support 2.
+- Middle-of-range entries between the two triggers are gambling — `middle_range_risk = true`, skip.
+- The scanner must wait for one of two clean signatures (sweep+reclaim OR break+failed-reclaim). Anything else is `SKIP_CHOP` or `SKIP_CHASE`.
+
+**Observed setup moments:**
+- Liquidity sweep below the lower edge of the zone (wick takes prior low)
+- Reclaim candle: body closes back above the swept level
+- Follow-through bar holds above — long scalp valid
+- Later: support break, body close below the zone
+- Reclaim attempt fails — body cannot hold back above
+- Continuation candle prints toward Support 2 magnet
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | liquidity_sweep → reclaimed_zone → topside_retest (phase 1) → broken_support → failed_reclaim (phase 2) |
+| `liquidity_sweep_before_move` | true (phase 1 trigger) |
+| `failed_support_hold` | true (phase 2 setup) |
+| `failed_reclaim` | true (phase 2 confirmation) |
+| `support2_magnet` | true (target for phase 2 short) |
+| `middle_range_risk` | true (between phase 1 long and phase 2 short — skip zone) |
+| `entry_quality` | high at sweep+reclaim and at failed-reclaim signatures; low elsewhere |
+| `skip_reason` | mid_range_no_confirmation (whenever neither signature is active) |
+| `ema200_relation` | depends on phase — above_ema200 during long phase, below_ema200 during short phase |
+| `htf_context_id` | 032 |
+| `execution_pair_id` | 033 |
+| `paired_context_id` | 032 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Phase 1 long entry | Sweep below lower edge + reclaim body close + follow-through bar holds |
+| Phase 1 long SL | Below sweep wick + 2 pts |
+| Phase 1 long TP | Upper edge of zone or next 15M structure above (15–30 pts) |
+| Middle-range zone | No entry — `SKIP_CHOP` until next clean signature |
+| Phase 2 short entry | Support break + reclaim attempt + failed reclaim body close |
+| Phase 2 short SL | Above failed reclaim wick + 2 pts |
+| Phase 2 short TP | Support 2 (htf_magnet from 032) — 15–30 pts |
+| Invalidation | Reclaim succeeds + body holds above broken support → cancel short |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `setup_action = ENTER_NOW` (long) fires only when `liquidity_sweep_before_move = true` AND `reclaimed_zone = true` AND follow-through bar holds.
+- `setup_action = ENTER_NOW` (short) fires only when `failed_support_hold = true` AND `failed_reclaim = true`.
+- `middle_range_risk = true` forces `setup_action = SKIP_CHOP` regardless of candle strength or trend slope.
+- `entry_quality` audit field rates each candidate trigger high / medium / low based on signature cleanness; low → skip.
+- `skip_reason` audit field records the explicit reason for any skip (mid_range_no_confirmation / chase_distance / sl_too_wide / no_signature).
+- Bias and target derive from paired 15M context (Example 032). Support 2 magnet is honored only after upper zone failure.
+
+**Action labels:**
+- `ENTER_NOW` (long) — sweep + reclaim + follow-through at lower edge
+- `ENTER_NOW` (short) — break + failed reclaim of support
+- `SKIP_CHOP` — middle-of-range, no clean signature
+- `SKIP_CHASE` — entering after price has already moved most of the distance to the next level
+- `WAIT_REACTION` — consolidation at the decision zone, no signature yet
+- `BIAS_FLIP` — reclaim succeeds and holds, invalidating the short setup
+
+---
+
+## Decision-Zone Consolidation Logic — PROPOSED
+
+Derived from Examples 032–033. Applies whenever a purple HTF zone or S/R band shows consolidation, mixed reactions, and no immediate directional resolution.
+
+- **Purple HTF zone = decision zone, not auto entry.** Treat the zone as `BIAS_ONLY` until structural confirmation appears.
+- **Consolidation means wait.** Multiple touches with overlap and no clean rejection = `WAIT_REACTION`.
+- **Two valid resolution signatures, no others:**
+  1. Sweep + reclaim + follow-through (entry in reclaim direction)
+  2. Break + failed reclaim + continuation (entry in break direction)
+- **Strong candle in the middle is noise.** A big body bar between the two signatures is `middle_range_risk = true` — skip.
+- **Fast break-and-return = possible sweep / fakeout.** Body close back inside within one or two bars = treat as sweep, not breakout.
+- **Failed reclaim of broken support = continuation valid.** Once the upper zone cannot hold, Support 2 becomes the active magnet.
+- **Mark gambling conditions explicitly.** `middle_range_risk = true` and `skip_reason = mid_range_no_confirmation` must be logged so the audit shows the scanner saw the setup and chose to skip.
+
+**Audit fields proposed (for decision-zone consolidation logic):**
+
+| Field | Purpose |
+|---|---|
+| `htf_zone_type` | Enum: purple_zone / sr_band / fvg / order_block / etc. |
+| `decision_zone` | Bool — true when zone behavior is mixed (both sides reacting) |
+| `consolidation_at_zone` | Bool — multiple bars overlapping inside or at the zone |
+| `liquidity_sweep_before_move` | Bool — sweep signature precedes the directional move |
+| `failed_support_hold` | Bool — previously respected support cannot hold after consolidation |
+| `failed_reclaim` | Bool — reclaim attempt body close cannot hold (already defined; reused here) |
+| `support2_magnet` | Bool — next lower HTF zone is the active downside magnet |
+| `middle_range_risk` | Bool — entry would land between the two clean signatures |
+| `entry_quality` | Enum: high / medium / low — based on signature cleanness |
+| `skip_reason` | Enum: mid_range_no_confirmation / chase_distance / sl_too_wide / no_signature / consolidation |
+| `htf_context_id` | ID of the HTF example providing context (e.g. 032) |
+| `execution_pair_id` | ID of the LTF example providing the trigger (e.g. 033) |
+
+---
+
+*Add next example below as Example 034*
 
 **Next planned batch:**
 - TBD by Om
