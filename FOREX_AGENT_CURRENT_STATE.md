@@ -1,3 +1,4 @@
+
 # FOREX AGENT CURRENT STATE — May 2026
 
 ---
@@ -86,7 +87,9 @@ All items below are committed and deployed on Railway.
 - Not starting until labeled examples are collected
 
 **Screenshot calibration:**
-- Not started
+- **Started — Example 001 stored** (`docs/om_gold_scalp/examples/001_1h_bearish_freefall_context.png`)
+- Example 001: 1H bearish freefall context — XAU/USD below both purple S/R zones and 200 EMA. Context only, not a direct entry.
+- Rulebook started: `docs/om_gold_scalp/OM_GOLD_SCALP_RULEBOOK.md`
 - Scanner reads OHLC candle data only — no pixel/image reading
 - Screenshots are needed to translate Om's visual trading logic into measurable candle rules
 
