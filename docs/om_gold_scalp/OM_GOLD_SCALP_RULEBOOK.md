@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 42 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039] + 2 × paired 15M/5M failed-bullish-reversal bearish-continuation context-execution [040–041] + 1 × 15M HTF-range breakdown bearish-continuation standalone context [042])
+**Examples collected:** 43 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039] + 2 × paired 15M/5M failed-bullish-reversal bearish-continuation context-execution [040–041] + 2 × paired 15M/5M HTF-range breakdown bearish-continuation context-execution [042–043])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -3114,7 +3114,7 @@ Derived from Examples 040–041. This is the failure-mode mirror of Examples 038
 
 ---
 
-## 15M HTF Range Breakdown Bearish Continuation — Example 042
+## Paired 15M / 5M HTF Range Breakdown Bearish Continuation — Examples 042–043
 
 Standalone 15M context example. Teaches that internal moves inside a wide HTF range are not trade signals. Bearish continuation only becomes valid after the range low breaks, price accepts below it, and follow-through confirms.
 
@@ -3125,7 +3125,7 @@ Standalone 15M context example. Teaches that internal moves inside a wide HTF ra
 - **example_id:** 042
 - **timeframe:** 15M
 - **layer:** context
-- **paired_with:** none (standalone context example — no 5M execution pair yet)
+- **paired_with:** 043 (5M execution view of this same context)
 - **screenshot_path:** `docs/om_gold_scalp/examples/042_htf_range_low_break_retest_hold_bearish_continuation_15m.png`
 - **setup_type:** `htf_range_breakdown_bearish_continuation`
 
@@ -3189,7 +3189,89 @@ Standalone 15M context example. Teaches that internal moves inside a wide HTF ra
 
 ---
 
-*Add next example below as Example 043*
+### Example 043
+
+- **example_id:** 043
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 042 (15M context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/043_htf_range_low_break_retest_hold_bearish_continuation_5m.png`
+- **setup_type:** `htf_range_low_break_retest_hold_bearish_continuation`
+- **timeframe_role:** execution_5m
+- **htf_context_id:** 042
+- **execution_pair_id:** 042_043
+
+**Om notes:**
+- 5M execution detail view of the same HTF range breakdown shown in 042.
+- 15M (042) defines the HTF range boundary and the range low break — the 5M view shows where and how to enter after that break.
+- Inside-range movement on the 5M is still `no_trade_zone` / `avoid_entry` — internal pushes that look strong are `low_confidence_setup`.
+- Short continuation on 5M is valid only after all three conditions from 042 are met at the HTF level:
+  1. Range low broken on 15M (042 context confirms).
+  2. Price accepts and retests below broken range low — retest holds as resistance on 5M.
+  3. Bearish follow-through on 5M extends lower.
+- Do not short inside the range on 5M just because a 5M candle looks bearish.
+- Do not short immediately on range low break — wait for the 5M retest hold confirmation.
+
+**Observed setup moments:**
+- 5M bars inside the HTF range — `no_trade_zone_inside_range = true`, `internal_pushes = avoid_entry`
+- Range low breaks on 15M (context from 042): 5M registers body close below range boundary
+- 5M retest: price returns to broken range low from below — watch for resistance reaction
+- Retest holds: 5M body closes back below the broken range low — `range_retest_held_below = true`
+- Follow-through: next 5M bars extend lower — `bearish_continuation_valid = true`
+- Short entry: on or after the retest-hold candle close
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | inside_range_chop → broken_support (range low) → underside_retest → range_retest_held_below → bearish_continuation |
+| `no_trade_zone_inside_range` | true while inside HTF range |
+| `internal_pushes` | avoid_entry (all 5M candles inside the purple range boundary) |
+| `avoid_short_before_break` | true — no 5M short until range low confirmed broken on 15M |
+| `range_low_broken` | true (inherited from 042 context) |
+| `range_retest_held_below` | true (5M body closes back below broken range low after retest) |
+| `confirmation_signal` | range_low_break_retest_hold_followthrough |
+| `bearish_continuation_valid` | true only after break + retest hold + follow-through |
+| `execution_bias` | short_after_confirmation |
+| `failure_condition` | price_reclaims_back_inside_HTF_range |
+| `ema200_relation` | below_ema200 when bearish continuation valid |
+| `htf_context_id` | 042 |
+| `execution_pair_id` | 042_043 |
+| `paired_context_id` | 042 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Inside range (5M) | `SKIP_CHOP` — `no_trade_zone_inside_range = true` |
+| Range low break | `WAIT_REACTION` — watching for 5M retest of broken level |
+| Retest of broken range low | Still `WAIT_REACTION` — waiting for hold confirmation |
+| Retest hold confirmed | `range_retest_held_below = true` — short entry arms |
+| Short entry | On retest-hold candle close OR first follow-through bar |
+| Short SL | Above the retest wick high + 2 pts (above failed retest into range low) |
+| Short TP | Next 15M structure level below (htf_magnet from 042) — 15–30 pts |
+| Failure | Body closes back inside HTF range → `failure_condition` triggered, cancel short |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 5M `setup_action = SKIP_CHOP` for every candidate while `no_trade_zone_inside_range = true`. No exception for candle size.
+- `avoid_short_before_break = true` blocks all 5M short entries until the 15M context (042) confirms `range_low_broken = true`.
+- `setup_action = WAIT_REACTION` activates on range low break — watching for 5M retest.
+- `setup_action = ENTER_NOW` (short) fires only after `range_retest_held_below = true` AND follow-through bar closes below.
+- Entering short immediately on range low break (without retest hold) = `SKIP_CHASE` — retest gives better R:R and filters fakeouts.
+- `failure_condition = price_reclaims_back_inside_HTF_range`: if 5M body closes back inside the purple range → cancel short, `bearish_continuation_valid = false`, restart from `WAIT_REACTION`.
+- All 5M execution logic in this example derives from the 15M context (042). The 5M cannot arm a short independently without the HTF range breakdown confirmation.
+
+**Action labels:**
+- `SKIP_CHOP` — inside HTF range, any direction
+- `avoid_entry` — all internal 5M pushes while `no_trade_zone_inside_range = true`
+- `WAIT_REACTION` — range low broken, watching for 5M retest
+- `ENTER_NOW` (short) — retest hold confirmed + follow-through bar
+- `SKIP_CHASE` — entering short immediately on range break without retest
+- `BIAS_FLIP` — body reclaims back inside range → cancel short, reassess
+
+---
+
+*Add next example below as Example 044*
 
 **Next planned batch:**
 - TBD by Om
