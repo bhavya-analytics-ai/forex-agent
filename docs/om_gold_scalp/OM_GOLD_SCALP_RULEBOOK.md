@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 37 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037])
+**Examples collected:** 39 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -2792,7 +2792,173 @@ Derived from Examples 036–037. Applies whenever a wide HTF range / purple cons
 
 ---
 
-*Add next example below as Example 038*
+## Paired 15M / 5M Double-Sweep Reclaim Long Context-Execution — Examples 038–039
+
+This pair teaches a clean liquidity sweep + reclaim long setup. Price sweeps downside liquidity twice, fails to continue lower, reclaims the swept area, then creates bullish displacement. The sweep alone is never the entry. Entry arms only after reclaim + displacement + structure shift.
+
+---
+
+### Example 038
+
+- **example_id:** 038
+- **timeframe:** 15M
+- **layer:** context
+- **paired_with:** 039 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/038_15m_double_liquidity_sweep_reclaim_long_bias.png`
+
+**Om notes:**
+- Price makes a double liquidity sweep below prior lows — two separate tests of the downside liquidity pool.
+- Downside continuation fails after both sweeps. No new low holds.
+- Price reclaims back above the swept area. Body close above the swept level = reclaim confirmed.
+- Bullish displacement candle prints after reclaim — large body, little overlap, confirms long bias.
+- 15M read: `sweep_reclaim_long_candidate` → `long_bias_after_reclaim`.
+- The double sweep is stronger evidence than a single sweep — more liquidity taken, more likely the move is exhausted.
+
+**Observed setup moments:**
+- Sweep 1: wick below prior low, body closes back above
+- Sweep 2: second wick below (double sweep), body closes back above
+- `reclaim_confirmed = true`: body close above the swept level holds
+- Bullish displacement candle: large body, directional, little overlap
+- `long_bias_after_reclaim = true` arms for 5M execution
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | liquidity_sweep (×2) → reclaimed_zone → bullish_displacement |
+| `liquidity_sweep_count` | 2 |
+| `double_sweep` | true |
+| `swept_side` | bearish (downside liquidity) |
+| `reclaim_confirmed` | true (body close above swept level after double sweep) |
+| `reclaim_direction` | bullish |
+| `bullish_displacement` | true |
+| `long_bias_after_reclaim` | true |
+| `sweep_alone_no_entry` | true (entry gate does not open until reclaim + displacement) |
+| `htf_magnet` | next 15M structure level above (prior high / resistance) |
+| `bias_source` | 15M — bearish during sweep, bullish after double-sweep reclaim + displacement |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `liquidity_sweep_count ≥ 2` + `reclaim_confirmed = true` → `sweep_reclaim_long_candidate = true`. Stronger signal than single sweep.
+- `sweep_alone_no_entry = true` keeps `setup_action = WAIT_REACTION` until both reclaim AND displacement confirm.
+- `bullish_displacement = true` after `reclaim_confirmed` → `long_bias_after_reclaim = true` arms 5M execution.
+- Double sweep: second wick that holds above the same level as sweep 1 = `double_sweep = true`, increases conviction weighting.
+- 15M does not generate entries here — it arms the long context for 5M execution.
+
+**Action labels:**
+- `WAIT_REACTION` — during sweep phase (both sweeps), no entry yet
+- `BIAS_ONLY` — 15M context after reclaim + displacement confirms, arms 5M
+- Pairs with Example 039 for execution
+
+---
+
+### Example 039
+
+- **example_id:** 039
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 038 (15M context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/039_5m_from_038_double_sweep_reclaim_long_trigger.png`
+
+**Om notes:**
+- 5M shows the full sequence: sweep 1 → sweep 2 → reclaim → bullish displacement → long trigger.
+- Do NOT enter while price is still below the swept level. That is `entry_invalid_without_confirmation`.
+- Do NOT enter from the sweep alone — the sweep is the setup, not the entry.
+- Confirmation comes from reclaim (body close back above the swept level) AND displacement (large directional candle).
+- Valid long trigger fires on the first pullback/retest after displacement that holds above the reclaim level, or on the displacement close itself if strong enough.
+- `structure_shift_after_sweep = true` when a higher low prints above the swept level after reclaim.
+
+**Observed setup moments:**
+- 5M sweep 1: wick below prior low, close back above
+- 5M sweep 2: second wick below, close back above (same or slightly lower wick)
+- `reclaim_confirmed = true` on 5M: body close above swept level holds for 1+ bars
+- Bullish displacement candle on 5M: body > prior 3-bar average, little overlap
+- `structure_shift_after_sweep = true`: higher low prints above swept level
+- Long entry: displacement close OR first retest of reclaim level that holds
+- SL: below sweep 2 wick low + 2 pts
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | liquidity_sweep (×2) → reclaimed_zone → bullish_displacement → long_trigger |
+| `liquidity_sweep_count` | 2 |
+| `double_sweep` | true |
+| `swept_side` | bearish (downside) |
+| `reclaim_confirmed` | true |
+| `reclaim_direction` | bullish |
+| `bullish_displacement` | true |
+| `structure_shift_after_sweep` | true (higher low above swept level) |
+| `long_bias_after_reclaim` | true (inherited from 038) |
+| `long_trigger_after_reclaim` | true |
+| `entry_after_reclaim_only` | true |
+| `sweep_alone_no_entry` | true |
+| `entry_quality` | high (double sweep + reclaim + displacement = strong confluence) |
+| `ema200_relation` | price reclaims above EMA 200 during displacement confirms alignment |
+| `htf_context_id` | 038 |
+| `execution_pair_id` | 039 |
+| `paired_context_id` | 038 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Sweep 1 | Observation only — `WAIT_REACTION`, no entry |
+| Sweep 2 | Observation only — `WAIT_REACTION`, `double_sweep = true` noted |
+| Reclaim candidate | Body close above swept level — watch for hold |
+| Reclaim confirmed | Holding candle above swept level — `long_trigger_after_reclaim` arms |
+| Long entry | Displacement close OR retest of reclaim level that holds |
+| Long SL | Below sweep 2 wick low + 2 pts |
+| Long TP | Next 15M structure level / prior high (15–30 pts from entry) |
+| Invalidation | Body closes back below swept level after reclaim attempt — `reclaim_failed`, cancel long |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `setup_action = WAIT_REACTION` during all sweep bars regardless of wick size or candle appearance.
+- `setup_action = ENTER_NOW` (long) requires ALL of: `double_sweep = true` (or `liquidity_sweep_count ≥ 1`) AND `reclaim_confirmed = true` AND `bullish_displacement = true`.
+- `entry_after_reclaim_only = true` blocks any long entry until reclaim body close is confirmed — no exceptions.
+- `structure_shift_after_sweep = true` (higher low above swept level) adds conviction weight — upgrade `entry_quality` from medium to high.
+- `sweep_alone_no_entry = true` is always set during sweep bars — audit field prevents entry_state from arming too early.
+- Reclaim failure after the second sweep (`reclaim_failed = true`) cancels the long setup entirely — price back below swept level = `low_confidence_setup`, reassess.
+- `double_sweep` carries higher conviction than single sweep — scanner may reduce required displacement threshold for entry when `double_sweep = true`.
+
+**Action labels:**
+- `WAIT_REACTION` — sweep 1, sweep 2 (no entry during sweep phase)
+- `WAIT_REACTION` → `ENTER_NOW` (long) — reclaim confirmed + displacement printed
+- `SKIP_CHASE` — entering long after price has already traveled far above the reclaim level
+- `low_confidence_setup` — if reclaim fails after double sweep (unusual, still possible)
+
+---
+
+## Double-Sweep Reclaim Logic — PROPOSED
+
+Derived from Examples 038–039. Applies to any liquidity sweep sequence (single or double) on any timeframe where price takes a prior extreme, fails to continue, and reclaims.
+
+- **Sweep is the setup, not the entry.** `sweep_alone_no_entry = true` is always active during the sweep bar(s).
+- **Double sweep increases conviction.** Two wicks into the same liquidity pool with no continuation = stronger exhaustion signal than a single sweep.
+- **Reclaim is the gate.** Entry does not arm until body close above (bullish) or below (bearish) the swept level holds for at least one confirming bar.
+- **Displacement is the trigger.** After reclaim holds, a displacement candle in the reclaim direction confirms `long_bias_after_reclaim` / `short_bias_after_reclaim`.
+- **Structure shift adds weight.** A higher low (bullish) or lower high (bearish) after reclaim = `structure_shift_after_sweep = true` → upgrade `entry_quality`.
+- **Reclaim failure cancels the setup.** If body closes back through the swept level after initial reclaim, `reclaim_failed = true` → cancel the entry, reassess.
+- **SL is always anchored to the sweep extreme.** SL below sweep 2 low (bullish) or above sweep 2 high (bearish) + 2 pts buffer.
+
+**Audit fields proposed (for double-sweep reclaim logic):**
+
+| Field | Purpose |
+|---|---|
+| `liquidity_sweep_count` | Int — number of sweeps into the same liquidity level (1 or 2+) |
+| `double_sweep` | Bool — true when `liquidity_sweep_count ≥ 2` at the same level |
+| `swept_side` | Enum: `bearish` (downside swept) / `bullish` (upside swept) |
+| `reclaim_confirmed` | Bool — body close back across swept level + hold (reused from earlier definitions) |
+| `reclaim_direction` | Enum: `bullish` / `bearish` |
+| `bullish_displacement` | Bool — large directional body candle in bullish direction after reclaim |
+| `structure_shift_after_sweep` | Bool — higher low (bullish) or lower high (bearish) prints after reclaim |
+| `long_bias_after_reclaim` | Bool — true when `swept_side = bearish` AND `reclaim_confirmed = true` AND `bullish_displacement = true` |
+| `long_trigger_after_reclaim` | Bool — true when `long_bias_after_reclaim` AND 5M entry signature confirmed |
+| `entry_after_reclaim_only` | Bool — gates all entries; prevents entry before reclaim confirmation |
+| `sweep_alone_no_entry` | Bool — always true during sweep bars; forces `WAIT_REACTION` |
+
+---
+
+*Add next example below as Example 040*
 
 **Next planned batch:**
 - TBD by Om
