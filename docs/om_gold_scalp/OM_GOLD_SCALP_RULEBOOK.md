@@ -4,7 +4,9 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 44 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039] + 2 × paired 15M/5M failed-bullish-reversal bearish-continuation context-execution [040–041] + 2 × paired 15M/5M HTF-range breakdown bearish-continuation context-execution [042–043] + 1 × 5M range fake-breakout reclaim-failed no-trade [044])
+**Examples collected:** 45 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039] + 2 × paired 15M/5M failed-bullish-reversal bearish-continuation context-execution [040–041] + 2 × paired 15M/5M HTF-range breakdown bearish-continuation context-execution [042–043] + 1 × 5M range fake-breakout reclaim-failed no-trade [044] + 1 × 5M S/R reclaim candidate to bullish displacement [045])
+
+**Screenshot calibration phase: COMPLETE — 45 examples collected. Next phase: rule extraction and scanner patch planning.**
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -3343,7 +3345,86 @@ Standalone 5M example. Teaches that a failed breakout above range high does not 
 
 ---
 
-*Add next example below as Example 045*
+## 5M S/R Reclaim Candidate to Bullish Displacement — Example 045
 
-**Next planned batch:**
-- TBD by Om
+Final screenshot calibration example. Teaches early-stage setup detection: the scanner should identify a potential long forming around a key S/R level, then upgrade state progressively as confirmation arrives — not wait until the move is already complete.
+
+---
+
+### Example 045
+
+- **example_id:** 045
+- **timeframe:** 5M
+- **layer:** execution / setup detection
+- **paired_with:** none (standalone — demonstrates progressive scanner state flow)
+- **screenshot_path:** `docs/om_gold_scalp/examples/045_5m_sr_reclaim_candidate_to_bullish_displacement.png`
+- **setup_type:** `sr_reclaim_candidate_to_bullish_displacement`
+
+**Om notes:**
+- Purple zone marks a key S/R level on the chart.
+- While price is below the level: long is NOT valid. Price below S/R = bearish pressure / failed support.
+- When price begins pushing back into the level from below: mark `reclaim_candidate = true`. This is attention, not entry.
+- After price body-closes above the S/R level AND holds (next bar does not immediately re-break): mark `reclaim_confirmed = true`.
+- Strong bullish displacement candle after reclaim (large body, direction, little overlap): increases long confidence significantly.
+- Potential long is valid only after all three: reclaim + hold + bullish displacement.
+- The scanner should detect this as a potential setup early (at `reclaim_candidate` stage) and upgrade state progressively, not miss it by waiting for the displacement to finish.
+
+**Observed setup moments:**
+- Price below S/R level — `price_below_sr = true`, `bearish_pressure_below_sr = true`, long suppressed
+- Push back into S/R from below — `reclaim_candidate = true` (attention state, no entry yet)
+- Body close above S/R level — reclaim attempt registered
+- Holding bar: next bar does not re-break below — `reclaim_confirmed = true`
+- Bullish displacement candle: large body above S/R — `bullish_displacement_after_reclaim = true`
+- `potential_long_setup = true` — long entry armed, `enter_long_only_after_confirmation = true` gate satisfied
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `setup_type` | sr_reclaim_candidate_to_bullish_displacement |
+| `key_sr_level` | true |
+| `price_below_sr` | true (initial state) |
+| `bearish_pressure_below_sr` | true |
+| `reclaim_candidate` | true (push back into level from below — attention state) |
+| `reclaim_confirmed` | true (body close above S/R + hold) |
+| `hold_above_sr_required` | true (holding bar must not re-break below) |
+| `bullish_displacement_after_reclaim` | true |
+| `potential_long_setup` | true |
+| `enter_long_only_after_confirmation` | true |
+| `scanner_state_flow` | WAIT_RECLAIM → WAIT_HOLD → ENTER_LONG_ALLOWED |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `price_below_sr = true` → long suppressed, `scanner_state_flow = WAIT_RECLAIM`. No entry regardless of candle strength.
+- `reclaim_candidate = true` fires when price pushes back into the S/R zone from below — scanner upgrades to attention state but does NOT arm entry yet.
+- `reclaim_confirmed = true` requires: body close above S/R level AND at least one holding bar (does not re-break immediately). Scanner upgrades to `WAIT_HOLD`.
+- `bullish_displacement_after_reclaim = true` requires: candle with large body (above average range), directional, little overlap, printed above the reclaimed S/R. Scanner upgrades to `ENTER_LONG_ALLOWED`.
+- `scanner_state_flow = WAIT_RECLAIM → WAIT_HOLD → ENTER_LONG_ALLOWED` is a progressive gate — skipping a step is not permitted.
+- `enter_long_only_after_confirmation = true` enforces the full gate; partial confirmation (reclaim only, no displacement) leaves scanner at `WAIT_HOLD`.
+- Early detection benefit: marking `reclaim_candidate` during the push-back phase means the scanner is watching and ready to upgrade — rather than detecting only after displacement is complete and the entry has passed.
+- SL for this setup: below the reclaim wick low + 2 pts (below the lowest point of the reclaim attempt into the S/R level).
+- `bearish_pressure_below_sr = true` is carried forward as a context flag — even after reclaim, if the displacement fails to hold, this flag warns the long is fragile.
+
+**Action labels:**
+- `WAIT_RECLAIM` — price below S/R, no entry yet
+- `reclaim_candidate` — push back into level from below; attention state, no entry
+- `WAIT_HOLD` — body close above S/R; waiting for hold confirmation
+- `ENTER_LONG_ALLOWED` — reclaim confirmed + displacement confirmed; long entry valid
+- `SKIP_CHASE` — entering long after displacement has already traveled far from S/R level
+- `BIAS_FLIP` — body re-breaks below S/R after reclaim → cancel long, back to `WAIT_RECLAIM`
+
+---
+
+## Screenshot Calibration — COMPLETE
+
+45 examples collected across 1H context, 15M setup, 5M trigger, and paired context-execution batches.
+
+**Next phase: Rule extraction and scanner patch planning.**
+
+The rulebook vocabulary, audit fields, and PROPOSED scanner rules established across all 45 examples are now ready for review. Before implementation begins:
+
+1. Om reviews and approves or corrects PROPOSED scanner rules in this rulebook.
+2. Approved rules are extracted into a structured scanner spec document.
+3. `strategies/om_gold_scalp.py` is written from the approved spec only.
+4. No code is written from unapproved PROPOSED rules.
+
+**Do not add more screenshot examples until Om approves the extraction phase.**
