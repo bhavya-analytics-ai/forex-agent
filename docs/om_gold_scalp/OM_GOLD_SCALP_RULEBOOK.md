@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 41 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039] + 2 × paired 15M/5M failed-bullish-reversal bearish-continuation context-execution [040–041])
+**Examples collected:** 42 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039] + 2 × paired 15M/5M failed-bullish-reversal bearish-continuation context-execution [040–041] + 1 × 15M HTF-range breakdown bearish-continuation standalone context [042])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -3114,7 +3114,82 @@ Derived from Examples 040–041. This is the failure-mode mirror of Examples 038
 
 ---
 
-*Add next example below as Example 042*
+## 15M HTF Range Breakdown Bearish Continuation — Example 042
+
+Standalone 15M context example. Teaches that internal moves inside a wide HTF range are not trade signals. Bearish continuation only becomes valid after the range low breaks, price accepts below it, and follow-through confirms.
+
+---
+
+### Example 042
+
+- **example_id:** 042
+- **timeframe:** 15M
+- **layer:** context
+- **paired_with:** none (standalone context example — no 5M execution pair yet)
+- **screenshot_path:** `docs/om_gold_scalp/examples/042_htf_range_low_break_retest_hold_bearish_continuation_15m.png`
+- **setup_type:** `htf_range_breakdown_bearish_continuation`
+
+**Om notes:**
+- A large purple box marks the HTF range / consolidation zone.
+- Price spends a significant amount of time inside the range — multiple bars, both sides tested.
+- Internal pushes up and down inside the range are not valid entries (`avoid_entry` / `no_trade_zone`).
+- Fake pushes inside the range: any strong-looking candle inside the purple box is `low_confidence_setup`.
+- Bearish continuation is NOT valid while price is inside the range.
+- Bearish continuation becomes valid only after three sequential conditions are met:
+  1. Range low breaks — body close below the purple box lower boundary.
+  2. Price accepts and holds below the broken range low — retest of range low from below holds as resistance.
+  3. Follow-through continues bearish — next bars extend lower, no reclaim back inside range.
+- Failure condition: price reclaims back inside the purple range → bearish setup invalidated, reassess.
+
+**Observed setup moments:**
+- Multiple bars inside the purple HTF range — `htf_range_active = true`, `no_trade_zone = true`
+- Internal bearish pushes: rejected, not followed through — `avoid_short_before_break = true`
+- Internal bullish pushes: rejected, not followed through — `avoid_long_inside_range = true`
+- Range low breaks: body close below lower boundary of the purple box
+- Retest of range low from below: holds as resistance — `range_retest_held_below = true`
+- Follow-through bearish candles: `bearish_continuation_valid = true`
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `htf_context` | range_consolidation |
+| `range_state` | active_until_break (inside range) → broken (after range low body close) |
+| `htf_range_active` | true while inside range |
+| `no_trade_zone` | true while price is inside the purple range |
+| `internal_pushes` | avoid_entry (both directions while inside range) |
+| `avoid_short_before_break` | true — bearish moves inside range are not continuation |
+| `avoid_long_inside_range` | true — bullish moves inside range are not reversal |
+| `range_low_broken` | true (body close below lower boundary) |
+| `range_retest_held_below` | true (retest of broken range low as resistance) |
+| `confirmation_signal` | range_low_break_and_hold_below |
+| `bearish_continuation_valid` | true only after break + retest hold + follow-through |
+| `execution_bias` | short_after_confirmation |
+| `failure_condition` | price_reclaims_back_inside_range |
+| `htf_zone_type` | purple HTF consolidation range |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- While `htf_range_active = true`: all candidates inside the range → `setup_action = SKIP_CHOP`, `no_trade_zone = true`, `internal_pushes = avoid_entry`.
+- `avoid_short_before_break = true` explicitly blocks all short entries until `range_low_broken = true`.
+- `avoid_long_inside_range = true` explicitly blocks all long entries while range is active.
+- `range_low_broken = true` requires a body close below the range lower boundary (wick alone = `boundary_break_required` still active).
+- `range_retest_held_below = true` requires: price returns to range low from below AND body close stays below the range boundary.
+- `confirmation_signal = range_low_break_and_hold_below` arms `bearish_continuation_valid = true` for short execution.
+- `failure_condition = price_reclaims_back_inside_range`: if body closes back inside the purple range → cancel short setup, `bearish_continuation_valid = false`, reassess from scratch.
+- Internal moves inside the range, however strong they appear (`single_candle_strength`), are always `low_confidence_setup` + `avoid_entry`.
+
+**Action labels:**
+- `SKIP_CHOP` — inside range, any direction
+- `no_trade_zone` — while `htf_range_active = true`
+- `avoid_entry` — all internal pushes regardless of candle size/color
+- `WAIT_REACTION` — range low broken, watching for retest
+- `ENTER_NOW` (short) — after `range_retest_held_below = true` + follow-through bar
+- `SKIP_CHASE` — entering short far below range after price has already traveled most of the distance
+- `BIAS_FLIP` — body reclaims back inside range → invalidate short, restart analysis
+
+---
+
+*Add next example below as Example 043*
 
 **Next planned batch:**
 - TBD by Om
