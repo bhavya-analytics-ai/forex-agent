@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 43 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039] + 2 × paired 15M/5M failed-bullish-reversal bearish-continuation context-execution [040–041] + 2 × paired 15M/5M HTF-range breakdown bearish-continuation context-execution [042–043])
+**Examples collected:** 44 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039] + 2 × paired 15M/5M failed-bullish-reversal bearish-continuation context-execution [040–041] + 2 × paired 15M/5M HTF-range breakdown bearish-continuation context-execution [042–043] + 1 × 5M range fake-breakout reclaim-failed no-trade [044])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -3271,7 +3271,79 @@ Standalone 15M context example. Teaches that internal moves inside a wide HTF ra
 
 ---
 
-*Add next example below as Example 044*
+## 5M Range Fake-Breakout Reclaim-Failed No-Trade — Example 044
+
+Standalone 5M example. Teaches that a failed breakout above range high does not immediately create a valid short. Once price is back inside the range, the scanner must mark `no_trade_zone` for both directions until the range resolves on the opposite side.
+
+---
+
+### Example 044
+
+- **example_id:** 044
+- **timeframe:** 5M
+- **layer:** execution / educational_negative_example
+- **paired_with:** none (standalone — no 15M context pair; this example is self-contained)
+- **screenshot_path:** `docs/om_gold_scalp/examples/044_range_fake_breakout_reclaim_failed_no_trade_5m.png`
+- **setup_type:** `range_fake_breakout_reclaim_failed`
+
+**Om notes:**
+- Price is inside a clear HTF range / consolidation zone.
+- A breakout attempt above the range high appears — price pushes above the upper boundary.
+- Breakout fails: price cannot hold above the range high and reclaims back inside.
+- This is NOT a valid long. The breakout was `failed_breakout`.
+- Once price is back inside the range, the scanner marks `no_trade_zone = true` for both directions.
+- Do not enter short immediately just because the breakout failed. Being back inside the range is not short confirmation.
+- Short only becomes valid later, after: range low breaks → price holds below the range → bearish follow-through confirms.
+- This example is an `educational_negative_example` for both the failed long AND the premature short.
+
+**Observed setup moments:**
+- Price inside HTF range — `range_context = true`, `no_trade_zone = true`
+- Breakout attempt above range high: `range_high_swept = true`
+- Breakout fails: body cannot hold above range boundary — `breakout_failed = true`
+- Price reclaims back inside range: `reclaim_back_inside_range = true`
+- Both long and short entries suppressed — `entry_allowed = false`
+- Future valid short requires: `range_low_broken = true` + `hold_below_range = true` + `bearish_follow_through = true`
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `setup_type` | range_fake_breakout_reclaim_failed |
+| `range_context` | true |
+| `htf_range_active` | true |
+| `range_high_swept` | true (price temporarily breaks above range high) |
+| `breakout_failed` | true (body cannot hold above range boundary) |
+| `reclaim_back_inside_range` | true (price returns inside the purple range) |
+| `no_trade_zone` | true (both directions while inside range after failed breakout) |
+| `avoid_long_reason` | failed_breakout_back_inside_range |
+| `avoid_short_reason` | still_inside_range_until_low_break_hold |
+| `entry_allowed` | false |
+| `scanner_action` | SKIP_INSIDE_RANGE |
+| `confirmation_needed` | range_low_broken + hold_below_range + bearish_follow_through |
+| `failure_condition` | entering either direction while inside the range after failed breakout |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `breakout_failed = true` + `reclaim_back_inside_range = true` → immediately set `no_trade_zone = true` for BOTH long and short. Neither direction is valid yet.
+- `avoid_long_reason = failed_breakout_back_inside_range`: the failed breakout disqualifies longs until a fresh reclaim + hold above range high succeeds.
+- `avoid_short_reason = still_inside_range_until_low_break_hold`: the failed breakout does NOT automatically arm shorts — being back inside the range is neutral, not bearish confirmation.
+- `scanner_action = SKIP_INSIDE_RANGE` overrides any 5M signal that would otherwise fire while both conditions are active.
+- `entry_allowed = false` is the gate field: until `confirmation_needed` conditions are fully met, no entry fires in either direction.
+- Short confirmation gate (in order): `range_low_broken = true` (body close below range low) → `hold_below_range = true` (retest of range low holds as resistance) → `bearish_follow_through = true` (next bars extend lower) → only then `entry_allowed = true` (short).
+- Long confirmation gate (alternative path): `range_high_broken_and_held = true` (new clean breakout above range high + hold + follow-through) → `entry_allowed = true` (long). This alternative path is not shown in this example but is the symmetric resolution.
+- A fake breakout followed by a return inside the range is an `educational_negative_example` — it teaches what NOT to act on, not a tradeable setup.
+
+**Action labels:**
+- `SKIP_INSIDE_RANGE` — default while price is inside range after failed breakout
+- `avoid_entry` (both directions) — `no_trade_zone = true`
+- `avoid_long_reason: failed_breakout_back_inside_range` — explicit suppression flag
+- `avoid_short_reason: still_inside_range_until_low_break_hold` — explicit suppression flag
+- `WAIT_REACTION` — watching for range low to break cleanly
+- `ENTER_NOW` (short) — only after range low broken + hold below + follow-through (future state)
+- `ENTER_NOW` (long) — only after fresh clean breakout above range high + hold + follow-through (symmetric alternative, future state)
+
+---
+
+*Add next example below as Example 045*
 
 **Next planned batch:**
 - TBD by Om
