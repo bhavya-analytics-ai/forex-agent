@@ -4,7 +4,7 @@
 > Rules are NOT finalized from screenshots alone. Om approves each rule before it is implemented.
 
 **Status:** Calibration in progress
-**Examples collected:** 39 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039])
+**Examples collected:** 41 (5 × 1H context [001–005] + 8 × 15M setup [006–013] + 8 × 5M trigger [014–021] + 4 × paired 1H/5M context-execution [022–025] + 2 × paired 15M/5M news-displacement context-execution [026–027] + 2 × paired 15M/5M range-break failed-reclaim context-execution [028–029] + 2 × paired 15M/5M countertrend-green-failure context-execution [030–031] + 2 × paired 15M/5M decision-zone consolidation context-execution [032–033] + 2 × paired 15M/5M impulse-exhaustion context-execution [034–035] + 2 × paired 15M/5M HTF-range no-trade context-execution [036–037] + 2 × paired 15M/5M double-sweep reclaim long context-execution [038–039] + 2 × paired 15M/5M failed-bullish-reversal bearish-continuation context-execution [040–041])
 **Rules approved:** 0 (pending calibration)
 
 ---
@@ -2958,7 +2958,163 @@ Derived from Examples 038–039. Applies to any liquidity sweep sequence (single
 
 ---
 
-*Add next example below as Example 040*
+## Paired 15M / 5M Failed-Bullish-Reversal Bearish-Continuation Context-Execution — Examples 040–041
+
+This pair teaches that a sweep candidate is not automatically bullish. A bullish reversal requires reclaim + structure hold. If reclaim fails and bearish displacement follows, the scanner must flip to bearish continuation. The mirror of the double-sweep reclaim long (038–039) — here the reclaim attempt collapses, not succeeds.
+
+---
+
+### Example 040
+
+- **example_id:** 040
+- **timeframe:** 15M
+- **layer:** context
+- **paired_with:** 041 (5M execution view of this same context)
+- **screenshot_path:** `docs/om_gold_scalp/examples/040_15m_sweep_candidate_reclaim_failed_bearish_continuation.png`
+
+**Om notes:**
+- Price sweeps downside liquidity — initially reads as a sweep candidate for a bullish reversal.
+- Bullish reversal attempt begins: price pushes back up toward the swept level.
+- The attempt fails. Price cannot sustain the recovery — reclaim does not hold.
+- Bearish displacement follows the failed reclaim — strong directional candle in the bearish direction.
+- Bearish continuation becomes valid. This is not a clean long setup after reclaim failure.
+- Key distinction from 038: in 038 the reclaim held and displacement was bullish; here reclaim failed and displacement was bearish.
+
+**Observed setup moments:**
+- Sweep candidate: wick into downside liquidity pool
+- Bullish recovery attempt: price pushes back up, some green bars
+- Reclaim attempt fails: body close cannot hold above the swept level (`reclaim_failed = true`)
+- Bearish displacement candle prints: large bearish body, breaks back below structure
+- Bearish continuation armed: lower high forms, continuation toward lower structure
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | liquidity_sweep → reclaim_attempt → reclaim_failed → bearish_displacement → bearish_continuation |
+| `sweep_candidate` | true (downside sweep appeared initially bullish) |
+| `reclaim_attempt` | true (bullish recovery attempted) |
+| `reclaim_failed` | true (body close cannot hold above swept level) |
+| `failed_bullish_reversal` | true |
+| `bearish_displacement_after_failed_reclaim` | true |
+| `bearish_continuation_valid` | true |
+| `avoid_long_reason` | reclaim_failed + bearish_displacement_after_failed_reclaim |
+| `htf_magnet` | next lower 15M structure level |
+| `bias_source` | 15M — initially sweep candidate, flips bearish after reclaim failure + displacement |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- `sweep_candidate = true` alone does not arm long bias. Long bias requires `reclaim_confirmed = true` (see 038–039).
+- If `reclaim_attempt = true` AND `reclaim_failed = true` → `failed_bullish_reversal = true`. Cancel any pending long setup.
+- `bearish_displacement_after_failed_reclaim = true` → flip to `bearish_continuation_valid = true`. Short triggers now arm on 5M.
+- `avoid_long_reason = reclaim_failed` suppresses any new long entries until price demonstrates a fresh reclaim structure.
+- 15M does not generate entries here — it flips the bias from potential-long to confirmed-bearish for 5M execution.
+
+**Action labels:**
+- `WAIT_REACTION` — sweep candidate printed, reclaim attempt in progress
+- `low_confidence_setup` — green candles during failed reclaim phase (appearance ≠ structural truth)
+- `BIAS_ONLY` (bearish) — after `failed_bullish_reversal` + `bearish_displacement` confirm
+- Pairs with Example 041 for execution
+
+---
+
+### Example 041
+
+- **example_id:** 041
+- **timeframe:** 5M
+- **layer:** execution
+- **paired_with:** 040 (15M context map for this execution)
+- **screenshot_path:** `docs/om_gold_scalp/examples/041_5m_from_040_reclaim_failed_short_continuation_trigger.png`
+
+**Om notes:**
+- 5M execution view of the same context shown in 040.
+- Failed reclaim and failed bullish continuation are visible at 5M resolution.
+- Bearish continuation short trigger fires only after the reclaim failure is confirmed visible — not from the sweep alone.
+- Avoid entering long just because price bounced or printed green candles during the reclaim attempt.
+- Green candles during a failed reclaim phase = `single_candle_strength` without structural support = `countertrend_attempt_failed`.
+
+**Observed setup moments:**
+- 5M sweep candidate: wick into downside liquidity
+- 5M reclaim attempt: green candles push back toward swept level
+- `reclaim_failed = true` on 5M: body close cannot hold above swept level for 2+ bars
+- Bearish displacement on 5M: large bearish body breaks below prior 5M low
+- `failed_bullish_reversal = true` confirmed on 5M
+- Short trigger: bearish displacement close OR lower-high retest that fails to push above
+
+**om_zone_context:**
+
+| Field | Value |
+|---|---|
+| `zone_state` | sweep_candidate → reclaim_attempt → reclaim_failed → bearish_displacement → bearish_continuation |
+| `sweep_candidate` | true |
+| `reclaim_attempt` | true |
+| `reclaim_failed` | true |
+| `failed_bullish_reversal` | true |
+| `bearish_displacement_after_failed_reclaim` | true |
+| `bearish_continuation_valid` | true |
+| `avoid_long_reason` | reclaim_failed + bearish_displacement_after_failed_reclaim |
+| `candle_strength_mismatch` | true (green bars during reclaim attempt had `single_candle_strength` but no structural support) |
+| `entry_quality` | high for short after confirmed failure; low for any long during reclaim attempt |
+| `ema200_relation` | below_ema200 when bearish continuation fires |
+| `htf_context_id` | 040 |
+| `execution_pair_id` | 041 |
+| `paired_context_id` | 040 |
+
+**trade_lifecycle:**
+
+| Label | Description |
+|---|---|
+| Sweep candidate | `WAIT_REACTION` — possible sweep but reclaim not yet attempted |
+| Reclaim attempt (green bars) | `WAIT_REACTION` — do not long; `avoid_long_reason` active |
+| Reclaim failure confirmed | `reclaim_failed = true` — cancel any long thesis |
+| Bearish displacement | Confirms `failed_bullish_reversal` — short trigger arms |
+| Short entry | Bearish displacement close OR lower-high retest that cannot push above |
+| Short SL | Above failed reclaim wick high + 2 pts |
+| Short TP | Next 15M structure level below (htf_magnet from 040) — 15–30 pts |
+| Invalidation | Body close back above the reclaim level AND holds → reassess; reclaim may have succeeded |
+
+**scanner_rule_learned (PROPOSED — not approved):**
+- 5M `setup_action = WAIT_REACTION` during sweep and entire reclaim-attempt phase regardless of green candle count or size.
+- `avoid_long_reason` field is set as soon as `sweep_candidate = true` — long only arms if `reclaim_confirmed = true` (038 path); stays blocked if `reclaim_failed = true` (this path).
+- `setup_action = ENTER_NOW` (short) fires after ALL of: `reclaim_failed = true` AND `bearish_displacement_after_failed_reclaim = true` AND `bearish_continuation_valid = true`.
+- `candle_strength_mismatch = true` logged for every green bar during the failed reclaim phase — calibration metric for how often appearance misled.
+- The failed reclaim short is the mirror of the double-sweep reclaim long (038–039): same anatomy, opposite outcome. Scanner must check reclaim success/failure before assigning direction.
+- SL is always above the failed reclaim wick + 2 pts — the highest point price reached during the failed recovery.
+
+**Action labels:**
+- `WAIT_REACTION` — sweep candidate and reclaim attempt phase (both)
+- `avoid_entry` (long) — green candles during failed reclaim = `low_confidence_setup`
+- `ENTER_NOW` (short) — after `failed_bullish_reversal` + bearish displacement confirmed
+- `SKIP_CHASE` — entering short after price has already traveled far below the failed reclaim level
+- `BIAS_FLIP` — only if body closes back above failed reclaim level and holds (then reassess from scratch)
+
+---
+
+## Failed-Bullish-Reversal Bearish-Continuation Logic — PROPOSED
+
+Derived from Examples 040–041. This is the failure-mode mirror of Examples 038–039 (double-sweep reclaim long). Applies when a sweep candidate fails to complete the reclaim and instead produces bearish displacement.
+
+- **Sweep candidate ≠ bullish confirmation.** A wick into downside liquidity does not arm long bias without reclaim + hold.
+- **Reclaim attempt with green bars = still waiting.** Green candles during recovery are `single_candle_strength` without structural proof — `WAIT_REACTION` stays active.
+- **Reclaim failure flips bias.** `reclaim_failed = true` cancels all long setups; `failed_bullish_reversal = true` arms bearish context.
+- **Bearish displacement after failed reclaim = short trigger arms.** `bearish_displacement_after_failed_reclaim = true` combined with `bearish_continuation_valid = true` allows 5M short entry.
+- **SL anchored to the failed reclaim high.** The highest point during the recovery attempt + 2 pts is always the SL for the short.
+- **Mirror the double-sweep reclaim logic.** Same anatomy (sweep → reclaim attempt → displacement) — outcome depends on whether reclaim succeeds (038 path) or fails (040 path). Scanner checks reclaim outcome before assigning direction.
+
+**Audit fields proposed (for failed-bullish-reversal bearish-continuation logic):**
+
+| Field | Purpose |
+|---|---|
+| `sweep_candidate` | Bool — price swept downside liquidity; bullish reversal possible but not confirmed |
+| `reclaim_attempt` | Bool — price is pushing back toward the swept level (already defined; reused) |
+| `reclaim_failed` | Bool — body close cannot hold above swept level (already defined; reused) |
+| `failed_bullish_reversal` | Bool — `reclaim_attempt = true` AND `reclaim_failed = true` together |
+| `bearish_displacement_after_failed_reclaim` | Bool — large bearish displacement candle follows the failed reclaim |
+| `bearish_continuation_valid` | Bool — all confirmation conditions for bearish continuation are met |
+| `avoid_long_reason` | Enum: `reclaim_failed` / `bearish_displacement_after_failed_reclaim` / `no_reclaim_hold` |
+
+---
+
+*Add next example below as Example 042*
 
 **Next planned batch:**
 - TBD by Om
