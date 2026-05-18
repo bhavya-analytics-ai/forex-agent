@@ -102,12 +102,12 @@ def scan_pair(pair: str, return_confluence: bool = False):
         # observation but produces zero DB rows and zero Slack alerts.
         # Set OM_STRATEGY_ENABLED=true in Railway env once OM rules are live.
         if not OM_STRATEGY_ENABLED:
-            scored["entry_state"]    = "WAIT_OM_RULES"
+            scored["entry_state"]    = "WATCH_ONLY_GLOBAL_DISABLED"
             scored["should_alert"]   = False
             scored["should_log"]     = False
             scored["entry_allowed"]  = False
             scored["strategy_mode"]  = "legacy_watch_only"
-            scored["scanner_action"] = "WAIT_OM_RULES"
+            scored["scanner_action"] = "WATCH_ONLY_GLOBAL_DISABLED"
 
         # ── MARKET HOURS GATE ─────────────────────────────────────────────────
         # Hard blocks (Saturday, Sunday pre-22:00, Friday 21:30+):

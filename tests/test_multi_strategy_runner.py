@@ -47,7 +47,7 @@ def _make_scored(pair="XAU_USD", signal_mode="legacy_gold"):
         "grade":        "A",
         "direction":    "bearish",
         "signal_mode":  signal_mode,
-        "entry_state":  "WAIT_OM_RULES",
+        "entry_state":  "WATCH_ONLY_GLOBAL_DISABLED",
         "should_log":   False,
         "should_alert": False,
     }
