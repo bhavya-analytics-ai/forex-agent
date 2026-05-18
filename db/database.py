@@ -425,10 +425,19 @@ def update_agent_signal_outcome(signal_id: str, outcome: str, pips: float, notes
         conn.commit()
 
 
-def get_recent_agent_signals(limit: int = 20) -> list[dict]:
+def get_recent_agent_signals(limit: int = 20, include_archived: bool = False) -> list[dict]:
+    """
+    Return recent agent signals from SQLite.
+
+    include_archived=False (default): only is_archived=0 rows.
+      This is the default and must be the server default — archived/bad-run
+      rows must never appear unless explicitly requested.
+    include_archived=True: all rows including archived (for Show Archived view).
+    """
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT * FROM agent_signals WHERE COALESCE(is_archived,0)=0 ORDER BY timestamp_utc DESC LIMIT ?", (limit,)
+    where = "" if include_archived else "WHERE COALESCE(is_archived,0)=0"
+    rows  = conn.execute(
+        f"SELECT * FROM agent_signals {where} ORDER BY timestamp_utc DESC LIMIT ?", (limit,)
     ).fetchall()
     return [dict(r) for r in rows]
 

@@ -2310,9 +2310,13 @@ async function fetchLocalStatus() {
 
 async function fetchPerformance() {
   try {
+    // Pass include_archived explicitly so the server enforces the filter,
+    // not just the client. Appending Date.now() busts any remaining HTTP cache.
+    const _ia  = (window._showArchived || false) ? "1" : "0";
+    const _bust = Date.now();
     const [perfResp, recentResp] = await Promise.all([
-      fetch("/api/performance"),
-      fetch("/api/recent_signals"),
+      fetch(`/api/performance?_=${_bust}`),
+      fetch(`/api/recent_signals?include_archived=${_ia}&_=${_bust}`),
     ]);
     const perf   = await perfResp.json();
     const recent = await recentResp.json();

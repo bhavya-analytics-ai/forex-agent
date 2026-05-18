@@ -425,24 +425,48 @@ def api_bulk_archive():
         return jsonify({"error": str(e)}), 500
 
 
+def _no_cache_response(data):
+    """
+    Build a JSON response with cache-busting headers.
+    Prevents browser and CDN from serving stale signal/performance data.
+    """
+    from flask import make_response
+    resp = make_response(jsonify(data))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"]        = "no-cache"
+    resp.headers["Expires"]       = "0"
+    return resp
+
+
 @app.route("/api/recent_signals")
 def api_recent_signals():
-    """Returns last 20 ENTER_NOW signals — SQLite first, CSV fallback."""
+    """
+    Returns recent ENTER_NOW signals — SQLite first, CSV fallback.
+
+    Query params:
+      include_archived=0  (default) — only active signals (is_archived=0)
+      include_archived=1            — all signals including archived
+
+    Response has Cache-Control: no-store to prevent stale browser cache.
+    Archived/bad-run rows are NEVER returned unless include_archived=1.
+    """
+    from flask import request as _req
+    include_archived = _req.args.get("include_archived", "0") == "1"
+
     try:
         from db.database import get_recent_agent_signals
-        rows = get_recent_agent_signals(limit=500)
-        if rows:
-            return jsonify({"signals": _sanitize(rows)})
+        rows = get_recent_agent_signals(limit=500, include_archived=include_archived)
+        return _no_cache_response({"signals": _sanitize(rows), "include_archived": include_archived})
     except Exception as e:
         logger.warning(f"SQLite recent_signals failed, falling back to CSV: {e}")
 
-    # CSV fallback
+    # CSV fallback — archived filter not supported in CSV, always returns active only
     try:
         import pandas as pd
         from config import LOG_CONFIG
         path = LOG_CONFIG["signal_log_path"]
         if not __import__("os").path.exists(path):
-            return jsonify({"signals": []})
+            return _no_cache_response({"signals": [], "include_archived": False})
         df = pd.read_csv(path)
         cols = ["signal_id", "timestamp_utc", "pair", "direction",
                 "setup_type", "grade", "score", "entry_price",
@@ -450,11 +474,15 @@ def api_recent_signals():
         for c in cols:
             if c not in df.columns:
                 df[c] = ""
+        # CSV fallback: apply bad-window exclusion — archived rows not in CSV anyway
+        from alerts.logger import _is_bad_window_csv
+        if "timestamp_utc" in df.columns:
+            df = df[~df["timestamp_utc"].apply(_is_bad_window_csv)]
         recent = df[cols].tail(500).iloc[::-1].fillna("").to_dict("records")
-        return jsonify({"signals": recent})
+        return _no_cache_response({"signals": recent, "include_archived": False})
     except Exception as e:
         logger.error(f"recent_signals CSV fallback error: {e}")
-        return jsonify({"signals": [], "error": str(e)}), 500
+        return _no_cache_response({"signals": [], "error": str(e)})
 
 
 @app.route("/api/mark_taken", methods=["POST"])
@@ -591,7 +619,7 @@ def api_performance():
         # so they are excluded by the base is_archived filter. The bad_run_window
         # param adds the count to the audit response even if they're already archived.
         summary = get_performance_summary_db(bad_run_window=_bad_run)
-        return jsonify(_sanitize(summary))
+        return _no_cache_response(_sanitize(summary))
     except Exception as e:
         logger.warning(f"SQLite performance failed, falling back to CSV: {e}")
 
@@ -601,10 +629,10 @@ def api_performance():
         # Also write excluded rows to audit file (idempotent).
         summary = get_performance_summary(bad_run_window=_bad_run)
         _write_bad_run_audit_csv(bad_run_window=_bad_run)
-        return jsonify(_sanitize(summary))
+        return _no_cache_response(_sanitize(summary))
     except Exception as e:
         logger.error(f"performance endpoint error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return _no_cache_response({"error": str(e)})
 
 
 def _write_bad_run_audit_csv(bad_run_window: tuple) -> None:
