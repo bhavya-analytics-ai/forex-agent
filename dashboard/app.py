@@ -29,8 +29,41 @@ def _sanitize(obj):
 
 _signal_store = {}
 _audit_store  = {}          # XAU/XAG only — full proof payload
+_extra_store  = {}          # extra strategy candidates keyed by "pair|signal_mode"
 _store_lock   = threading.Lock()
 _GOLD_PAIRS   = {"XAU_USD", "XAG_USD"}
+
+
+def update_extra_candidate(pair: str, signal_mode: str, candidate: dict):
+    """
+    Push an extra strategy candidate (e.g. om_gold_scalp) to the isolated
+    extra store. Never touches _signal_store — existing /api/signals is unaffected.
+    Thread-safe.
+    """
+    key = f"{pair}|{signal_mode}"
+    with _store_lock:
+        _extra_store[key] = {
+            "pair":            pair,
+            "signal_mode":     signal_mode,
+            "entry_state":     candidate.get("entry_state", ""),
+            "direction":       candidate.get("direction", ""),
+            "setup_type":      candidate.get("setup_type", ""),
+            "should_log":      candidate.get("should_log", False),
+            "should_alert":    candidate.get("should_alert", False),
+            "entry_allowed":   candidate.get("entry_allowed", False),
+            "skip_reason":     candidate.get("skip_reason", ""),
+            "momentum_score":  candidate.get("momentum_score", 0),
+            "scanner_state_flow": candidate.get("scanner_state_flow", ""),
+            "entry_price":     candidate.get("entry_price"),
+            "sl_price":        candidate.get("sl_price"),
+            "tp1_price":       candidate.get("tp1_price"),
+            "sl_pips":         candidate.get("sl_pips", 0),
+            "sl_pts":          candidate.get("sl_pts", 0.0),
+            "rr":              candidate.get("rr", 0.0),
+            "htf_range_active": candidate.get("htf_range_active", False),
+            "zone_state":      candidate.get("zone_state", ""),
+            "updated_at":      datetime.now(timezone.utc).strftime("%H:%M:%S"),
+        }
 
 
 def update_dashboard(pair: str, scored: dict, confluence: dict, ict: dict = None):
@@ -1307,6 +1340,26 @@ def api_journal_delete(entry_id: int):
     except Exception as e:
         logger.error(f"api_journal_delete error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/signals/extra")
+def api_signals_extra():
+    """
+    Extra strategy candidates (e.g. om_gold_scalp) that run in parallel
+    with the legacy scanner but are stored separately.
+
+    Keyed by "pair|signal_mode". All entries have should_log=False and
+    should_alert=False while OM_STRATEGY_ENABLED / per-strategy flags are off.
+
+    This endpoint does NOT affect /api/signals — existing dashboard is unchanged.
+    """
+    with _store_lock:
+        data = _sanitize(list(_extra_store.values()))
+    return jsonify({
+        "candidates":  data,
+        "count":       len(data),
+        "updated_at":  datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
+    })
 
 
 def start_dashboard():

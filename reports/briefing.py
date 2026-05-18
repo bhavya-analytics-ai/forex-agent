@@ -76,6 +76,18 @@ def scan_pair(pair: str, return_confluence: bool = False):
         except Exception as e:
             logger.warning(f"Strategy error for {pair}: {e}")
 
+        # ── EXTRA STRATEGIES (parallel execution) ────────────────────────────
+        # Runs all eligible strategies beyond the primary legacy result.
+        # Each produces an independent candidate dict (primary `scored` is NOT
+        # modified). Watch-only enforcement applied inside each strategy + runner.
+        # No DB writes, no Slack — all switches default false.
+        _extra_candidates: list = []
+        try:
+            from strategies.runner import run_extra_strategies
+            _extra_candidates = run_extra_strategies(scored, confluence, pair, candles)
+        except Exception as _re:
+            logger.warning(f"Extra strategy runner error for {pair}: {_re}")
+
         # Attach trend context for display
         scored["h1_trend"]  = confluence["h1"]["structure"].get("trend", "—")
         scored["m15_trend"] = confluence["m15"]["structure"].get("trend", "—")
@@ -200,6 +212,16 @@ def scan_pair(pair: str, return_confluence: bool = False):
             update_dashboard(pair, scored, confluence, ict)
         except Exception:
             pass
+
+        # Push extra strategy candidates to dashboard under isolated keys
+        # (non-blocking; uses separate _extra_store so existing /api/signals is unaffected)
+        for _cand in _extra_candidates:
+            try:
+                _cand_mode = _cand.get("signal_mode", "unknown")
+                from dashboard.app import update_extra_candidate
+                update_extra_candidate(pair, _cand_mode, _cand)
+            except Exception:
+                pass
 
         return (scored, confluence) if return_confluence else scored
 
