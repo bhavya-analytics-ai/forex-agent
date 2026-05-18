@@ -143,6 +143,14 @@ DASHBOARD_CONFIG = {
 # Default OFF — zero performance impact when disabled.
 DEBUG_DECISIONS = os.getenv("DEBUG_DECISIONS", "false").lower() == "true"
 
+# --- OM STRATEGY KILL SWITCH ---
+# Default: false — legacy scanner runs in watch-only mode.
+#   ENTER_NOW suppressed, no DB writes, no Slack alerts.
+#   Scanner still evaluates confluence and grades for observation.
+# Set OM_STRATEGY_ENABLED=true in Railway env ONLY when OM entry rules are
+# implemented, reviewed, and approved by Om. Do not enable without his sign-off.
+OM_STRATEGY_ENABLED = os.getenv("OM_STRATEGY_ENABLED", "false").lower() == "true"
+
 # --- LOGGING ---
 LOG_CONFIG = {
     "signal_log_path":  "logs/agent_signals.csv",   # agent ENTER_NOW signals

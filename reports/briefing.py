@@ -6,7 +6,7 @@ Sessions: tokyo, london, new_york
 
 import logging
 from datetime import datetime
-from config import PAIRS, DEBUG_DECISIONS
+from config import PAIRS, DEBUG_DECISIONS, OM_STRATEGY_ENABLED
 from filters.market_hours import market_hours_gate
 from filters.quality_gate import minimum_quality_gate
 from core.fetcher import fetch_all_timeframes
@@ -83,6 +83,19 @@ def scan_pair(pair: str, return_confluence: bool = False):
 
         # Approaching warning — wire into result so main.py and dashboard can read it
         scored["approaching_warning"] = confluence.get("approaching_warning", "")
+
+        # ── OM STRATEGY KILL SWITCH ───────────────────────────────────────────
+        # When OM_STRATEGY_ENABLED=false (default): suppress all ENTER_NOW from
+        # the legacy loose scanner. Scanner still evaluates + grades for
+        # observation but produces zero DB rows and zero Slack alerts.
+        # Set OM_STRATEGY_ENABLED=true in Railway env once OM rules are live.
+        if not OM_STRATEGY_ENABLED:
+            scored["entry_state"]    = "WAIT_OM_RULES"
+            scored["should_alert"]   = False
+            scored["should_log"]     = False
+            scored["entry_allowed"]  = False
+            scored["strategy_mode"]  = "legacy_watch_only"
+            scored["scanner_action"] = "WAIT_OM_RULES"
 
         # ── MARKET HOURS GATE ─────────────────────────────────────────────────
         # Hard blocks (Saturday, Sunday pre-22:00, Friday 21:30+):
