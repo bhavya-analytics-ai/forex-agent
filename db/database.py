@@ -152,15 +152,22 @@ def init_db():
     # ── MIGRATIONS ────────────────────────────────────────────────────────────
     # agent_signals: extra user/actual level columns + oanda_trade_id
     for col, typedef in [
-        ("user_sl",        "REAL"),
-        ("user_tp1",       "REAL"),
-        ("actual_sl",      "REAL"),
-        ("actual_tp1",     "REAL"),
-        ("oanda_trade_id", "TEXT"),   # OANDA fill trade ID — needed to update GTC orders
-        ("exit_price",     "REAL"),   # actual close price if closed early/mid-trade
-        ("h1_trend_at_entry", "TEXT"),  # H1 candle direction at signal time (for training)
-        ("is_archived",    "INTEGER DEFAULT 0"),  # soft-delete: hidden from dashboard, kept for training
-        ("signal_mode",    "TEXT"),   # "normal" or "news_sniper" — mode when signal fired
+        ("user_sl",              "REAL"),
+        ("user_tp1",             "REAL"),
+        ("actual_sl",            "REAL"),
+        ("actual_tp1",           "REAL"),
+        ("oanda_trade_id",       "TEXT"),    # OANDA fill trade ID — needed to update GTC orders
+        ("exit_price",           "REAL"),    # actual close price if closed early/mid-trade
+        ("h1_trend_at_entry",    "TEXT"),    # H1 candle direction at signal time (for training)
+        ("is_archived",          "INTEGER DEFAULT 0"),  # soft-delete: hidden from dashboard, kept for training
+        ("signal_mode",          "TEXT"),    # "normal" or "news_sniper" — mode when signal fired
+        # ── Session/weekend guard audit fields (added: production guard patch) ──
+        ("weekend_block",        "INTEGER DEFAULT 0"),  # 1 = Saturday or Sunday-pre-open caused block
+        ("session_block",        "INTEGER DEFAULT 0"),  # 1 = Friday pre-close caused block
+        ("market_closed",        "INTEGER DEFAULT 0"),  # 1 = market fully closed at signal time
+        ("low_liquidity_window", "INTEGER DEFAULT 0"),  # 1 = caution window (not a hard block)
+        ("blocked_reason",       "TEXT DEFAULT ''"),    # machine-readable slug, e.g. SATURDAY_MARKET_CLOSED
+        ("entry_allowed",        "INTEGER DEFAULT 1"),  # 0 when guard blocked ENTER_NOW
     ]:
         try:
             conn.execute(f"ALTER TABLE agent_signals ADD COLUMN {col} {typedef}")
@@ -229,6 +236,12 @@ def init_db():
         logger.warning(f"signal_mode backfill failed (non-fatal): {e}")
 
     logger.info(f"SQLite DB ready at {_db_path()}")
+    # Archive any signals logged during closed-market windows (one-time cleanup,
+    # idempotent — safe to run on every startup).
+    try:
+        archive_bad_window_signals()
+    except Exception as e:
+        logger.warning(f"archive_bad_window_signals failed at startup (non-fatal): {e}")
 
 
 # ── MANUAL TRADES ─────────────────────────────────────────────────────────────
@@ -411,6 +424,94 @@ def get_recent_agent_signals(limit: int = 20) -> list[dict]:
         "SELECT * FROM agent_signals WHERE COALESCE(is_archived,0)=0 ORDER BY timestamp_utc DESC LIMIT ?", (limit,)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def archive_bad_window_signals() -> int:
+    """
+    One-time cleanup: soft-archive agent_signals that were logged during
+    closed-market windows (Saturday all-day, Sunday before 22:00 UTC,
+    Friday 21:30+ UTC).
+
+    These signals polluted win-rate stats. They are NOT deleted — is_archived=1
+    keeps them out of dashboards and performance queries while preserving the
+    raw data for training analysis.
+
+    Returns the count of rows archived. Safe to call multiple times (idempotent).
+    """
+    conn = _get_conn()
+    # Build a SQLite expression that detects bad-window timestamps.
+    # strftime('%w', ...) returns day-of-week: 0=Sunday, 6=Saturday in SQLite.
+    # Times are stored as "YYYY-MM-DD HH:MM:SS" UTC strings.
+    with _write_lock:
+        result = conn.execute("""
+            UPDATE agent_signals
+            SET    is_archived   = 1,
+                   market_closed = 1,
+                   blocked_reason = CASE
+                       WHEN strftime('%w', timestamp_utc) = '6'
+                            THEN 'SATURDAY_MARKET_CLOSED'
+                       WHEN strftime('%w', timestamp_utc) = '0'
+                            AND CAST(strftime('%H', timestamp_utc) AS INTEGER) < 22
+                            THEN 'SUNDAY_MARKET_CLOSED'
+                       WHEN strftime('%w', timestamp_utc) = '5'
+                            AND (
+                                CAST(strftime('%H', timestamp_utc) AS INTEGER) > 21
+                                OR (
+                                    CAST(strftime('%H', timestamp_utc) AS INTEGER) = 21
+                                    AND CAST(strftime('%M', timestamp_utc) AS INTEGER) >= 30
+                                )
+                            )
+                            THEN 'FRIDAY_PRE_CLOSE'
+                       ELSE blocked_reason
+                   END,
+                   weekend_block = CASE
+                       WHEN strftime('%w', timestamp_utc) IN ('0', '6') THEN 1
+                       ELSE weekend_block
+                   END,
+                   session_block = CASE
+                       WHEN strftime('%w', timestamp_utc) = '5'
+                            AND (
+                                CAST(strftime('%H', timestamp_utc) AS INTEGER) > 21
+                                OR (
+                                    CAST(strftime('%H', timestamp_utc) AS INTEGER) = 21
+                                    AND CAST(strftime('%M', timestamp_utc) AS INTEGER) >= 30
+                                )
+                            ) THEN 1
+                       ELSE session_block
+                   END
+            WHERE  COALESCE(is_archived, 0) = 0
+              AND (
+                -- Saturday all day (SQLite: %w=6)
+                strftime('%w', timestamp_utc) = '6'
+                OR
+                -- Sunday before 22:00 UTC (SQLite: %w=0)
+                (
+                    strftime('%w', timestamp_utc) = '0'
+                    AND CAST(strftime('%H', timestamp_utc) AS INTEGER) < 22
+                )
+                OR
+                -- Friday 21:30 UTC onwards (SQLite: %w=5)
+                (
+                    strftime('%w', timestamp_utc) = '5'
+                    AND (
+                        CAST(strftime('%H', timestamp_utc) AS INTEGER) > 21
+                        OR (
+                            CAST(strftime('%H', timestamp_utc) AS INTEGER) = 21
+                            AND CAST(strftime('%M', timestamp_utc) AS INTEGER) >= 30
+                        )
+                    )
+                )
+              )
+        """)
+        conn.commit()
+    count = result.rowcount
+    if count:
+        logger.info(
+            f"archive_bad_window_signals: archived {count} bad-window signals "
+            f"(Saturday/Sunday-pre-open/Friday-pre-close). "
+            f"Rows kept in DB with is_archived=1."
+        )
+    return count
 
 
 def get_unlabeled_taken_signals() -> list[dict]:

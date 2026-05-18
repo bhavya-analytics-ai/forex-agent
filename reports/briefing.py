@@ -85,9 +85,29 @@ def scan_pair(pair: str, return_confluence: bool = False):
         scored["approaching_warning"] = confluence.get("approaching_warning", "")
 
         # ── MARKET HOURS GATE ─────────────────────────────────────────────────
-        # Runs before all logging decisions. Modifies score/alert only — never
-        # touches strategy logic, confluence, or scoring internals.
+        # Hard blocks (Saturday, Sunday pre-22:00, Friday 21:30+):
+        #   - entry_state forced to SKIP_SESSION — strategy output overridden
+        #   - entry_allowed=False written to scored for audit/dashboard
+        #   - no logging, no alert (enforced in logging gate below)
+        # Caution windows (Friday 21:00–21:30, Sunday 22:00–22:59):
+        #   - score penalised, alerts suppressed — entry_state unchanged
         _mh = market_hours_gate()
+
+        if _mh["blocked"]:
+            # Force entry_state — strategy ENTER_NOW is not valid in a closed market
+            scored["entry_state"]    = "SKIP_SESSION"
+            scored["entry_allowed"]  = False
+            scored["should_alert"]   = False
+            scored["should_log"]     = False
+
+        # Attach all audit fields regardless of block/caution status
+        scored["weekend_block"]         = _mh.get("weekend_block",         False)
+        scored["session_block"]         = _mh.get("session_block",         False)
+        scored["market_closed"]         = _mh.get("market_closed",         False)
+        scored["low_liquidity_window"]  = _mh.get("low_liquidity_window",  False)
+        scored["blocked_reason"]        = _mh.get("blocked_reason",        "")
+        if "entry_allowed" not in scored:
+            scored["entry_allowed"]     = True
 
         if _mh["penalty_pts"]:
             scored["score"] = max(
