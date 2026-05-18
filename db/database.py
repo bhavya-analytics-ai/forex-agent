@@ -609,15 +609,54 @@ def update_agent_signal_levels(signal_id: str, user_sl: float | None, user_tp1: 
     return True
 
 
-def get_performance_summary_db() -> dict:
+def get_performance_summary_db(bad_run_window: tuple | None = None) -> dict:
+    """
+    Performance summary from SQLite.
+
+    Archived signals (is_archived=1) are always excluded — they were logged
+    during closed-market windows and must not pollute win-rate stats.
+
+    bad_run_window: optional (start_utc_str, end_utc_str) tuple to exclude an
+    additional manual date range. Pass None (default) to leave it off.
+    Example: ("2026-05-15 00:00:00", "2026-05-18 01:07:52")
+
+    Returns audit fields:
+      stats_source            "sqlite"
+      excluded_archived_count rows excluded by is_archived=1
+      excluded_bad_window_count rows excluded by bad_run_window (0 if not applied)
+      bad_run_window_applied  bool
+    """
     conn = _get_conn()
+
+    # Count archived rows (excluded regardless of bad_run_window)
+    excluded_archived = conn.execute(
+        "SELECT COUNT(*) FROM agent_signals WHERE COALESCE(is_archived,0)=1"
+    ).fetchone()[0]
+
+    # Build optional bad-run window clause
+    bad_window_clause       = ""
+    excluded_bad_window_cnt = 0
+    bad_run_applied         = False
+    if bad_run_window:
+        start_str, end_str   = bad_run_window
+        bad_window_clause    = f" AND (timestamp_utc < '{start_str}' OR timestamp_utc > '{end_str}')"
+        excluded_bad_window_cnt = conn.execute(
+            """SELECT COUNT(*) FROM agent_signals
+               WHERE COALESCE(is_archived,0)=0
+                 AND timestamp_utc >= ? AND timestamp_utc <= ?""",
+            (start_str, end_str)
+        ).fetchone()[0]
+        bad_run_applied = True
+
+    base_where = f"COALESCE(is_archived,0)=0{bad_window_clause}"
 
     # Agent signals stats
     agent_rows = conn.execute(
-        "SELECT outcome, outcome_pips, grade, taken FROM agent_signals WHERE COALESCE(is_archived,0)=0 AND outcome != ''"
+        f"SELECT outcome, outcome_pips, grade, taken FROM agent_signals "
+        f"WHERE {base_where} AND outcome != ''"
     ).fetchall()
 
-    # Manual trades stats
+    # Manual trades stats (no bad-window concept — manual trades are always valid)
     manual_rows = conn.execute(
         "SELECT outcome, outcome_pips FROM manual_trades WHERE outcome != ''"
     ).fetchall()
@@ -651,23 +690,37 @@ def get_performance_summary_db() -> dict:
             }
 
     # taken_count = all signals ever taken (not just labeled ones)
-    taken_count   = conn.execute("SELECT COUNT(*) FROM agent_signals WHERE COALESCE(is_archived,0)=0 AND taken = 1").fetchone()[0]
-    total_signals = conn.execute("SELECT COUNT(*) FROM agent_signals WHERE COALESCE(is_archived,0)=0").fetchone()[0]
+    taken_count   = conn.execute(
+        f"SELECT COUNT(*) FROM agent_signals WHERE {base_where} AND taken = 1"
+    ).fetchone()[0]
+    total_signals = conn.execute(
+        f"SELECT COUNT(*) FROM agent_signals WHERE {base_where}"
+    ).fetchone()[0]
     total_manual  = conn.execute("SELECT COUNT(*) FROM manual_trades").fetchone()[0]
 
+    combined_total = agent_stats["total"] + manual_stats["total"]
+    combined_wins  = agent_stats["wins"]  + manual_stats["wins"]
+    combined_loss  = agent_stats["losses"] + manual_stats["losses"]
+
     return {
+        # ── audit ──────────────────────────────────────────────────────────
+        "stats_source":               "sqlite",
+        "excluded_archived_count":    excluded_archived,
+        "excluded_bad_window_count":  excluded_bad_window_cnt,
+        "bad_run_window_applied":     bad_run_applied,
+        # ── counts ─────────────────────────────────────────────────────────
         "total_signals": total_signals,
         "total_manual":  total_manual,
         "agent":         agent_stats,
         "manual":        manual_stats,
         "taken_count":   taken_count,
         "by_grade":      by_grade,
-        # legacy keys for dashboard compat — combined agent + manual
-        "completed":     agent_stats["total"] + manual_stats["total"],
-        "wins":          agent_stats["wins"]   + manual_stats["wins"],
-        "losses":        agent_stats["losses"] + manual_stats["losses"],
-        "win_rate":      round((agent_stats["wins"] + manual_stats["wins"]) / (agent_stats["total"] + manual_stats["total"]) * 100, 1) if (agent_stats["total"] + manual_stats["total"]) > 0 else 0,
-        "avg_pips":      agent_stats["avg_pips"],
+        # ── legacy keys for dashboard compat ───────────────────────────────
+        "completed": combined_total,
+        "wins":      combined_wins,
+        "losses":    combined_loss,
+        "win_rate":  round(combined_wins / combined_total * 100, 1) if combined_total > 0 else 0,
+        "avg_pips":  agent_stats["avg_pips"],
     }
 
 

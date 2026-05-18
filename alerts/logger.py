@@ -347,17 +347,96 @@ def update_outcome(signal_id: str, outcome: str, pips: float, notes: str = ""):
     logger.info(f"Updated {signal_id}: {outcome} ({pips} pips)")
 
 
-def get_performance_summary() -> dict:
+def _is_bad_window_csv(timestamp_utc_str: str) -> bool:
+    """
+    Returns True if a CSV timestamp falls in a closed-market window that should
+    be excluded from performance stats.
+
+    Mirrors the hard-block rules in filters/market_hours.py:
+      Saturday all day          → exclude
+      Sunday before 22:00 UTC   → exclude
+      Friday 21:30+ UTC         → exclude
+
+    Used only when CSV is the fallback stats source (SQLite unavailable).
+    """
+    try:
+        from datetime import datetime
+        dt   = datetime.strptime(timestamp_utc_str.strip(), "%Y-%m-%d %H:%M:%S")
+        wd   = dt.weekday()        # Mon=0 … Sun=6
+        hhmm = dt.hour * 60 + dt.minute
+        if wd == 5:                                    # Saturday all day
+            return True
+        if wd == 6 and hhmm < 22 * 60:                # Sunday before 22:00
+            return True
+        if wd == 4 and hhmm >= 21 * 60 + 30:          # Friday 21:30+
+            return True
+    except Exception:
+        pass   # malformed timestamp → don't exclude
+    return False
+
+
+def get_performance_summary(bad_run_window: tuple | None = None) -> dict:
+    """
+    CSV-based performance summary (fallback when SQLite is unavailable).
+
+    Always excludes rows from closed-market windows (Saturday, Sunday pre-22:00,
+    Friday 21:30+) using _is_bad_window_csv().
+
+    bad_run_window: optional (start_utc_str, end_utc_str) tuple for a manual
+    exclusion window. Pass None (default) to leave it off.
+
+    Returns audit fields:
+      stats_source              "csv"
+      excluded_bad_window_count rows removed by market-hours filter
+      excluded_bad_run_count    rows removed by bad_run_window (0 if not applied)
+      bad_run_window_applied    bool
+    """
     import pandas as pd
 
     if not os.path.exists(LOG_PATH):
-        return {"error": "No signal log found"}
+        return {"error": "No signal log found", "stats_source": "csv"}
 
-    df        = pd.read_csv(LOG_PATH)
+    df = pd.read_csv(LOG_PATH)
+
+    # ── Bad-window exclusion (closed-market rows) ─────────────────────────────
+    if "timestamp_utc" in df.columns:
+        bad_window_mask = df["timestamp_utc"].apply(_is_bad_window_csv)
+        excluded_bad_window_count = int(bad_window_mask.sum())
+        df = df[~bad_window_mask]
+    else:
+        excluded_bad_window_count = 0
+
+    # ── Manual bad-run window exclusion (not applied by default) ──────────────
+    excluded_bad_run_count = 0
+    bad_run_applied        = False
+    if bad_run_window and "timestamp_utc" in df.columns:
+        start_str, end_str = bad_run_window
+        in_window = (df["timestamp_utc"] >= start_str) & (df["timestamp_utc"] <= end_str)
+        excluded_bad_run_count = int(in_window.sum())
+        df              = df[~in_window]
+        bad_run_applied = True
+
+    if df.empty or "outcome" not in df.columns:
+        return {
+            "stats_source":              "csv",
+            "excluded_bad_window_count": excluded_bad_window_count,
+            "excluded_bad_run_count":    excluded_bad_run_count,
+            "bad_run_window_applied":    bad_run_applied,
+            "total_signals":             len(df),
+            "completed":                 0,
+        }
+
     completed = df[df["outcome"].isin(["WIN", "LOSS", "NEUTRAL"])]
 
     if completed.empty:
-        return {"total_signals": len(df), "completed": 0}
+        return {
+            "stats_source":              "csv",
+            "excluded_bad_window_count": excluded_bad_window_count,
+            "excluded_bad_run_count":    excluded_bad_run_count,
+            "bad_run_window_applied":    bad_run_applied,
+            "total_signals":             len(df),
+            "completed":                 0,
+        }
 
     wins     = (completed["outcome"] == "WIN").sum()
     losses   = (completed["outcome"] == "LOSS").sum()
@@ -379,6 +458,12 @@ def get_performance_summary() -> dict:
                 }
 
     return {
+        # ── audit ──────────────────────────────────────────────────────────
+        "stats_source":              "csv",
+        "excluded_bad_window_count": excluded_bad_window_count,
+        "excluded_bad_run_count":    excluded_bad_run_count,
+        "bad_run_window_applied":    bad_run_applied,
+        # ── stats ──────────────────────────────────────────────────────────
         "total_signals": len(df),
         "completed":     total,
         "wins":          int(wins),
