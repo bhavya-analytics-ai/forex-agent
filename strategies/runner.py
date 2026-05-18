@@ -28,6 +28,42 @@ from config import OM_STRATEGY_ENABLED
 logger = logging.getLogger(__name__)
 
 
+# ── CANDLE NORMALISATION ──────────────────────────────────────────────────────
+# Production fetch_all_timeframes() returns DataFrames. om_gold_scalp expects
+# list-of-dicts. Normalise here so the strategy never sees a DataFrame.
+
+def _df_to_list(obj) -> list:
+    """
+    Convert a single candle DataFrame to list-of-dicts.
+    Pass-through if already a list. Returns [] on any failure.
+    """
+    if isinstance(obj, list):
+        return obj
+    if obj is None:
+        return []
+    try:
+        import pandas as pd
+        if not isinstance(obj, pd.DataFrame) or obj.empty:
+            return []
+        # Normalise column names to lowercase
+        renamed = obj.rename(columns={c: c.lower() for c in obj.columns})
+        needed = ("open", "high", "low", "close")
+        if not all(c in renamed.columns for c in needed):
+            return []
+        if "volume" not in renamed.columns:
+            renamed = renamed.copy()
+            renamed["volume"] = 1000.0
+        return renamed[list(needed) + ["volume"]].to_dict("records")
+    except Exception as exc:
+        logger.debug(f"_df_to_list conversion error: {exc}")
+        return []
+
+
+def _normalise_candles(candles: dict) -> dict:
+    """Convert a raw candle dict (may contain DataFrames) to list-of-dicts format."""
+    return {tf: _df_to_list(data) for tf, data in (candles or {}).items()}
+
+
 def run_extra_strategies(
     scored: dict, confluence: dict, pair: str, candles: dict
 ) -> list:
@@ -90,7 +126,7 @@ def _run_om_gold_scalp(
             "grade": primary_scored.get("grade", "C"),
         }
 
-        om_result = om_run(base, confluence, pair, candles)
+        om_result = om_run(base, confluence, pair, _normalise_candles(candles))
 
         # Gate 1: global master applied on top of per-strategy gate (Gate 2)
         if not OM_STRATEGY_ENABLED:
