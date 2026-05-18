@@ -220,10 +220,12 @@ class TestSweepReclaimLong:
           bars[23]:    displacement — large bullish body (> 1.5× avg)
         """
         bars = bearish_candles(start=base + 20, step=1.5, n=20)
-        sweep = candle(base - 2, base - 2 + 3, base - 12, base - 3)   # wick below, body stays near
-        reclaim = candle(base - 3, base + 2, base - 4, base + 1)       # body close above base
-        hold    = candle(base + 1, base + 3, base,     base + 2)       # holds above
-        displace = candle(base + 2, base + 14, base + 1, base + 13)    # large bullish body
+        # sweep low=base-13: clears prior swing low (~base-11.5) by >1.5pts ✓
+        # displace close=base+1: entry_dist=14 ≤ 25 (no chase), sl_pts=16 ≤ 20, RR=1.5 ✓
+        sweep    = candle(base - 2, base + 1, base - 13, base - 3)  # wick down, body back up
+        reclaim  = candle(base - 3, base + 2, base - 4,  base + 1)  # body close above level
+        hold     = candle(base + 1, base + 3, base,      base + 2)  # holds above
+        displace = candle(base - 2, base + 4, base - 3,  base + 1)  # bullish body, close=base+1
         bars += [sweep, reclaim, hold, displace]
         return bars
 
@@ -243,22 +245,27 @@ class TestSweepReclaimLong:
         assert result["setup_type"]  == "sweep_reclaim_long"
 
     def test_sweep_alone_no_entry(self, monkeypatch):
-        """Sweep bar printed but no reclaim yet → WAIT_RETEST."""
+        """Sweep detected but no displacement yet → not ENTER_NOW (WAIT_HOLD or earlier)."""
         mod = _import_strategy()
         import config
         monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
 
         base = 2300.0
         bars = bearish_candles(start=base + 20, step=1.5, n=20)
-        # Sweep bar only — no reclaim candle follows
-        sweep = candle(base - 2, base - 2 + 3, base - 12, base - 3)
-        bars.append(sweep)
+        # Sweep: low=base-13 clears prior swing low by >1.5pts
+        sweep     = candle(base - 2, base + 1, base - 13, base - 3)
+        # Small follow bar — body=1, well below the displacement threshold
+        small_bar = candle(base - 3, base,     base - 4,  base - 2)
+        bars += [sweep, small_bar]
 
-        confluence = make_confluence(m5_candles=bars, m5_trend="bearish")
+        confluence = make_confluence(m5_candles=bars, m5_trend="bearish",
+                                     h1_trend="bearish")
         candles    = make_candles_dict(m5=bars)
         result     = mod.run({}, confluence, "XAU_USD", candles)
 
-        assert result["entry_state"] in ("WAIT_RETEST", "WAIT_REACTION", "WAIT_RECLAIM")
+        assert result["entry_state"] in (
+            "WAIT_RETEST", "WAIT_REACTION", "WAIT_RECLAIM", "WAIT_HOLD"
+        )
         assert result.get("sweep_candidate") is True
 
 
@@ -267,14 +274,17 @@ class TestFailedReclaimShort:
 
     def _build_failed_reclaim_m5(self, sr=2300.0):
         """
-        bars[0..19]: bearish context, price below sr
-        bars[20]:    reclaim attempt — wick above sr, body closes back below
-        bars[21]:    bearish displacement — large bearish body
+        bars[0..19]: flat context near sr-5 (highs ≈ sr-3)
+        bars[20]:    bullish sweep — wick spikes above prior swing high by >1.5pts, body closes back
+        bars[21]:    reclaim attempt — wick above sweep_high, body closes below
+        bars[22]:    bearish displacement — large bearish body
         """
-        bars = bearish_candles(start=sr + 20, step=2.0, n=20)
-        reclaim_fail = candle(sr - 2, sr + 5, sr - 3, sr - 1)     # wick above sr, body stays below
-        displace     = candle(sr - 1, sr,      sr - 14, sr - 13)   # large bearish body
-        bars += [reclaim_fail, displace]
+        # Flat near sr-5 so prior_swing_high ≈ sr-3 (price+2). A wick to sr+3 clears it by >1.5pts.
+        bars = flat_candles(price=sr - 5, n=20)
+        sweep_up     = candle(sr - 5, sr + 3,  sr - 7,  sr - 4)   # high=sr+3>prior+1.5 ✓, body back
+        reclaim_fail = candle(sr - 2, sr + 5,  sr - 3,  sr - 1)   # wick>sweep_high-1.5, body below
+        displace     = candle(sr - 1, sr,       sr - 14, sr - 13)  # large bearish body
+        bars += [sweep_up, reclaim_fail, displace]
         return bars, sr
 
     def test_failed_reclaim_short_enter_now(self, monkeypatch):
@@ -298,12 +308,15 @@ class TestRangeBreakdownBearish:
 
     def _build_breakdown_m5(self, range_low=2290.0):
         """
-        bars[0..19]: range context (oscillating)
+        bars[0..19]: range context — flat at range_low+2, inside H1 range [range_low, range_low+4]
         bars[20]:    body close below range_low
         bars[21]:    retest — wicks up toward range_low, body holds below
         bars[22]:    follow-through — closes lower
+
+        M5 context at range_low+2 keeps all bars below range_high (range_low+4)
+        so fake_breakout detection does not fire before range_breakdown.
         """
-        bars = flat_candles(price=range_low + 10, n=20)
+        bars = flat_candles(price=range_low + 2, n=20)
         breakdown    = candle(range_low + 1, range_low + 3, range_low - 5, range_low - 3)
         retest       = candle(range_low - 3, range_low - 0.5, range_low - 6, range_low - 4)
         follow       = candle(range_low - 4, range_low - 3,  range_low - 12, range_low - 10)
@@ -315,9 +328,10 @@ class TestRangeBreakdownBearish:
         import config
         monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
 
-        m5, rlow = self._build_breakdown_m5(range_low=2290.0)
-        # H1 shows range context
-        h1 = flat_candles(price=2300.0, n=60)
+        range_low = 2290.0
+        m5, rlow = self._build_breakdown_m5(range_low=range_low)
+        # H1: flat_candles with price = range_low + 2 so swing_low ≈ range_low
+        h1 = flat_candles(price=range_low + 2, n=60)
         confluence = make_confluence(h1_candles=h1, m5_candles=m5,
                                      h1_trend="chop", m5_trend="bearish")
         candles = make_candles_dict(h1=h1, m5=m5)
@@ -348,8 +362,10 @@ class TestRangeFakeBreakoutSkip:
         import config
         monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
 
-        m5, rhigh = self._build_fake_breakout_m5(range_high=2310.0)
-        h1 = flat_candles(price=2300.0, n=60)
+        range_high = 2310.0
+        m5, rhigh = self._build_fake_breakout_m5(range_high=range_high)
+        # H1: flat_candles with price = range_high - 2 so swing_high ≈ range_high
+        h1 = flat_candles(price=range_high - 2, n=60)
         confluence = make_confluence(h1_candles=h1, m5_candles=m5, h1_trend="chop")
         candles = make_candles_dict(h1=h1, m5=m5)
         result  = mod.run({}, confluence, "XAU_USD", candles)
@@ -366,8 +382,9 @@ class TestRangeFakeBreakoutSkip:
         import config
         monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
 
-        m5, rhigh = self._build_fake_breakout_m5(range_high=2310.0)
-        h1 = flat_candles(price=2300.0, n=60)
+        range_high = 2310.0
+        m5, rhigh = self._build_fake_breakout_m5(range_high=range_high)
+        h1 = flat_candles(price=range_high - 2, n=60)
         confluence = make_confluence(h1_candles=h1, m5_candles=m5, h1_trend="chop")
         candles = make_candles_dict(h1=h1, m5=m5)
         result  = mod.run({}, confluence, "XAU_USD", candles)
@@ -386,17 +403,20 @@ class TestSlTooWide:
         import config
         monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
 
-        # Sweep extreme 25 pts below reclaim level → SL = 25 + 2 buffer = 27 pts → too wide
+        # Sweep 27pts deep → SL = entry_dist + 2 > 20.
+        # Displace closes at base-4 (entry_dist=23 ≤ 25 chase threshold, sl_pts=25 > 20).
         base = 2300.0
         bars = bearish_candles(start=base + 20, step=1.5, n=20)
-        sweep    = candle(base - 2, base + 1, base - 27, base - 2)   # 27 pt wick
-        reclaim  = candle(base - 2, base + 2, base - 3, base + 1)
-        hold     = candle(base + 1, base + 3, base,     base + 2)
-        displace = candle(base + 2, base + 14, base + 1, base + 13)
+        sweep    = candle(base - 2, base + 1,  base - 27, base - 2)   # low = base-27
+        reclaim  = candle(base - 2, base + 2,  base - 3,  base + 1)
+        hold     = candle(base + 1, base + 3,  base,      base + 2)
+        displace = candle(base - 9, base - 3,  base - 10, base - 4)   # close=base-4, bullish, body=5
         bars += [sweep, reclaim, hold, displace]
 
-        confluence = make_confluence(m5_candles=bars)
-        candles    = make_candles_dict(m5=bars)
+        # Use bearish H1 trend so range gate doesn't fire before the SL check
+        h1 = bearish_candles(start=base + 60, step=2.0, n=40)
+        confluence = make_confluence(m5_candles=bars, h1_candles=h1, h1_trend="bearish")
+        candles    = make_candles_dict(m5=bars, h1=h1)
         result     = mod.run({}, confluence, "XAU_USD", candles)
 
         assert result["entry_state"] in ("SKIP", "SKIP_CHOP")
@@ -411,17 +431,19 @@ class TestChaseDistance:
         import config
         monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
 
-        # Valid sweep+reclaim but displacement moves price 30 pts from zone
+        # Valid sweep+reclaim but displacement moves price 31 pts from sweep low
         base = 2300.0
         bars = bearish_candles(start=base + 20, step=1.5, n=20)
-        sweep    = candle(base - 2, base + 1, base - 10, base - 3)
+        sweep    = candle(base - 2, base + 1, base - 13, base - 3)  # low=base-13, clears prior swing
         reclaim  = candle(base - 3, base + 2, base - 4, base + 1)
         hold     = candle(base + 1, base + 3, base,     base + 2)
         displace = candle(base + 2, base + 32, base + 1, base + 31)  # 31 pts from zone
         bars += [sweep, reclaim, hold, displace]
 
-        confluence = make_confluence(m5_candles=bars)
-        candles    = make_candles_dict(m5=bars)
+        # Use bearish H1 trend so range gate doesn't fire before the chase check
+        h1 = bearish_candles(start=base + 60, step=2.0, n=40)
+        confluence = make_confluence(m5_candles=bars, h1_candles=h1, h1_trend="bearish")
+        candles    = make_candles_dict(m5=bars, h1=h1)
         result     = mod.run({}, confluence, "XAU_USD", candles)
 
         assert result["entry_state"] == "SKIP_CHASE"
@@ -488,10 +510,10 @@ class TestMomentumScore:
 
         base = 2300.0
         bars = bearish_candles(start=base + 20, step=1.5, n=20)
-        sweep    = candle(base - 2, base - 2 + 3, base - 12, base - 3)
-        reclaim  = candle(base - 3, base + 2, base - 4, base + 1)
-        hold     = candle(base + 1, base + 3, base,     base + 2)
-        displace = candle(base + 2, base + 14, base + 1, base + 13)
+        sweep    = candle(base - 2, base + 1, base - 13, base - 3)
+        reclaim  = candle(base - 3, base + 2, base - 4,  base + 1)
+        hold     = candle(base + 1, base + 3, base,      base + 2)
+        displace = candle(base - 2, base + 4, base - 3,  base + 1)
         bars += [sweep, reclaim, hold, displace]
 
         confluence = make_confluence(m5_candles=bars)
@@ -565,10 +587,10 @@ class TestTradeLevels:
         monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
 
         bars = bearish_candles(start=base + 20, step=1.5, n=20)
-        sweep    = candle(base - 2, base - 2 + 3, base - 12, base - 3)
-        reclaim  = candle(base - 3, base + 2, base - 4, base + 1)
-        hold     = candle(base + 1, base + 3, base,     base + 2)
-        displace = candle(base + 2, base + 14, base + 1, base + 13)
+        sweep    = candle(base - 2, base + 1, base - 13, base - 3)
+        reclaim  = candle(base - 3, base + 2, base - 4,  base + 1)
+        hold     = candle(base + 1, base + 3, base,      base + 2)
+        displace = candle(base - 2, base + 4, base - 3,  base + 1)
         bars += [sweep, reclaim, hold, displace]
         confluence = make_confluence(m5_candles=bars, m5_trend="bearish")
         candles    = make_candles_dict(m5=bars)
