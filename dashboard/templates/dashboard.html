@@ -664,6 +664,127 @@
     margin-bottom: 16px;
   }
 
+  /* ── OM SCALP PANEL ───────────────────────────────────────────── */
+  .om-panel {
+    background: var(--navy-dark);
+    border: 1px solid #1e3a6e;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 12px auto 0;
+    max-width: 1400px;
+  }
+  .om-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .om-panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--yellow);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .om-panel-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    background: #1a1200;
+    color: #ffb300;
+    border: 1px solid #4a3000;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .om-panel-ts {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    margin-left: auto;
+  }
+  .om-cards-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .om-card {
+    background: var(--navy-mid);
+    border: 1px solid var(--navy-border);
+    border-radius: 8px;
+    padding: 12px 15px;
+    min-width: 220px;
+    flex: 1 1 220px;
+    max-width: 320px;
+  }
+  .om-card.state-enter  { border-color: #00c853; }
+  .om-card.state-wait   { border-color: #ff8f00; }
+  .om-card.state-skip   { border-color: #333; }
+  .om-card-pair {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--blue-bright);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 6px;
+  }
+  .om-card-state {
+    font-size: 13px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 8px;
+  }
+  .om-card-state.enter { color: var(--green); }
+  .om-card-state.wait  { color: var(--yellow); }
+  .om-card-state.skip  { color: var(--text-muted); }
+  .om-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 2px 0;
+  }
+  .om-card-row .lbl { color: var(--text-dim); }
+  .om-card-row .val { color: var(--text-primary); font-weight: 600; }
+  .om-card-row .val.muted { color: var(--text-muted); }
+  .om-mom-bar-wrap {
+    background: #0a1628;
+    border-radius: 3px;
+    height: 4px;
+    margin: 6px 0 4px;
+    overflow: hidden;
+  }
+  .om-mom-bar {
+    height: 4px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #ff4444 0%, #ffd740 50%, #00e676 80%);
+    transition: width .4s ease;
+  }
+  .om-watch-badge {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    background: #0d1f0d;
+    color: #4caf50;
+    border: 1px solid #1b5e20;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 6px;
+  }
+  .om-empty {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    padding: 6px 0;
+  }
+  /* ─────────────────────────────────────────────────────────────── */
+
   .trade-card {
     background: var(--navy-mid);
     border: 1px solid var(--navy-border);
@@ -1791,6 +1912,18 @@
 </table>
 </div>
 
+<!-- OM GOLD SCALP WATCH-ONLY PANEL -->
+<div class="om-panel" id="om-scalp-panel">
+  <div class="om-panel-header">
+    <span class="om-panel-title">⚡ OM Gold Scalp</span>
+    <span class="om-panel-badge">WATCH-ONLY</span>
+    <span class="om-panel-ts" id="om-panel-ts">—</span>
+  </div>
+  <div class="om-cards-grid" id="om-cards-grid">
+    <div class="om-empty">Waiting for scanner data…</div>
+  </div>
+</div>
+
 <div class="footer">
   <span>Slack:</span> A+ and A only &nbsp;·&nbsp;
   <span>Dashboard:</span> all grades &nbsp;·&nbsp;
@@ -2873,11 +3006,93 @@ async function deleteSignal(signalId, kind, btn) {
   }
 }
 
+// ── OM GOLD SCALP PANEL ──────────────────────────────────────────────────────
+
+function _omStateClass(entry_state) {
+  if (!entry_state) return "skip";
+  if (entry_state === "ENTER_NOW") return "enter";
+  if (entry_state.startsWith("WAIT")) return "wait";
+  return "skip";
+}
+
+function buildOmCard(c) {
+  const pair        = c.pair        || "XAU_USD";
+  const entry_state = c.entry_state || "SKIP";
+  const setup_type  = c.setup_type  || "—";
+  const direction   = c.direction   || "—";
+  const mom         = typeof c.momentum_score === "number" ? c.momentum_score : 0;
+  const min_mom     = c.min_momentum_required || 50;
+  const gate_passed = c.momentum_gate_passed === true;
+  const skip_reason = c.skip_reason || "";
+  const flow        = c.scanner_state_flow || "—";
+  const sc          = _omStateClass(entry_state);
+  const barPct      = Math.min(100, Math.round((mom / 100) * 100));
+
+  const skipRow = skip_reason
+    ? `<div class="om-card-row"><span class="lbl">skip</span><span class="val muted">${skip_reason}</span></div>`
+    : "";
+
+  const dirColor = direction === "bullish" ? "var(--green)" : direction === "bearish" ? "var(--red)" : "var(--text-dim)";
+
+  return `
+<div class="om-card state-${sc}">
+  <div class="om-card-pair">${pair.replace("_","/")} · om_gold_scalp</div>
+  <div class="om-card-state ${sc}">${entry_state}</div>
+  <div class="om-card-row">
+    <span class="lbl">setup</span>
+    <span class="val">${setup_type.replace(/_/g," ")}</span>
+  </div>
+  <div class="om-card-row">
+    <span class="lbl">direction</span>
+    <span class="val" style="color:${dirColor}">${direction}</span>
+  </div>
+  <div class="om-card-row">
+    <span class="lbl">momentum</span>
+    <span class="val">${mom}<span style="color:var(--text-dim);font-weight:400"> / ${min_mom} req</span></span>
+  </div>
+  <div class="om-mom-bar-wrap">
+    <div class="om-mom-bar" style="width:${barPct}%"></div>
+  </div>
+  <div class="om-card-row">
+    <span class="lbl">gate</span>
+    <span class="val ${gate_passed ? '' : 'muted'}">${gate_passed ? "✓ passed" : "✗ blocked"}</span>
+  </div>
+  ${skipRow}
+  <div class="om-card-row" style="margin-top:4px">
+    <span class="lbl">should_log</span><span class="val muted">false</span>
+  </div>
+  <div class="om-card-row">
+    <span class="lbl">should_alert</span><span class="val muted">false</span>
+  </div>
+  <div style="margin-top:6px;font-size:9px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;word-break:break-word;line-height:1.5">${flow}</div>
+  <div class="om-watch-badge">watch-only · no DB · no Slack</div>
+</div>`;
+}
+
+async function fetchOmExtra() {
+  try {
+    const resp = await fetch("/api/signals/extra");
+    const data = await resp.json();
+    const candidates = data.candidates || [];
+    const grid = document.getElementById("om-cards-grid");
+    const ts   = document.getElementById("om-panel-ts");
+    if (ts) ts.textContent = data.updated_at || "—";
+    if (!grid) return;
+    if (candidates.length === 0) {
+      grid.innerHTML = '<div class="om-empty">No extra candidates yet — waiting for scan cycle…</div>';
+      return;
+    }
+    grid.innerHTML = candidates.map(buildOmCard).join("");
+  } catch(e) { console.warn("OM extra fetch error:", e); }
+}
+
 fetchAndRender();
 fetchPerformance();                     // populate summary bar immediately on load
 fetchLocalStatus();                     // local DB counts via localhost:5001
+fetchOmExtra();                         // OM Gold Scalp watch-only panel
 setInterval(fetchAndRender, REFRESH_MS);
 setInterval(fetchPerformance, 10000);   // performance stats refresh every 10s
+setInterval(fetchOmExtra,     REFRESH_MS); // OM panel refreshes with main loop
 setInterval(updateClock, 1000);
 updateClock();
 
