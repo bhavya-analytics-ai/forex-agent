@@ -2778,13 +2778,8 @@ function toggleShowArchived() {
   window._showArchived = !window._showArchived;
   const btn = document.getElementById("archive-toggle-btn");
   if (btn) btn.textContent = window._showArchived ? "👁 Hide Archived" : "👁 Show Archived";
-  // Re-render both tables immediately with cached data — no fetch needed
-  if (window._lastPerfData) {
-    renderPerformance(window._lastPerfData.perf, window._lastPerfData.signals);
-  }
-  if (window._lastManualTrades) {
-    renderManualTrades(window._lastManualTrades);
-  }
+  // Always re-fetch from API — cached data may be stale after archive/deploy.
+  fetchPerformance();
 }
 
 async function archiveManualTrade(signalId, archive, btn) {
