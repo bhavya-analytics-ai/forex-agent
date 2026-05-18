@@ -424,7 +424,7 @@ def _calc_trade_levels(entry_price, sl_extreme, direction, htf_magnet=0.0):
         tp2_price = entry_price - TP1_MAX_PTS
 
     if sl_pts > MAX_SL_PTS:
-        return None  # caller treats as sl_too_wide
+        return None  # caller treats as sl_too_wide; use _compute_sl_raw to surface values
 
     tp1_pts = abs(tp1_price - entry_price)
     sl_pips = round(sl_pts * 100)   # 1 pt = 100 pips for XAU (pip_size 0.01)
@@ -442,6 +442,28 @@ def _calc_trade_levels(entry_price, sl_extreme, direction, htf_magnet=0.0):
         "tp1_pts":     round(tp1_pts, 2),
         "rr":          rr,
     }
+
+
+# ── RAW SL COMPUTATION (no gate) ─────────────────────────────────────────────
+
+def _compute_sl_raw(entry_price: float, sl_extreme: float, direction: str):
+    """
+    Compute sl_price and sl_pts using the same formula as _calc_trade_levels
+    but WITHOUT the MAX_SL_PTS gate.
+
+    Used exclusively at sl_too_wide rejection sites so the output dict always
+    carries numeric sl_price_candidate and sl_pts even when SL is rejected.
+    This is debug/audit only — does NOT change any entry decision.
+
+    Returns: (sl_price: float, sl_pts: float)  — both rounded, sl_pts >= 0.
+    """
+    if direction == "bullish":
+        sl_price = sl_extreme - SL_BUFFER_PTS
+        sl_pts   = entry_price - sl_price
+    else:
+        sl_price = sl_extreme + SL_BUFFER_PTS
+        sl_pts   = sl_price - entry_price
+    return round(sl_price, 3), round(max(0.0, sl_pts), 2)
 
 
 # ── MOMENTUM SCORE ────────────────────────────────────────────────────────────
@@ -676,10 +698,13 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 if levels is not None:
                     out["sl_price_candidate"] = levels["sl_price"]
                 if levels is None:
-                    out["sl_gate_passed"]  = False
-                    out["rejection_stage"] = "sl_check"
-                    out["rejection_reason"] = "sl_too_wide"
-                    out["skip_reason"] = "sl_too_wide"
+                    _raw_sl_price, _raw_sl_pts = _compute_sl_raw(entry_price, sl_extreme, "bearish")
+                    out["sl_price_candidate"] = _raw_sl_price
+                    out["sl_pts"]             = _raw_sl_pts
+                    out["sl_gate_passed"]     = False
+                    out["rejection_stage"]    = "sl_check"
+                    out["rejection_reason"]   = f"sl_pts={_raw_sl_pts} > max={MAX_SL_PTS}"
+                    out["skip_reason"]        = "sl_too_wide"
                     out["scanner_state_flow"] = "range_breakdown → sl_too_wide"
                     _apply_watch_only_gate(out)
                     return out
@@ -793,11 +818,16 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 out["sl_price_candidate"] = levels["sl_price"]
 
             if levels is None:
-                out["sl_gate_passed"]  = False
-                out["entry_state"]     = "SKIP"
-                out["skip_reason"]     = "sl_too_wide"
-                out["rejection_stage"] = "sl_check"
-                out["rejection_reason"] = "sl_too_wide"
+                _raw_sl_price, _raw_sl_pts = _compute_sl_raw(
+                    entry_price_candidate, sweep_extreme, "bullish"
+                )
+                out["sl_price_candidate"] = _raw_sl_price
+                out["sl_pts"]             = _raw_sl_pts
+                out["sl_gate_passed"]     = False
+                out["entry_state"]        = "SKIP"
+                out["skip_reason"]        = "sl_too_wide"
+                out["rejection_stage"]    = "sl_check"
+                out["rejection_reason"]   = f"sl_pts={_raw_sl_pts} > max={MAX_SL_PTS}"
                 out["scanner_state_flow"] = "sweep_detected → sl_too_wide → SKIP"
                 out["evaluated_branches"] = _branches
                 _apply_watch_only_gate(out)
@@ -938,10 +968,15 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                         out["sl_price_candidate"] = levels["sl_price"]
 
                     if levels is None:
-                        out["sl_gate_passed"]  = False
-                        out["skip_reason"]     = "sl_too_wide"
-                        out["rejection_stage"] = "sl_check"
-                        out["rejection_reason"] = "sl_too_wide"
+                        _raw_sl_price, _raw_sl_pts = _compute_sl_raw(
+                            entry_price, sl_extreme, "bearish"
+                        )
+                        out["sl_price_candidate"] = _raw_sl_price
+                        out["sl_pts"]             = _raw_sl_pts
+                        out["sl_gate_passed"]     = False
+                        out["skip_reason"]        = "sl_too_wide"
+                        out["rejection_stage"]    = "sl_check"
+                        out["rejection_reason"]   = f"sl_pts={_raw_sl_pts} > max={MAX_SL_PTS}"
                         out["scanner_state_flow"] = "failed_reclaim → sl_too_wide"
                         out["evaluated_branches"] = _branches
                         _apply_watch_only_gate(out)
@@ -1044,13 +1079,46 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
         return out
 
 
+# ── SKIP CLASSIFICATION CONSISTENCY GUARD ────────────────────────────────────
+
+def _enforce_skip_consistency(out: dict) -> None:
+    """
+    Invariant: skip_reason="sl_too_wide" is ONLY valid when ALL of:
+      - entry_price_candidate is not None   (a real candidate was found)
+      - sl_price_candidate is not None      (SL was computed before rejection)
+      - sl_pts is numeric and > 0           (the actual pts that exceeded the gate)
+
+    If any precondition is missing the caller set sl_too_wide incorrectly
+    (no real setup existed). Reclassify to no_setup so the debug panel
+    never shows an inconsistent state.
+
+    Called as the first step of _apply_watch_only_gate so it fires on every
+    return path without requiring individual call sites to remember.
+    """
+    if out.get("skip_reason") != "sl_too_wide":
+        return
+
+    has_entry   = out.get("entry_price_candidate") is not None
+    has_sl_cand = out.get("sl_price_candidate")    is not None
+    has_sl_pts  = isinstance(out.get("sl_pts"), (int, float)) and out.get("sl_pts", 0) > 0
+
+    if not (has_entry and has_sl_cand and has_sl_pts):
+        out["skip_reason"]        = "no_setup"
+        out["rejection_stage"]    = "setup_detection"
+        out["rejection_reason"]   = "no_valid_candidate"
+        out["scanner_state_flow"] = "no_sweep_no_range_event → SKIP"
+
+
 # ── WATCH-ONLY GATE ───────────────────────────────────────────────────────────
 
 def _apply_watch_only_gate(out: dict) -> None:
     """
-    Mutate `out` in place. If OM_GOLD_SCALP_ENABLED is false,
-    suppress should_log and should_alert but preserve all audit fields.
+    Mutate `out` in place.
+    1. Enforce skip classification consistency (sl_too_wide preconditions).
+    2. If OM_GOLD_SCALP_ENABLED is false, suppress should_log and should_alert
+       but preserve all audit fields.
     """
+    _enforce_skip_consistency(out)   # invariant check on every return path
     if not OM_GOLD_SCALP_ENABLED:
         out["should_log"]   = False
         out["should_alert"] = False

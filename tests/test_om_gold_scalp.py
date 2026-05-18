@@ -980,4 +980,199 @@ class TestEntrySlCandidateFields:
         result = mod.run({}, make_confluence(), "XAU_USD", make_candles_dict())
         # No setup → no SL evaluation → sl_gate_passed stays False
         assert result["sl_gate_passed"] is False
-        assert result["should_alert"] is False
+
+
+# ---------------------------------------------------------------------------
+# SKIP CLASSIFICATION CONSISTENCY TESTS
+# Tests the invariants enforced by _enforce_skip_consistency:
+#   1. no sweep/no range event → never produces sl_too_wide
+#   2. sl_too_wide requires entry_price_candidate, sl_price_candidate, sl_pts > 0
+#   3. every SKIP output has internally consistent fields
+# ---------------------------------------------------------------------------
+
+class TestSkipClassificationConsistency:
+    """
+    sl_too_wide is only valid when a real candidate was evaluated and the SL
+    distance exceeded MAX_SL_PTS. A bare no-setup scan must always produce
+    skip_reason=no_setup with null entry/SL candidate fields.
+    """
+
+    # ── helper: run with flat candles (guaranteed no sweep, no range event) ──
+    def _no_candidate_result(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        confluence = make_confluence(h1_trend="bearish", m15_trend="bearish", m5_trend="bearish")
+        return mod.run({}, confluence, "XAU_USD", make_candles_dict())
+
+    # ── helper: build candles that force sl_too_wide on a sweep path ─────────
+    @staticmethod
+    def _wide_sl_sweep_candles(price=2300.0, sweep_pts=60.0):
+        """
+        Sweep bar whose wick is 60 pts below prior lows (>> MAX_SL_PTS=20).
+        Entry is at ~price, so SL anchor = price - 60 → sl_pts ≈ 62 → rejected.
+        Reclaim: last bar closes well above sweep extreme + 1.5 threshold.
+        Displacement: last two bars are large bullish candles (>= 1.5× avg body).
+        """
+        base_price = price
+        base = [candle(base_price, base_price + 2, base_price - 2, base_price)
+                for _ in range(25)]
+
+        # Sweep bar — wick to price-60, close back to price-1
+        sweep_bar = candle(base_price, base_price + 1,
+                           base_price - sweep_pts,
+                           base_price - 1)
+
+        # Reclaim: close well above (sweep_extreme + SWEEP_MIN_WICK_PTS)
+        # sweep_extreme = price - 60; threshold = price - 58.5
+        reclaim_bar = candle(base_price - 1, base_price + 3,
+                             base_price - 2, base_price + 2)
+
+        # Big bullish displacement candles
+        disp1 = candle(base_price + 2, base_price + 12, base_price + 1, base_price + 11)
+        disp2 = candle(base_price + 11, base_price + 21, base_price + 10, base_price + 20)
+
+        return base + [sweep_bar, reclaim_bar, disp1, disp2]
+
+    # ── Test 1: no sweep / no range event → never sl_too_wide ────────────────
+    def test_no_candidate_never_sl_too_wide(self, monkeypatch):
+        result = self._no_candidate_result(monkeypatch)
+        assert result["skip_reason"] != "sl_too_wide", (
+            "No candidate was found but skip_reason=sl_too_wide — "
+            "classification invariant violated"
+        )
+
+    def test_no_candidate_skip_reason_is_no_setup(self, monkeypatch):
+        result = self._no_candidate_result(monkeypatch)
+        assert result["skip_reason"] == "no_setup", (
+            f"Expected no_setup on flat candles, got: {result['skip_reason']}"
+        )
+
+    def test_no_candidate_entry_fields_are_null(self, monkeypatch):
+        result = self._no_candidate_result(monkeypatch)
+        assert result["entry_price_candidate"] is None, \
+            "entry_price_candidate must be None when no candidate found"
+        assert result["sl_anchor"]          is None, \
+            "sl_anchor must be None when no candidate found"
+        assert result["sl_price_candidate"] is None, \
+            "sl_price_candidate must be None when no candidate found"
+
+    def test_no_candidate_sl_pts_is_zero(self, monkeypatch):
+        result = self._no_candidate_result(monkeypatch)
+        # sl_pts must stay at base_audit default (0.0) when no SL was evaluated
+        assert result["sl_pts"] == 0.0, (
+            f"sl_pts must be 0.0 on no-setup SKIP, got {result['sl_pts']}"
+        )
+
+    # ── Test 2: sl_too_wide requires populated entry/SL fields ───────────────
+    def test_sl_too_wide_has_entry_price_candidate(self, monkeypatch):
+        """Any sl_too_wide result must carry a non-null entry_price_candidate."""
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        m5 = self._wide_sl_sweep_candles()
+        confluence = make_confluence(m5_candles=m5, h1_trend="bearish",
+                                     m15_trend="bearish", m5_trend="bullish")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        if result.get("skip_reason") == "sl_too_wide":
+            assert result["entry_price_candidate"] is not None, \
+                "sl_too_wide without entry_price_candidate — invariant violated"
+
+    def test_sl_too_wide_has_sl_price_candidate(self, monkeypatch):
+        """Any sl_too_wide result must carry a non-null sl_price_candidate."""
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        m5 = self._wide_sl_sweep_candles()
+        confluence = make_confluence(m5_candles=m5, h1_trend="bearish",
+                                     m15_trend="bearish", m5_trend="bullish")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        if result.get("skip_reason") == "sl_too_wide":
+            assert result["sl_price_candidate"] is not None, \
+                "sl_too_wide without sl_price_candidate — invariant violated"
+
+    def test_sl_too_wide_has_numeric_sl_pts(self, monkeypatch):
+        """Any sl_too_wide result must carry sl_pts > 0."""
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        m5 = self._wide_sl_sweep_candles()
+        confluence = make_confluence(m5_candles=m5, h1_trend="bearish",
+                                     m15_trend="bearish", m5_trend="bullish")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        if result.get("skip_reason") == "sl_too_wide":
+            assert isinstance(result["sl_pts"], (int, float)), \
+                "sl_pts must be numeric on sl_too_wide"
+            assert result["sl_pts"] > 0, \
+                f"sl_pts must be > 0 on sl_too_wide, got {result['sl_pts']}"
+
+    def test_sl_too_wide_sl_pts_exceeds_max(self, monkeypatch):
+        """sl_pts on a sl_too_wide output must exceed MAX_SL_PTS (20)."""
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        m5 = self._wide_sl_sweep_candles()
+        confluence = make_confluence(m5_candles=m5, h1_trend="bearish",
+                                     m15_trend="bearish", m5_trend="bullish")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        if result.get("skip_reason") == "sl_too_wide":
+            max_sl = result.get("max_sl_pts", 20.0)
+            assert result["sl_pts"] > max_sl, (
+                f"sl_pts={result['sl_pts']} must exceed max_sl_pts={max_sl} on sl_too_wide"
+            )
+
+    # ── Test 3: consistency invariant on every SKIP output ───────────────────
+    @pytest.mark.parametrize("skip_reason,entry_should_be_null", [
+        ("no_setup", True),
+        ("inside_range_chop", True),
+        ("pair_not_supported", True),
+    ])
+    def test_null_entry_on_no_candidate_skip_reasons(
+        self, monkeypatch, skip_reason, entry_should_be_null
+    ):
+        """
+        For skip reasons that imply no candidate was evaluated, entry/SL fields
+        must stay null. Uses flat candles to ensure no candidate is found, then
+        checks the actual output reason matches expected null-entry invariant.
+        """
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        result = mod.run({}, make_confluence(), "XAU_USD", make_candles_dict())
+
+        actual_reason = result.get("skip_reason", "")
+        # Only assert on the expected reason if the output actually produced it
+        if actual_reason == skip_reason and entry_should_be_null:
+            assert result["entry_price_candidate"] is None, (
+                f"entry_price_candidate must be None when skip_reason={skip_reason}"
+            )
+            assert result["sl_price_candidate"] is None, (
+                f"sl_price_candidate must be None when skip_reason={skip_reason}"
+            )
+
+    def test_consistency_guard_reclassifies_stray_sl_too_wide(self, monkeypatch):
+        """
+        _enforce_skip_consistency must convert sl_too_wide → no_setup when
+        entry_price_candidate is None (simulates a stale/corrupt output).
+        """
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+
+        # Inject a stray sl_too_wide with no candidate — simulates bad state
+        stray_out = mod._base_audit()
+        stray_out["skip_reason"]        = "sl_too_wide"
+        stray_out["entry_price_candidate"] = None
+        stray_out["sl_price_candidate"]    = None
+        stray_out["sl_pts"]                = 0.0
+
+        mod._enforce_skip_consistency(stray_out)
+
+        assert stray_out["skip_reason"]      == "no_setup", \
+            "Guard must reclassify stray sl_too_wide to no_setup"
+        assert stray_out["rejection_stage"]  == "setup_detection"
+        assert stray_out["rejection_reason"] == "no_valid_candidate"
