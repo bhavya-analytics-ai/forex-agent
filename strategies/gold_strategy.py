@@ -17,6 +17,16 @@ Silver (XAG_USD): same logic, different ATR floor.
 """
 
 import logging
+
+# ── STRATEGY METADATA ─────────────────────────────────────────────────────────
+STRATEGY_META = {
+    "signal_mode":         "legacy_gold",
+    "allowed_symbols":     {"XAU_USD", "XAG_USD"},
+    "required_timeframes": ["H1", "M15", "M5"],
+    "can_run_watch_only":  True,
+    "can_emit_live_signal": True,        # gated by LEGACY_GOLD_ENABLED in config
+}
+# ─────────────────────────────────────────────────────────────────────────────
 from datetime import datetime, timezone, timedelta
 from core.fetcher import pip_size
 

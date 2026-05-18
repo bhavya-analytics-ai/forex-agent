@@ -16,6 +16,18 @@ Momentum override: breakout ATR ratio >= 1.5 skips mid-range and HTF zone filter
 """
 
 import logging
+
+# ── STRATEGY METADATA ─────────────────────────────────────────────────────────
+# Consumed by the parallel strategy runner in reports/briefing.py.
+# Do NOT edit without updating the runner's STRATEGY_REGISTRY.
+STRATEGY_META = {
+    "signal_mode":         "legacy_forex",
+    "allowed_symbols":     "*",          # all non-metal pairs; metals filtered by decision_layer
+    "required_timeframes": ["H1", "M15", "M5"],
+    "can_run_watch_only":  True,
+    "can_emit_live_signal": True,        # gated by LEGACY_FOREX_ENABLED in config
+}
+# ─────────────────────────────────────────────────────────────────────────────
 from core.fetcher import pip_size
 from core.liquidity import get_stop_loss, get_take_profit
 

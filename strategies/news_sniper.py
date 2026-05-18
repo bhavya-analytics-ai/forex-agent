@@ -28,6 +28,16 @@ Entry States:
 import logging
 import pandas as pd
 from core.fetcher import pip_size
+
+# ── STRATEGY METADATA ─────────────────────────────────────────────────────────
+STRATEGY_META = {
+    "signal_mode":         "news_sniper",
+    "allowed_symbols":     "*",          # all pairs, but only runs when news mode active
+    "required_timeframes": ["H1", "M5", "M1"],
+    "can_run_watch_only":  True,
+    "can_emit_live_signal": True,        # gated by NEWS_SNIPER_ENABLED in config
+}
+# ─────────────────────────────────────────────────────────────────────────────
 from alerts.scorer import NEWS_LIKELIHOODS, BASE_RATES, calculate_posterior, calculate_ev
 
 logger = logging.getLogger(__name__)

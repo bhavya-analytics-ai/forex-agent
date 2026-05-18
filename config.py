@@ -143,13 +143,27 @@ DASHBOARD_CONFIG = {
 # Default OFF — zero performance impact when disabled.
 DEBUG_DECISIONS = os.getenv("DEBUG_DECISIONS", "false").lower() == "true"
 
-# --- OM STRATEGY KILL SWITCH ---
-# Default: false — legacy scanner runs in watch-only mode.
-#   ENTER_NOW suppressed, no DB writes, no Slack alerts.
-#   Scanner still evaluates confluence and grades for observation.
-# Set OM_STRATEGY_ENABLED=true in Railway env ONLY when OM entry rules are
-# implemented, reviewed, and approved by Om. Do not enable without his sign-off.
-OM_STRATEGY_ENABLED = os.getenv("OM_STRATEGY_ENABLED", "false").lower() == "true"
+# --- STRATEGY LIVE SWITCHES ---
+#
+# Two-gate system:
+#   Gate 1 (global): OM_STRATEGY_ENABLED — master on/off for all DB writes and Slack.
+#                    false → no strategy can write to DB or send Slack, period.
+#   Gate 2 (per-strategy): each flag below — must ALSO be true for that strategy to log.
+#
+# Defaults: all false. Every strategy starts in watch-only mode.
+# Enable each individually in Railway env after validating watch-only output.
+# Do not set any flag without Om's sign-off.
+#
+# Current state: OM_STRATEGY_ENABLED=false deployed (eb67c60).
+# All per-strategy flags intentionally false until Phase 3 rollout.
+
+OM_STRATEGY_ENABLED  = os.getenv("OM_STRATEGY_ENABLED",  "false").lower() == "true"
+
+# Per-strategy live switches (only respected when OM_STRATEGY_ENABLED=true):
+LEGACY_FOREX_ENABLED  = os.getenv("LEGACY_FOREX_ENABLED",  "false").lower() == "true"
+LEGACY_GOLD_ENABLED   = os.getenv("LEGACY_GOLD_ENABLED",   "false").lower() == "true"
+NEWS_SNIPER_ENABLED   = os.getenv("NEWS_SNIPER_ENABLED",   "false").lower() == "true"
+OM_GOLD_SCALP_ENABLED = os.getenv("OM_GOLD_SCALP_ENABLED", "false").lower() == "true"
 
 # --- LOGGING ---
 LOG_CONFIG = {
