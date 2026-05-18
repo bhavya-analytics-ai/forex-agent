@@ -788,4 +788,196 @@ class TestIntegration:
         candles    = make_candles_dict()
         result     = mod.run({}, confluence, "XAU_USD", candles)
         assert result["should_log"]   is False
+
+
+# ---------------------------------------------------------------------------
+# AUDIT FIELD VISIBILITY TESTS
+# ---------------------------------------------------------------------------
+
+class TestDebugAuditFields:
+    """
+    All debug audit fields must be present in every run() output, regardless of
+    entry_state. Covers: SKIP, WAIT_REACTION, WAIT_HOLD, ENTER_NOW paths.
+    No strategy logic is changed — these tests verify observability only.
+    """
+
+    # Core fields that must exist on every output
+    CORE_FIELDS = [
+        "signal_mode", "entry_state", "direction", "setup_type",
+        "should_log", "should_alert", "entry_allowed", "skip_reason",
+        "momentum_score", "scanner_state_flow",
+    ]
+
+    # Branch tracking
+    BRANCH_FIELDS = [
+        "evaluated_branches", "active_branch",
+        "rejection_stage", "rejection_reason", "setup_candidates_found",
+    ]
+
+    # Context trends
+    TREND_FIELDS = ["h1_trend", "m15_trend", "m5_trend"]
+
+    # Sweep detail
+    SWEEP_FIELDS = [
+        "sweep_detected", "sweep_low", "sweep_high", "sweep_bars_ago",
+        "sweep_reference_level", "sweep_distance_pts",
+    ]
+
+    # Reclaim detail
+    RECLAIM_FIELDS = ["reclaim_level", "hold_bar", "reclaim_distance_pts"]
+
+    # Displacement detail
+    DISP_FIELDS = ["displacement_body_pts", "avg_body_pts", "displacement_ratio"]
+
+    # Entry/SL candidates
+    ENTRY_FIELDS = [
+        "entry_price_candidate", "sl_anchor",
+        "sl_price_candidate", "sl_gate_passed", "max_sl_pts",
+    ]
+
+    ALL_REQUIRED = (
+        CORE_FIELDS + BRANCH_FIELDS + TREND_FIELDS
+        + SWEEP_FIELDS + RECLAIM_FIELDS + DISP_FIELDS + ENTRY_FIELDS
+    )
+
+    def _run_skip(self, monkeypatch):
+        """Run with no sweep setup → SKIP path."""
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        confluence = make_confluence(h1_trend="bearish", m15_trend="bearish", m5_trend="bearish")
+        candles = make_candles_dict()
+        return mod.run({}, confluence, "XAU_USD", candles)
+
+    def test_all_audit_fields_present_on_skip(self, monkeypatch):
+        result = self._run_skip(monkeypatch)
+        missing = [f for f in self.ALL_REQUIRED if f not in result]
+        assert not missing, f"Missing audit fields on SKIP: {missing}"
+
+    def test_evaluated_branches_is_list(self, monkeypatch):
+        result = self._run_skip(monkeypatch)
+        assert isinstance(result["evaluated_branches"], list)
+
+    def test_setup_candidates_found_is_int(self, monkeypatch):
+        result = self._run_skip(monkeypatch)
+        assert isinstance(result["setup_candidates_found"], int)
+
+    def test_trend_fields_populated(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        confluence = make_confluence(h1_trend="bearish", m15_trend="downtrend", m5_trend="bearish")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict())
+        assert result["h1_trend"]  == "bearish"
+        assert result["m15_trend"] == "downtrend"
+        assert result["m5_trend"]  == "bearish"
+
+    def test_avg_body_pts_non_negative(self, monkeypatch):
+        result = self._run_skip(monkeypatch)
+        assert result["avg_body_pts"] >= 0.0
+
+    def test_max_sl_pts_matches_constant(self, monkeypatch):
+        result = self._run_skip(monkeypatch)
+        assert result["max_sl_pts"] == 20.0
+
+    def test_rejection_stage_or_reason_on_skip(self, monkeypatch):
+        result = self._run_skip(monkeypatch)
+        assert result["rejection_stage"] != "" or result["rejection_reason"] != "", \
+            "Expected rejection_stage or rejection_reason on SKIP path"
+
+
+class TestSweepDetailFields:
+    """When a sweep is detected, sweep detail fields must be populated."""
+
+    def _make_sweep_candles(self, price=2300.0, sweep_down_to=2285.0):
+        """
+        25 baseline bars + 1 sweep bar (wick well below prior lows, closes back up)
+        + 3 consolidation bars. Should trigger bearish sweep → WAIT_REACTION.
+        """
+        base = flat_candles(price, n=25)
+        sweep_bar = {
+            "open":  price,
+            "high":  price + 1.0,
+            "low":   sweep_down_to,
+            "close": price - 0.5,
+            "volume": 2000.0,
+        }
+        hold = [{"open": price - 0.5, "high": price + 0.5, "low": price - 1.0,
+                 "close": price - 0.3, "volume": 800.0} for _ in range(3)]
+        return base + [sweep_bar] + hold
+
+    def test_sweep_fields_always_present(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        result = mod.run({}, make_confluence(), "XAU_USD", make_candles_dict())
+        for f in ["sweep_detected", "sweep_low", "sweep_high", "sweep_bars_ago",
+                  "sweep_reference_level", "sweep_distance_pts"]:
+            assert f in result, f"Missing sweep field: {f}"
+
+    def test_sweep_detail_populated_when_detected(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        m5 = self._make_sweep_candles()
+        confluence = make_confluence(m5_candles=m5, h1_trend="bearish",
+                                     m5_trend="bearish", m15_trend="bearish")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        if result.get("sweep_detected"):
+            assert result["sweep_low"]             > 0.0
+            assert result["sweep_high"]            > 0.0
+            assert result["sweep_bars_ago"]        < 999
+            assert result["sweep_reference_level"] > 0.0
+            assert result["sweep_distance_pts"]    > 0.0
+
+    def test_sweep_defaults_when_not_detected(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        result = mod.run({}, make_confluence(), "XAU_USD", make_candles_dict())
+        if not result.get("sweep_detected"):
+            assert result["sweep_bars_ago"]     == 999
+            assert result["sweep_distance_pts"] == 0.0
+
+
+class TestDisplacementDetailFields:
+    """displacement_body_pts, avg_body_pts, displacement_ratio must be numeric in every result."""
+
+    def test_disp_fields_numeric(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        result = mod.run({}, make_confluence(), "XAU_USD", make_candles_dict())
+        assert isinstance(result["displacement_body_pts"], (int, float))
+        assert isinstance(result["avg_body_pts"],          (int, float))
+        assert isinstance(result["displacement_ratio"],    (int, float))
+
+    def test_disp_ratio_non_negative(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        result = mod.run({}, make_confluence(), "XAU_USD", make_candles_dict())
+        assert result["displacement_ratio"] >= 0.0
+
+
+class TestEntrySlCandidateFields:
+    """Entry/SL candidate fields surface what the strategy was considering."""
+
+    def test_candidate_fields_present(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        result = mod.run({}, make_confluence(), "XAU_USD", make_candles_dict())
+        for f in ["entry_price_candidate", "sl_anchor", "sl_price_candidate",
+                  "sl_gate_passed", "max_sl_pts"]:
+            assert f in result, f"Missing candidate field: {f}"
+
+    def test_sl_gate_passed_false_on_no_setup(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+        result = mod.run({}, make_confluence(), "XAU_USD", make_candles_dict())
+        # No setup → no SL evaluation → sl_gate_passed stays False
+        assert result["sl_gate_passed"] is False
         assert result["should_alert"] is False

@@ -179,14 +179,19 @@ def _detect_sweep(m5_candles, direction="bearish"):
       sweep_low/high  float  (the extreme wick tip)
       bars_ago        int    (1 = bar immediately before current)
     """
+    _no_sweep = {
+        "detected": False, "sweep_low": 0.0, "sweep_high": 0.0, "bars_ago": 999,
+        "sweep_reference_level": 0.0, "sweep_distance_pts": 0.0,
+    }
+
     if len(m5_candles) < 5:
-        return {"detected": False, "sweep_low": 0.0, "sweep_high": 0.0, "bars_ago": 999}
+        return _no_sweep
 
     # Exclude the current (last) bar — scan the prior SWEEP_MAX_BARS_AGO bars.
     window = m5_candles[-(SWEEP_MAX_BARS_AGO + 1):-1]
     n = len(window)
     if n < 2:
-        return {"detected": False, "sweep_low": 0.0, "sweep_high": 0.0, "bars_ago": 999}
+        return _no_sweep
 
     if direction == "bearish":
         # Iterate newest → oldest; for each bar compare to minimum of all bars before it.
@@ -196,10 +201,12 @@ def _detect_sweep(m5_candles, direction="bearish"):
             if (c["low"] < prior_swing_low - SWEEP_MIN_WICK_PTS
                     and c["close"] > c["low"] + SWEEP_MIN_WICK_PTS):
                 return {
-                    "detected":   True,
-                    "sweep_low":  c["low"],
-                    "sweep_high": c["high"],
-                    "bars_ago":   n - i,
+                    "detected":              True,
+                    "sweep_low":             c["low"],
+                    "sweep_high":            c["high"],
+                    "bars_ago":              n - i,
+                    "sweep_reference_level": round(prior_swing_low, 3),
+                    "sweep_distance_pts":    round(prior_swing_low - c["low"], 2),
                 }
     else:  # bullish sweep
         for i in range(n - 1, 0, -1):
@@ -208,13 +215,15 @@ def _detect_sweep(m5_candles, direction="bearish"):
             if (c["high"] > prior_swing_high + SWEEP_MIN_WICK_PTS
                     and c["close"] < c["high"] - SWEEP_MIN_WICK_PTS):
                 return {
-                    "detected":   True,
-                    "sweep_low":  c["low"],
-                    "sweep_high": c["high"],
-                    "bars_ago":   n - i,
+                    "detected":              True,
+                    "sweep_low":             c["low"],
+                    "sweep_high":            c["high"],
+                    "bars_ago":              n - i,
+                    "sweep_reference_level": round(prior_swing_high, 3),
+                    "sweep_distance_pts":    round(c["high"] - prior_swing_high, 2),
                 }
 
-    return {"detected": False, "sweep_low": 0.0, "sweep_high": 0.0, "bars_ago": 999}
+    return _no_sweep
 
 
 def _detect_reclaim(m5_candles, level, direction="bullish"):
@@ -228,8 +237,13 @@ def _detect_reclaim(m5_candles, level, direction="bullish"):
       reclaim_failed     bool  (wick crossed, body closed back through)
       hold_bar           bool  (bar after reclaim holds above/below level)
     """
+    _no_reclaim = {
+        "reclaim_confirmed": False, "reclaim_failed": False, "hold_bar": False,
+        "reclaim_distance_pts": 0.0,
+    }
+
     if len(m5_candles) < 3:
-        return {"reclaim_confirmed": False, "reclaim_failed": False, "hold_bar": False}
+        return _no_reclaim
 
     last3 = m5_candles[-3:]
 
@@ -239,34 +253,46 @@ def _detect_reclaim(m5_candles, level, direction="bullish"):
             None
         )
         if reclaim_bar is None:
-            return {"reclaim_confirmed": False, "reclaim_failed": False, "hold_bar": False}
+            return _no_reclaim
 
         idx = last3.index(reclaim_bar)
         hold_bar = idx < len(last3) - 1 and last3[idx + 1]["close"] > level
+        reclaim_distance_pts = round(reclaim_bar["close"] - level, 2)
         return {
-            "reclaim_confirmed": True,
-            "reclaim_failed":    False,
-            "hold_bar":          hold_bar,
+            "reclaim_confirmed":    True,
+            "reclaim_failed":       False,
+            "hold_bar":             hold_bar,
+            "reclaim_distance_pts": reclaim_distance_pts,
         }
 
     else:  # bearish: wick above, body closes back below = failed reclaim
         for c in reversed(last3):
             if c["high"] > level and c["close"] < level:
                 return {
-                    "reclaim_confirmed": False,
-                    "reclaim_failed":    True,
-                    "hold_bar":          False,
+                    "reclaim_confirmed":    False,
+                    "reclaim_failed":       True,
+                    "hold_bar":             False,
+                    "reclaim_distance_pts": round(level - c["close"], 2),
                 }
-        return {"reclaim_confirmed": False, "reclaim_failed": False, "hold_bar": False}
+        return _no_reclaim
 
 
 def _detect_displacement(m5_candles, direction="bullish", avg_body=None):
     """
     Displacement = last 1-2 bars contain a body >= DISPLACE_MIN_MULT × avg_body
     in the given direction.
+
+    Returns dict:
+      detected              bool
+      displacement_body_pts float  (largest qualifying body, or 0.0 if none)
+      avg_body_pts          float
+      displacement_ratio    float  (body / avg_body, or 0.0 if none)
     """
+    _no_disp = {"detected": False, "displacement_body_pts": 0.0,
+                "avg_body_pts": 0.0, "displacement_ratio": 0.0}
+
     if not m5_candles:
-        return False
+        return _no_disp
     if avg_body is None:
         avg_body = _avg_body(m5_candles[:-2]) if len(m5_candles) > 2 else 1.0
     if avg_body < 0.01:
@@ -276,10 +302,28 @@ def _detect_displacement(m5_candles, direction="bullish", avg_body=None):
         b = _body(c)
         if b >= DISPLACE_MIN_MULT * avg_body:
             if direction == "bullish" and _is_bullish(c):
-                return True
+                return {
+                    "detected":              True,
+                    "displacement_body_pts": round(b, 3),
+                    "avg_body_pts":          round(avg_body, 3),
+                    "displacement_ratio":    round(b / avg_body, 2),
+                }
             if direction == "bearish" and _is_bearish(c):
-                return True
-    return False
+                return {
+                    "detected":              True,
+                    "displacement_body_pts": round(b, 3),
+                    "avg_body_pts":          round(avg_body, 3),
+                    "displacement_ratio":    round(b / avg_body, 2),
+                }
+
+    # Not detected — still return avg_body for observability
+    max_b = max((_body(c) for c in m5_candles[-2:]), default=0.0)
+    return {
+        "detected":              False,
+        "displacement_body_pts": round(max_b, 3),
+        "avg_body_pts":          round(avg_body, 3),
+        "displacement_ratio":    round(max_b / avg_body, 2) if avg_body > 0 else 0.0,
+    }
 
 
 # ── RANGE BREAKDOWN DETECTION ────────────────────────────────────────────────
@@ -467,6 +511,16 @@ def _base_audit():
         "should_log":     False,
         "should_alert":   False,
         "skip_reason":    "no_setup",
+        # Context trends (from confluence, set in run())
+        "h1_trend":       "",
+        "m15_trend":      "",
+        "m5_trend":       "",
+        # Branch evaluation tracking
+        "evaluated_branches":     [],
+        "active_branch":          "",
+        "rejection_stage":        "",
+        "rejection_reason":       "",
+        "setup_candidates_found": 0,
         # Zone / range
         "htf_range_active":     False,
         "range_boundary_high":  0.0,
@@ -474,20 +528,35 @@ def _base_audit():
         "no_trade_zone":        False,
         "inside_range_chop":    False,
         "zone_state":           "unknown",
-        # Sweep
-        "sweep_candidate":      False,
+        # Sweep (summary)
+        "sweep_detected":       False,
+        "sweep_candidate":      False,   # kept for back-compat
         "double_sweep":         False,
         "swept_side":           "",
         "sweep_alone_no_entry": False,
-        # Reclaim
+        # Sweep (detail)
+        "sweep_low":             0.0,
+        "sweep_high":            0.0,
+        "sweep_bars_ago":        999,
+        "sweep_reference_level": 0.0,
+        "sweep_distance_pts":    0.0,
+        # Reclaim (summary)
         "reclaim_candidate":    False,
         "reclaim_confirmed":    False,
         "reclaim_failed":       False,
         "reclaim_direction":    "",
-        # Displacement
+        # Reclaim (detail)
+        "reclaim_level":        0.0,
+        "hold_bar":             False,
+        "reclaim_distance_pts": 0.0,
+        # Displacement (summary)
         "bullish_displacement": False,
         "bearish_displacement_after_failed_reclaim": False,
         "follow_through_confirmed":                  False,
+        # Displacement (detail)
+        "displacement_body_pts": 0.0,
+        "avg_body_pts":          0.0,
+        "displacement_ratio":    0.0,
         # Range breakdown
         "range_low_broken":        False,
         "range_retest_held_below": False,
@@ -498,11 +567,17 @@ def _base_audit():
         "avoid_long_reason":           "",
         "avoid_short_reason":          "",
         # Entry quality
-        "entry_quality":        "low",
-        "momentum_score":       0,
+        "entry_quality":         "low",
+        "momentum_score":        0,
         "min_momentum_required": MIN_MOMENTUM_REQUIRED,
         "momentum_gate_passed":  False,
-        "scanner_state_flow":   "init",
+        "scanner_state_flow":    "init",
+        # Entry / SL candidates (populated when evaluated, even if SKIP)
+        "entry_price_candidate": None,
+        "sl_anchor":             None,
+        "sl_price_candidate":    None,
+        "sl_gate_passed":        False,
+        "max_sl_pts":            MAX_SL_PTS,
         # Trade levels (populated on ENTER_NOW only)
         "entry_price": None,
         "sl_price":    None,
@@ -534,8 +609,10 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
     try:
         # ── PAIR GUARD ────────────────────────────────────────────────────────
         if pair not in STRATEGY_META["allowed_symbols"]:
-            out["entry_state"] = "SKIP"
-            out["skip_reason"] = "pair_not_supported"
+            out["entry_state"]        = "SKIP"
+            out["skip_reason"]        = "pair_not_supported"
+            out["rejection_stage"]    = "pair_guard"
+            out["rejection_reason"]   = f"{pair} not in allowed_symbols"
             out["scanner_state_flow"] = f"pair_guard: {pair} not in allowed_symbols"
             _apply_watch_only_gate(out)
             return out
@@ -545,13 +622,25 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
         m15_candles = confluence.get("m15", {}).get("candles") or candles.get("M15", [])
         m5_candles  = confluence.get("m5",  {}).get("candles") or candles.get("M5",  [])
         h1_trend    = confluence.get("h1",  {}).get("structure", {}).get("trend", "chop")
+        m15_trend   = confluence.get("m15", {}).get("structure", {}).get("trend", "")
+        m5_trend    = confluence.get("m5",  {}).get("structure", {}).get("trend", "")
+
+        # Expose trend context in output (for debug/dashboard visibility)
+        out["h1_trend"]  = h1_trend
+        out["m15_trend"] = m15_trend
+        out["m5_trend"]  = m5_trend
 
         # ── 1H ANALYSIS ───────────────────────────────────────────────────────
         h1 = _analyse_h1(h1_candles, h1_trend)
         out.update(h1)
 
         # ── GATE 1: HTF range chop ────────────────────────────────────────────
+        _branches = []
         if h1["htf_range_active"]:
+            _branches.append("htf_range")
+            out["evaluated_branches"]     = _branches
+            out["active_branch"]          = "htf_range"
+            out["setup_candidates_found"] = 1
             range_high = h1["range_boundary_high"]
             range_low  = h1["range_boundary_low"]
             out["inside_range_chop"] = True
@@ -567,6 +656,8 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 out["avoid_short_reason"]        = "still_inside_range_until_low_break_hold"
                 out["setup_type"]                = "range_fake_breakout_no_trade"
                 out["scanner_state_flow"]        = "range_active → fake_breakout_detected → SKIP_INSIDE_RANGE"
+                out["rejection_stage"]           = "fake_breakout_check"
+                out["rejection_reason"]          = "fake_breakout_no_trade"
                 _apply_watch_only_gate(out)
                 return out
 
@@ -577,18 +668,29 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 # Valid breakdown — proceed to entry
                 entry_price = m5_candles[-1]["close"] if m5_candles else 0.0
                 sl_extreme  = range_low + 1.0  # retest resistance level
+                # Record entry/SL candidates for debug visibility
+                out["entry_price_candidate"] = round(entry_price, 3)
+                out["sl_anchor"]             = round(sl_extreme, 3)
                 levels = _calc_trade_levels(entry_price, sl_extreme, "bearish",
                                             htf_magnet=h1["htf_magnet"])
+                if levels is not None:
+                    out["sl_price_candidate"] = levels["sl_price"]
                 if levels is None:
+                    out["sl_gate_passed"]  = False
+                    out["rejection_stage"] = "sl_check"
+                    out["rejection_reason"] = "sl_too_wide"
                     out["skip_reason"] = "sl_too_wide"
                     out["scanner_state_flow"] = "range_breakdown → sl_too_wide"
                     _apply_watch_only_gate(out)
                     return out
+                out["sl_gate_passed"] = True
 
                 entry_dist = abs(entry_price - range_low)
                 if entry_dist > MAX_CHASE_PTS:
-                    out["entry_state"] = "SKIP_CHASE"
-                    out["skip_reason"] = "chase_distance"
+                    out["entry_state"]     = "SKIP_CHASE"
+                    out["skip_reason"]     = "chase_distance"
+                    out["rejection_stage"] = "chase_check"
+                    out["rejection_reason"] = "chase_distance"
                     out["scanner_state_flow"] = "range_breakdown → chase_distance"
                     _apply_watch_only_gate(out)
                     return out
@@ -604,6 +706,8 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                     out["entry_state"]          = "SKIP"
                     out["skip_reason"]          = "opposing_h1_low_momentum"
                     out["momentum_gate_passed"] = False
+                    out["rejection_stage"]      = "momentum_gate"
+                    out["rejection_reason"]     = "opposing_h1_low_momentum"
                     out["scanner_state_flow"]   = (
                         "range_active → range_low_broken → retest_held → follow_through"
                         " → opposing_h1_low_momentum → SKIP"
@@ -615,6 +719,8 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                     out["entry_state"]          = "WAIT_MOMENTUM"
                     out["skip_reason"]          = "low_momentum"
                     out["momentum_gate_passed"] = False
+                    out["rejection_stage"]      = "momentum_gate"
+                    out["rejection_reason"]     = f"momentum={mom} < {MIN_MOMENTUM_REQUIRED}"
                     out["scanner_state_flow"]   = (
                         "range_active → range_low_broken → retest_held → follow_through"
                         " → low_momentum → WAIT_MOMENTUM"
@@ -641,25 +747,41 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             # Still inside range, no breakdown
             out["entry_state"]       = "SKIP"
             out["skip_reason"]       = "inside_range_chop"
+            out["rejection_stage"]   = "range_breakdown_check"
+            out["rejection_reason"]  = "no_breakdown_confirmed"
             out["scanner_state_flow"] = "range_active → no_breakdown → SKIP_CHOP"
             _apply_watch_only_gate(out)
             return out
 
         # ── GATE 2: Sweep + reclaim long (bullish reversal) ──────────────────
+        _branches.append("bearish_sweep_reclaim_long")
         sweep_bear = _detect_sweep(m5_candles, direction="bearish")
-        out["sweep_candidate"] = sweep_bear["detected"]
-        out["swept_side"]      = "bearish" if sweep_bear["detected"] else ""
+        out["sweep_candidate"]       = sweep_bear["detected"]
+        out["sweep_detected"]        = sweep_bear["detected"]
+        out["swept_side"]            = "bearish" if sweep_bear["detected"] else ""
+        out["sweep_low"]             = sweep_bear["sweep_low"]
+        out["sweep_high"]            = sweep_bear["sweep_high"]
+        out["sweep_bars_ago"]        = sweep_bear["bars_ago"]
+        out["sweep_reference_level"] = sweep_bear["sweep_reference_level"]
+        out["sweep_distance_pts"]    = sweep_bear["sweep_distance_pts"]
 
         if sweep_bear["detected"]:
+            out["active_branch"]          = "bearish_sweep_reclaim_long"
+            out["setup_candidates_found"] = out["setup_candidates_found"] + 1
             sweep_extreme = sweep_bear["sweep_low"]
             entry_price_candidate = m5_candles[-1]["close"] if m5_candles else 0.0
+            out["entry_price_candidate"] = round(entry_price_candidate, 3)
+            out["sl_anchor"]             = round(sweep_extreme, 3)
 
             # Chase check first — if price has run too far from zone, no point computing SL
             entry_dist_pre = abs(entry_price_candidate - sweep_extreme)
             if entry_dist_pre > MAX_CHASE_PTS:
-                out["entry_state"] = "SKIP_CHASE"
-                out["skip_reason"] = "chase_distance"
+                out["entry_state"]     = "SKIP_CHASE"
+                out["skip_reason"]     = "chase_distance"
+                out["rejection_stage"] = "chase_check"
+                out["rejection_reason"] = "chase_distance"
                 out["scanner_state_flow"] = "sweep_detected → chase_distance → SKIP_CHASE"
+                out["evaluated_branches"] = _branches
                 _apply_watch_only_gate(out)
                 return out
 
@@ -667,40 +789,59 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             levels = _calc_trade_levels(
                 entry_price_candidate, sweep_extreme, "bullish", h1["htf_magnet"]
             )
+            if levels is not None:
+                out["sl_price_candidate"] = levels["sl_price"]
 
             if levels is None:
-                out["entry_state"]       = "SKIP"
-                out["skip_reason"]       = "sl_too_wide"
+                out["sl_gate_passed"]  = False
+                out["entry_state"]     = "SKIP"
+                out["skip_reason"]     = "sl_too_wide"
+                out["rejection_stage"] = "sl_check"
+                out["rejection_reason"] = "sl_too_wide"
                 out["scanner_state_flow"] = "sweep_detected → sl_too_wide → SKIP"
+                out["evaluated_branches"] = _branches
                 _apply_watch_only_gate(out)
                 return out
+            out["sl_gate_passed"] = True
 
             # Check reclaim
             reclaim_level = sweep_bear["sweep_low"] + SWEEP_MIN_WICK_PTS
             rec = _detect_reclaim(m5_candles, reclaim_level, direction="bullish")
             out.update({
-                "reclaim_candidate":  True,
-                "reclaim_confirmed":  rec["reclaim_confirmed"],
-                "reclaim_direction":  "bullish",
+                "reclaim_candidate":    True,
+                "reclaim_confirmed":    rec["reclaim_confirmed"],
+                "reclaim_direction":    "bullish",
+                "reclaim_level":        round(reclaim_level, 3),
+                "hold_bar":             rec["hold_bar"],
+                "reclaim_distance_pts": rec["reclaim_distance_pts"],
             })
 
             if not rec["reclaim_confirmed"]:
-                out["entry_state"]        = "WAIT_REACTION"
+                out["entry_state"]          = "WAIT_REACTION"
                 out["sweep_alone_no_entry"] = True
-                out["skip_reason"]        = ""
-                out["scanner_state_flow"] = "sweep_detected → awaiting_reclaim → WAIT_REACTION"
+                out["skip_reason"]          = ""
+                out["rejection_stage"]      = "reclaim_check"
+                out["rejection_reason"]     = "reclaim_not_confirmed"
+                out["scanner_state_flow"]   = "sweep_detected → awaiting_reclaim → WAIT_REACTION"
+                out["evaluated_branches"]   = _branches
                 _apply_watch_only_gate(out)
                 return out
 
             # Reclaim confirmed — check displacement
             avg = _avg_body(m5_candles)
-            displaced = _detect_displacement(m5_candles, "bullish", avg)
-            out["bullish_displacement"] = displaced
+            disp = _detect_displacement(m5_candles, "bullish", avg)
+            out["bullish_displacement"]  = disp["detected"]
+            out["displacement_body_pts"] = disp["displacement_body_pts"]
+            out["avg_body_pts"]          = disp["avg_body_pts"]
+            out["displacement_ratio"]    = disp["displacement_ratio"]
 
-            if not displaced:
-                out["entry_state"]        = "WAIT_HOLD"
-                out["skip_reason"]        = ""
+            if not disp["detected"]:
+                out["entry_state"]     = "WAIT_HOLD"
+                out["skip_reason"]     = ""
+                out["rejection_stage"] = "displacement_check"
+                out["rejection_reason"] = f"displacement_ratio={disp['displacement_ratio']} < {DISPLACE_MIN_MULT}"
                 out["scanner_state_flow"] = "sweep_detected → reclaim_confirmed → awaiting_displacement → WAIT_HOLD"
+                out["evaluated_branches"] = _branches
                 _apply_watch_only_gate(out)
                 return out
 
@@ -715,10 +856,13 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 out["entry_state"]          = "SKIP"
                 out["skip_reason"]          = "opposing_h1_low_momentum"
                 out["momentum_gate_passed"] = False
+                out["rejection_stage"]      = "momentum_gate"
+                out["rejection_reason"]     = f"opposing_h1({h1_trend})_momentum={mom}"
                 out["scanner_state_flow"]   = (
                     "sweep_detected → reclaim_confirmed → displacement"
                     " → opposing_h1_low_momentum → SKIP"
                 )
+                out["evaluated_branches"]   = _branches
                 _apply_watch_only_gate(out)
                 return out
 
@@ -726,15 +870,19 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 out["entry_state"]          = "WAIT_MOMENTUM"
                 out["skip_reason"]          = "low_momentum"
                 out["momentum_gate_passed"] = False
+                out["rejection_stage"]      = "momentum_gate"
+                out["rejection_reason"]     = f"momentum={mom} < {MIN_MOMENTUM_REQUIRED}"
                 out["scanner_state_flow"]   = (
                     "sweep_detected → reclaim_confirmed → displacement"
                     " → low_momentum → WAIT_MOMENTUM"
                 )
+                out["evaluated_branches"]   = _branches
                 _apply_watch_only_gate(out)
                 return out
 
             # All gates passed — ENTER_NOW long
-            out["momentum_gate_passed"] = True
+            out["momentum_gate_passed"]   = True
+            out["evaluated_branches"]     = _branches
             out.update(levels)
             out["entry_state"]        = "ENTER_NOW"
             out["direction"]          = "bullish"
@@ -751,37 +899,63 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             return out
 
         # ── GATE 3: Failed reclaim → continuation short ───────────────────────
+        _branches.append("bullish_sweep_failed_reclaim_short")
         sweep_bull = _detect_sweep(m5_candles, direction="bullish")
         if sweep_bull["detected"]:
-            out["sweep_candidate"] = True
-            out["swept_side"]      = "bullish"
-            sr_level = sweep_bull["sweep_high"] - SWEEP_MIN_WICK_PTS
+            out["sweep_candidate"]       = True
+            out["sweep_detected"]        = True
+            out["swept_side"]            = "bullish"
+            out["sweep_low"]             = sweep_bull["sweep_low"]
+            out["sweep_high"]            = sweep_bull["sweep_high"]
+            out["sweep_bars_ago"]        = sweep_bull["bars_ago"]
+            out["sweep_reference_level"] = sweep_bull["sweep_reference_level"]
+            out["sweep_distance_pts"]    = sweep_bull["sweep_distance_pts"]
+            out["active_branch"]         = "bullish_sweep_failed_reclaim_short"
+            out["setup_candidates_found"] = out["setup_candidates_found"] + 1
 
+            sr_level = sweep_bull["sweep_high"] - SWEEP_MIN_WICK_PTS
             rec_fail = _detect_reclaim(m5_candles, sr_level, direction="bearish")
-            out["reclaim_failed"] = rec_fail["reclaim_failed"]
+            out["reclaim_failed"]       = rec_fail["reclaim_failed"]
+            out["reclaim_level"]        = round(sr_level, 3)
+            out["reclaim_distance_pts"] = rec_fail["reclaim_distance_pts"]
 
             if rec_fail["reclaim_failed"]:
-                displaced = _detect_displacement(m5_candles, "bearish",
-                                                 _avg_body(m5_candles))
-                out["bearish_displacement_after_failed_reclaim"] = displaced
+                avg_b = _avg_body(m5_candles)
+                disp = _detect_displacement(m5_candles, "bearish", avg_b)
+                out["bearish_displacement_after_failed_reclaim"] = disp["detected"]
+                out["displacement_body_pts"] = disp["displacement_body_pts"]
+                out["avg_body_pts"]          = disp["avg_body_pts"]
+                out["displacement_ratio"]    = disp["displacement_ratio"]
 
-                if displaced:
+                if disp["detected"]:
                     entry_price = m5_candles[-1]["close"] if m5_candles else 0.0
                     sl_extreme  = sweep_bull["sweep_high"]
+                    out["entry_price_candidate"] = round(entry_price, 3)
+                    out["sl_anchor"]             = round(sl_extreme, 3)
                     levels = _calc_trade_levels(entry_price, sl_extreme, "bearish",
                                                 h1["htf_magnet"])
+                    if levels is not None:
+                        out["sl_price_candidate"] = levels["sl_price"]
 
                     if levels is None:
-                        out["skip_reason"]       = "sl_too_wide"
+                        out["sl_gate_passed"]  = False
+                        out["skip_reason"]     = "sl_too_wide"
+                        out["rejection_stage"] = "sl_check"
+                        out["rejection_reason"] = "sl_too_wide"
                         out["scanner_state_flow"] = "failed_reclaim → sl_too_wide"
+                        out["evaluated_branches"] = _branches
                         _apply_watch_only_gate(out)
                         return out
+                    out["sl_gate_passed"] = True
 
                     entry_dist = abs(entry_price - sl_extreme)
                     if entry_dist > MAX_CHASE_PTS:
-                        out["entry_state"] = "SKIP_CHASE"
-                        out["skip_reason"] = "chase_distance"
+                        out["entry_state"]     = "SKIP_CHASE"
+                        out["skip_reason"]     = "chase_distance"
+                        out["rejection_stage"] = "chase_check"
+                        out["rejection_reason"] = "chase_distance"
                         out["scanner_state_flow"] = "failed_reclaim → chase_distance → SKIP_CHASE"
+                        out["evaluated_branches"] = _branches
                         _apply_watch_only_gate(out)
                         return out
 
@@ -796,10 +970,13 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                         out["entry_state"]          = "SKIP"
                         out["skip_reason"]          = "opposing_h1_low_momentum"
                         out["momentum_gate_passed"] = False
+                        out["rejection_stage"]      = "momentum_gate"
+                        out["rejection_reason"]     = f"opposing_h1({h1_trend})_momentum={mom}"
                         out["scanner_state_flow"]   = (
                             "bullish_sweep → reclaim_failed → bearish_displacement"
                             " → opposing_h1_low_momentum → SKIP"
                         )
+                        out["evaluated_branches"]   = _branches
                         _apply_watch_only_gate(out)
                         return out
 
@@ -807,14 +984,18 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                         out["entry_state"]          = "WAIT_MOMENTUM"
                         out["skip_reason"]          = "low_momentum"
                         out["momentum_gate_passed"] = False
+                        out["rejection_stage"]      = "momentum_gate"
+                        out["rejection_reason"]     = f"momentum={mom} < {MIN_MOMENTUM_REQUIRED}"
                         out["scanner_state_flow"]   = (
                             "bullish_sweep → reclaim_failed → bearish_displacement"
                             " → low_momentum → WAIT_MOMENTUM"
                         )
+                        out["evaluated_branches"]   = _branches
                         _apply_watch_only_gate(out)
                         return out
 
-                    out["momentum_gate_passed"] = True
+                    out["momentum_gate_passed"]   = True
+                    out["evaluated_branches"]     = _branches
                     out.update(levels)
                     out["entry_state"]        = "ENTER_NOW"
                     out["direction"]          = "bearish"
@@ -830,16 +1011,24 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                     _apply_watch_only_gate(out)
                     return out
 
-            # Sweep detected but no failed reclaim yet
-            out["entry_state"]       = "WAIT_REACTION"
-            out["skip_reason"]       = ""
+                # Bearish displacement not confirmed yet
+                out["rejection_stage"]  = "displacement_check"
+                out["rejection_reason"] = f"displacement_ratio={disp['displacement_ratio']} < {DISPLACE_MIN_MULT}"
+
+            # Sweep detected but no failed reclaim yet (or failed reclaim but no displacement)
+            out["entry_state"]        = "WAIT_REACTION"
+            out["skip_reason"]        = ""
             out["scanner_state_flow"] = "bullish_sweep_detected → awaiting_reclaim_outcome → WAIT_REACTION"
+            out["evaluated_branches"] = _branches
             _apply_watch_only_gate(out)
             return out
 
         # ── FALLTHROUGH: no setup ─────────────────────────────────────────────
         out["entry_state"]        = "SKIP"
         out["skip_reason"]        = "no_setup"
+        out["rejection_stage"]    = "all_gates"
+        out["rejection_reason"]   = "no_sweep_detected_no_range_event"
+        out["evaluated_branches"] = _branches
         out["scanner_state_flow"] = "no_sweep_no_range_event → SKIP"
         _apply_watch_only_gate(out)
         return out
@@ -848,6 +1037,8 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
         logger.exception(f"om_gold_scalp.run error for {pair}: {exc}")
         out["entry_state"]        = "SKIP"
         out["skip_reason"]        = "internal_error"
+        out["rejection_stage"]    = "internal_error"
+        out["rejection_reason"]   = str(exc)
         out["scanner_state_flow"] = f"internal_error: {exc}"
         _apply_watch_only_gate(out)
         return out

@@ -783,6 +783,55 @@
     font-family: 'JetBrains Mono', monospace;
     padding: 6px 0;
   }
+  /* ── OM Debug expandable section ── */
+  .om-debug-details {
+    margin-top: 6px;
+    border-top: 1px solid #1e2a1e;
+    padding-top: 4px;
+  }
+  .om-debug-toggle {
+    font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-dim);
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    list-style: none;
+    user-select: none;
+  }
+  .om-debug-toggle::-webkit-details-marker { display: none; }
+  .om-debug-toggle::before { content: "▶ "; font-size: 7px; }
+  details[open] .om-debug-toggle::before { content: "▼ "; }
+  .om-debug-body {
+    margin-top: 5px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    line-height: 1.65;
+  }
+  .om-dbg-section {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #3a5a3a;
+    text-transform: uppercase;
+    margin: 6px 0 2px;
+    border-bottom: 1px solid #1a2a1a;
+  }
+  .om-dbg-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .om-dbg-row > span:first-child {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    min-width: 90px;
+  }
+  .om-dbg-row > span:last-child {
+    color: var(--text-primary);
+    text-align: right;
+    word-break: break-all;
+  }
   /* ─────────────────────────────────────────────────────────────── */
 
   .trade-card {
@@ -3034,6 +3083,81 @@ function buildOmCard(c) {
 
   const dirColor = direction === "bullish" ? "var(--green)" : direction === "bearish" ? "var(--red)" : "var(--text-dim)";
 
+  // ── Debug detail block ─────────────────────────────────────────────────────
+  const h1t  = c.h1_trend  || "—";
+  const m15t = c.m15_trend || "—";
+  const m5t  = c.m5_trend  || "—";
+
+  const rejStage  = c.rejection_stage  || "—";
+  const rejReason = c.rejection_reason || "—";
+  const branches  = Array.isArray(c.evaluated_branches) ? c.evaluated_branches.join(" → ") : "—";
+  const activeBr  = c.active_branch || "—";
+  const candCount = typeof c.setup_candidates_found === "number" ? c.setup_candidates_found : 0;
+
+  const sweepDetected = c.sweep_detected === true;
+  const sweepLow      = typeof c.sweep_low  === "number" ? c.sweep_low.toFixed(2)  : "—";
+  const sweepHigh     = typeof c.sweep_high === "number" ? c.sweep_high.toFixed(2) : "—";
+  const sweepAgo      = typeof c.sweep_bars_ago === "number" && c.sweep_bars_ago < 999 ? c.sweep_bars_ago + " bars ago" : "not detected";
+  const sweepRef      = typeof c.sweep_reference_level === "number" && c.sweep_reference_level > 0 ? c.sweep_reference_level.toFixed(2) : "—";
+  const sweepDist     = typeof c.sweep_distance_pts === "number" ? c.sweep_distance_pts.toFixed(2) + " pts" : "—";
+
+  const rclmLevel = typeof c.reclaim_level === "number" && c.reclaim_level > 0 ? c.reclaim_level.toFixed(2) : "—";
+  const rclmDist  = typeof c.reclaim_distance_pts === "number" ? c.reclaim_distance_pts.toFixed(2) + " pts" : "—";
+  const holdBar   = c.hold_bar === true ? "yes" : "no";
+
+  const dispBody  = typeof c.displacement_body_pts === "number" ? c.displacement_body_pts.toFixed(3) + " pts" : "—";
+  const avgBody   = typeof c.avg_body_pts === "number" ? c.avg_body_pts.toFixed(3) + " pts" : "—";
+  const dispRatio = typeof c.displacement_ratio === "number" ? "×" + c.displacement_ratio.toFixed(2) : "—";
+
+  const entryPx   = c.entry_price_candidate != null ? c.entry_price_candidate : "—";
+  const slAnchor  = c.sl_anchor   != null ? c.sl_anchor   : "—";
+  const slCand    = c.sl_price_candidate != null ? c.sl_price_candidate : "—";
+  const slGate    = c.sl_gate_passed === true ? "✓ passed" : "✗ blocked";
+  const maxSl     = typeof c.max_sl_pts === "number" ? c.max_sl_pts + " pts" : "—";
+
+  const uid = Math.random().toString(36).slice(2, 8);
+
+  const debugBlock = `
+<details class="om-debug-details" id="om-dbg-${uid}">
+  <summary class="om-debug-toggle">WHY SKIPPED / WHY WAITING</summary>
+  <div class="om-debug-body">
+    <div class="om-dbg-section">TREND CONTEXT</div>
+    <div class="om-dbg-row"><span>H1</span><span>${h1t}</span></div>
+    <div class="om-dbg-row"><span>M15</span><span>${m15t}</span></div>
+    <div class="om-dbg-row"><span>M5</span><span>${m5t}</span></div>
+
+    <div class="om-dbg-section">BRANCH EVAL</div>
+    <div class="om-dbg-row"><span>branches</span><span>${branches}</span></div>
+    <div class="om-dbg-row"><span>active</span><span>${activeBr}</span></div>
+    <div class="om-dbg-row"><span>candidates found</span><span>${candCount}</span></div>
+    <div class="om-dbg-row"><span>rejection stage</span><span>${rejStage}</span></div>
+    <div class="om-dbg-row"><span>rejection reason</span><span>${rejReason}</span></div>
+
+    <div class="om-dbg-section">SWEEP</div>
+    <div class="om-dbg-row"><span>detected</span><span>${sweepDetected ? "yes" : "no"}</span></div>
+    <div class="om-dbg-row"><span>low / high</span><span>${sweepLow} / ${sweepHigh}</span></div>
+    <div class="om-dbg-row"><span>timing</span><span>${sweepAgo}</span></div>
+    <div class="om-dbg-row"><span>reference level</span><span>${sweepRef}</span></div>
+    <div class="om-dbg-row"><span>distance</span><span>${sweepDist}</span></div>
+
+    <div class="om-dbg-section">RECLAIM</div>
+    <div class="om-dbg-row"><span>reclaim level</span><span>${rclmLevel}</span></div>
+    <div class="om-dbg-row"><span>distance past</span><span>${rclmDist}</span></div>
+    <div class="om-dbg-row"><span>hold bar</span><span>${holdBar}</span></div>
+
+    <div class="om-dbg-section">DISPLACEMENT</div>
+    <div class="om-dbg-row"><span>body / avg</span><span>${dispBody} / ${avgBody}</span></div>
+    <div class="om-dbg-row"><span>ratio</span><span>${dispRatio} (need ×1.5)</span></div>
+
+    <div class="om-dbg-section">ENTRY / SL</div>
+    <div class="om-dbg-row"><span>entry candidate</span><span>${entryPx}</span></div>
+    <div class="om-dbg-row"><span>SL anchor</span><span>${slAnchor}</span></div>
+    <div class="om-dbg-row"><span>SL candidate</span><span>${slCand}</span></div>
+    <div class="om-dbg-row"><span>SL gate</span><span>${slGate}</span></div>
+    <div class="om-dbg-row"><span>max SL</span><span>${maxSl}</span></div>
+  </div>
+</details>`;
+
   return `
 <div class="om-card state-${sc}">
   <div class="om-card-pair">${pair.replace("_","/")} · om_gold_scalp</div>
@@ -3065,6 +3189,7 @@ function buildOmCard(c) {
     <span class="lbl">should_alert</span><span class="val muted">false</span>
   </div>
   <div style="margin-top:6px;font-size:9px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;word-break:break-word;line-height:1.5">${flow}</div>
+  ${debugBlock}
   <div class="om-watch-badge">watch-only · no DB · no Slack</div>
 </div>`;
 }
