@@ -168,6 +168,9 @@ def init_db():
         ("low_liquidity_window", "INTEGER DEFAULT 0"),  # 1 = caution window (not a hard block)
         ("blocked_reason",       "TEXT DEFAULT ''"),    # machine-readable slug, e.g. SATURDAY_MARKET_CLOSED
         ("entry_allowed",        "INTEGER DEFAULT 1"),  # 0 when guard blocked ENTER_NOW
+        # ── Manual exclusion audit fields (added: bad-run window patch) ────────
+        ("archive_reason",       "TEXT DEFAULT ''"),    # free-text label for why this was archived
+        ("manual_exclusion",     "INTEGER DEFAULT 0"),  # 1 = excluded by explicit operator decision
     ]:
         try:
             conn.execute(f"ALTER TABLE agent_signals ADD COLUMN {col} {typedef}")
@@ -236,12 +239,16 @@ def init_db():
         logger.warning(f"signal_mode backfill failed (non-fatal): {e}")
 
     logger.info(f"SQLite DB ready at {_db_path()}")
-    # Archive any signals logged during closed-market windows (one-time cleanup,
-    # idempotent — safe to run on every startup).
+    # Archive signals from closed-market windows (idempotent, runs every startup).
     try:
         archive_bad_window_signals()
     except Exception as e:
         logger.warning(f"archive_bad_window_signals failed at startup (non-fatal): {e}")
+    # Archive signals from the approved bad-run window (May 15–18 2026).
+    try:
+        archive_bad_run_window()
+    except Exception as e:
+        logger.warning(f"archive_bad_run_window failed at startup (non-fatal): {e}")
 
 
 # ── MANUAL TRADES ─────────────────────────────────────────────────────────────
@@ -510,6 +517,55 @@ def archive_bad_window_signals() -> int:
             f"archive_bad_window_signals: archived {count} bad-window signals "
             f"(Saturday/Sunday-pre-open/Friday-pre-close). "
             f"Rows kept in DB with is_archived=1."
+        )
+    return count
+
+
+# Bad-run window constants — scanner over-signaling period May 15–18 2026.
+# Approved by Om for manual exclusion. Keep as constants so tests can import them.
+BAD_RUN_WINDOW_START = "2026-05-15 00:00:00"
+BAD_RUN_WINDOW_END   = "2026-05-18 01:07:52"
+
+
+def archive_bad_run_window(
+    start_utc: str = BAD_RUN_WINDOW_START,
+    end_utc:   str = BAD_RUN_WINDOW_END,
+) -> int:
+    """
+    Soft-archive agent_signals logged during the known scanner over-signaling
+    period (May 15–18 2026) when debug instability caused spurious signals.
+
+    These signals were generated during valid market hours but are NOT reliable
+    production data. Om approved manual exclusion on 2026-05-18.
+
+    Marks rows:
+      is_archived      = 1
+      manual_exclusion = 1
+      blocked_reason   = "bad_run_bug_window"
+      archive_reason   = "scanner_over_signaling_may15_may18"
+
+    Idempotent — safe to run on every startup. Returns count of rows archived.
+    Does NOT delete any rows.
+    """
+    conn = _get_conn()
+    with _write_lock:
+        result = conn.execute("""
+            UPDATE agent_signals
+            SET is_archived      = 1,
+                manual_exclusion = 1,
+                blocked_reason   = 'bad_run_bug_window',
+                archive_reason   = 'scanner_over_signaling_may15_may18'
+            WHERE COALESCE(is_archived, 0) = 0
+              AND timestamp_utc >= ?
+              AND timestamp_utc <= ?
+        """, (start_utc, end_utc))
+        conn.commit()
+    count = result.rowcount
+    if count:
+        logger.info(
+            f"archive_bad_run_window: archived {count} signals from {start_utc} → {end_utc} "
+            f"(scanner_over_signaling_may15_may18). "
+            f"Rows kept in DB with is_archived=1, manual_exclusion=1."
         )
     return count
 

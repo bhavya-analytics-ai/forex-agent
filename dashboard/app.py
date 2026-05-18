@@ -567,20 +567,80 @@ def api_audit(pair: str):
 
 @app.route("/api/performance")
 def api_performance():
-    """Returns performance summary — SQLite first, CSV fallback."""
+    """
+    Returns performance summary — SQLite first, CSV fallback.
+
+    Always excludes:
+      - Archived signals (is_archived=1): closed-market windows (Sat/Sun-pre-22/Fri-21:30+)
+      - Bad-run window signals (May 15–18 2026): approved manual exclusion for scanner
+        over-signaling period. Rows are marked is_archived=1 / manual_exclusion=1 in DB.
+
+    Response audit fields:
+      stats_source              "sqlite" or "csv"
+      excluded_archived_count   rows excluded by is_archived (DB path)
+      excluded_bad_window_count rows excluded by market-hours filter (CSV path)
+      excluded_bad_run_count    rows excluded by bad-run window
+      bad_run_window_applied    true
+    """
+    from db.database import BAD_RUN_WINDOW_START, BAD_RUN_WINDOW_END
+    _bad_run = (BAD_RUN_WINDOW_START, BAD_RUN_WINDOW_END)
+
     try:
         from db.database import get_performance_summary_db
-        summary = get_performance_summary_db()
+        # DB path: bad-run rows are already is_archived=1 (stamped at startup),
+        # so they are excluded by the base is_archived filter. The bad_run_window
+        # param adds the count to the audit response even if they're already archived.
+        summary = get_performance_summary_db(bad_run_window=_bad_run)
         return jsonify(_sanitize(summary))
     except Exception as e:
         logger.warning(f"SQLite performance failed, falling back to CSV: {e}")
+
     try:
         from alerts.logger import get_performance_summary
-        summary = get_performance_summary()
+        # CSV fallback: apply both market-hours filter AND bad-run window exclusion.
+        # Also write excluded rows to audit file (idempotent).
+        summary = get_performance_summary(bad_run_window=_bad_run)
+        _write_bad_run_audit_csv(bad_run_window=_bad_run)
         return jsonify(_sanitize(summary))
     except Exception as e:
         logger.error(f"performance endpoint error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+def _write_bad_run_audit_csv(bad_run_window: tuple) -> None:
+    """
+    Write CSV rows that fall inside bad_run_window to a separate audit file.
+    Rows are NOT removed from the original CSV — this is additive only.
+    Output: logs/excluded_bad_run_signals_2026-05-15_to_2026-05-18.csv
+    Idempotent — rewrites the audit file on every call (safe because source CSV is read-only here).
+    """
+    import os, csv as _csv
+    import pandas as pd
+    from config import LOG_CONFIG
+
+    src_path  = LOG_CONFIG["signal_log_path"]
+    audit_path = os.path.join(
+        os.path.dirname(src_path),
+        "excluded_bad_run_signals_2026-05-15_to_2026-05-18.csv",
+    )
+
+    try:
+        if not os.path.exists(src_path):
+            return
+        df = pd.read_csv(src_path)
+        if "timestamp_utc" not in df.columns:
+            return
+        start_str, end_str = bad_run_window
+        mask = (df["timestamp_utc"] >= start_str) & (df["timestamp_utc"] <= end_str)
+        excluded = df[mask]
+        if excluded.empty:
+            return
+        excluded.to_csv(audit_path, index=False)
+        logger.info(
+            f"Bad-run audit CSV written: {audit_path} ({len(excluded)} rows)"
+        )
+    except Exception as e:
+        logger.warning(f"_write_bad_run_audit_csv failed (non-fatal): {e}")
 
 
 # ── OUTCOME LABELER BACKGROUND THREAD ────────────────────────────────────────

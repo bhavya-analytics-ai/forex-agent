@@ -2,7 +2,7 @@
 tests/test_performance_exclusions.py — Performance stats exclude archived/bad-window signals
 
 Tests for:
-  db/database.py   :: get_performance_summary_db()
+  db/database.py   :: get_performance_summary_db(), archive_bad_run_window()
   alerts/logger.py :: get_performance_summary() + _is_bad_window_csv()
 
 Run:
@@ -65,7 +65,9 @@ def _make_db_with_signals(signals: list[dict]):
             market_closed   INTEGER DEFAULT 0,
             low_liquidity_window INTEGER DEFAULT 0,
             blocked_reason  TEXT DEFAULT '',
-            entry_allowed   INTEGER DEFAULT 1
+            entry_allowed   INTEGER DEFAULT 1,
+            archive_reason  TEXT DEFAULT '',
+            manual_exclusion INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS manual_trades (
             signal_id       TEXT PRIMARY KEY,
@@ -89,8 +91,8 @@ def _make_db_with_signals(signals: list[dict]):
             INSERT INTO agent_signals
                 (signal_id, timestamp_utc, pair, grade, outcome, outcome_pips,
                  taken, is_archived, weekend_block, session_block, market_closed,
-                 blocked_reason, entry_allowed)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 blocked_reason, entry_allowed, archive_reason, manual_exclusion)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             sig.get("signal_id", f"SIG_{i:03d}"),
             sig.get("timestamp_utc", "2026-05-12 10:00:00"),
@@ -105,6 +107,8 @@ def _make_db_with_signals(signals: list[dict]):
             sig.get("market_closed", 0),
             sig.get("blocked_reason", ""),
             sig.get("entry_allowed", 1),
+            sig.get("archive_reason", ""),
+            sig.get("manual_exclusion", 0),
         ))
     conn.commit()
     return conn
@@ -372,3 +376,96 @@ class TestDbPerformanceSummary:
         assert r["excluded_archived_count"] == 0
         assert r["agent"]["total"]          == 0
         assert r["win_rate"]                == 0
+
+
+# ─── archive_bad_run_window ───────────────────────────────────────────────────
+
+class TestArchiveBadRunWindow:
+    """archive_bad_run_window() stamps rows with is_archived=1 + audit fields."""
+
+    def _fake_db(self, signals):
+        """Return a monkeypatched db_mod with an in-memory DB."""
+        import db.database as db_mod
+        conn = _make_db_with_signals(signals)
+        original = db_mod._get_conn
+        db_mod._get_conn = lambda: conn
+        return db_mod, original, conn
+
+    def _restore(self, db_mod, original):
+        db_mod._get_conn = original
+
+    def test_rows_in_window_archived(self):
+        import db.database as db_mod
+        signals = [
+            {"signal_id": "IN1",  "timestamp_utc": "2026-05-15 12:00:00", "outcome": "WIN",  "outcome_pips": 10},
+            {"signal_id": "IN2",  "timestamp_utc": "2026-05-17 22:30:00", "outcome": "LOSS", "outcome_pips": -5},
+            {"signal_id": "OUT1", "timestamp_utc": "2026-05-14 23:59:59", "outcome": "WIN",  "outcome_pips": 8},  # before
+            {"signal_id": "OUT2", "timestamp_utc": "2026-05-18 01:07:53", "outcome": "WIN",  "outcome_pips": 8},  # after
+        ]
+        db_mod_real, orig, conn = self._fake_db(signals)
+        try:
+            count = db_mod.archive_bad_run_window(
+                start_utc="2026-05-15 00:00:00",
+                end_utc="2026-05-18 01:07:52",
+            )
+            assert count == 2
+            rows = conn.execute(
+                "SELECT signal_id, is_archived, manual_exclusion, blocked_reason, archive_reason "
+                "FROM agent_signals ORDER BY signal_id"
+            ).fetchall()
+            by_id = {r["signal_id"]: dict(r) for r in rows}
+            assert by_id["IN1"]["is_archived"]      == 1
+            assert by_id["IN1"]["manual_exclusion"] == 1
+            assert by_id["IN1"]["blocked_reason"]   == "bad_run_bug_window"
+            assert by_id["IN1"]["archive_reason"]   == "scanner_over_signaling_may15_may18"
+            assert by_id["IN2"]["is_archived"]      == 1
+            assert by_id["OUT1"]["is_archived"]     == 0   # untouched
+            assert by_id["OUT2"]["is_archived"]     == 0   # untouched
+        finally:
+            self._restore(db_mod_real, orig)
+
+    def test_idempotent_second_call_archives_zero(self):
+        import db.database as db_mod
+        signals = [
+            {"signal_id": "SIG1", "timestamp_utc": "2026-05-15 12:00:00"},
+        ]
+        db_mod_real, orig, conn = self._fake_db(signals)
+        try:
+            count1 = db_mod.archive_bad_run_window(
+                start_utc="2026-05-15 00:00:00",
+                end_utc="2026-05-18 01:07:52",
+            )
+            count2 = db_mod.archive_bad_run_window(
+                start_utc="2026-05-15 00:00:00",
+                end_utc="2026-05-18 01:07:52",
+            )
+            assert count1 == 1
+            assert count2 == 0   # already archived — no second change
+        finally:
+            self._restore(db_mod_real, orig)
+
+    def test_stats_exclude_bad_run_rows_after_archive(self):
+        """After archive_bad_run_window(), get_performance_summary_db() excludes them."""
+        import db.database as db_mod
+        signals = [
+            {"signal_id": "GOOD", "timestamp_utc": "2026-05-12 10:00:00", "outcome": "WIN",  "outcome_pips": 10},
+            {"signal_id": "BAD",  "timestamp_utc": "2026-05-15 18:00:00", "outcome": "LOSS", "outcome_pips": -5},
+        ]
+        db_mod_real, orig, conn = self._fake_db(signals)
+        try:
+            db_mod.archive_bad_run_window(
+                start_utc="2026-05-15 00:00:00",
+                end_utc="2026-05-18 01:07:52",
+            )
+            r = db_mod.get_performance_summary_db()
+            assert r["agent"]["wins"]   == 1
+            assert r["agent"]["losses"] == 0
+            assert r["excluded_archived_count"] >= 1
+        finally:
+            self._restore(db_mod_real, orig)
+
+    def test_constants_exported(self):
+        """BAD_RUN_WINDOW_START/END are importable for wiring into api_performance."""
+        from db.database import BAD_RUN_WINDOW_START, BAD_RUN_WINDOW_END
+        assert BAD_RUN_WINDOW_START == "2026-05-15 00:00:00"
+        assert BAD_RUN_WINDOW_END   == "2026-05-18 01:07:52"
