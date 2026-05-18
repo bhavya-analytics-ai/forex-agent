@@ -62,7 +62,8 @@ MIN_RR             = 1.5
 SWEEP_MIN_WICK_PTS = 1.5
 SWEEP_MAX_BARS_AGO = 20
 DISPLACE_MIN_MULT  = 1.5
-RANGE_FLAT_THRESH  = 8.0    # H1 range < this → htf_range_active candidate
+RANGE_FLAT_THRESH      = 8.0    # H1 range < this → htf_range_active candidate
+MIN_MOMENTUM_REQUIRED  = 50.0   # momentum_score must reach this before ENTER_NOW is allowed
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -497,9 +498,11 @@ def _base_audit():
         "avoid_long_reason":           "",
         "avoid_short_reason":          "",
         # Entry quality
-        "entry_quality":       "low",
-        "momentum_score":      0,
-        "scanner_state_flow":  "init",
+        "entry_quality":        "low",
+        "momentum_score":       0,
+        "min_momentum_required": MIN_MOMENTUM_REQUIRED,
+        "momentum_gate_passed":  False,
+        "scanner_state_flow":   "init",
         # Trade levels (populated on ENTER_NOW only)
         "entry_price": None,
         "sl_price":    None,
@@ -590,6 +593,36 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                     _apply_watch_only_gate(out)
                     return out
 
+                # ── MOMENTUM GATE ─────────────────────────────────────────────
+                mom = _momentum_score(m5_candles, "bearish", confluence)
+                out["momentum_score"]        = mom
+                out["min_momentum_required"] = MIN_MOMENTUM_REQUIRED
+
+                # H1 opposing hard skip (h1_trend="chop" here normally; guard for edge cases)
+                if (h1_trend in ("bullish", "uptrend", "weak_bullish", "weak_uptrend")
+                        and mom < 35):
+                    out["entry_state"]          = "SKIP"
+                    out["skip_reason"]          = "opposing_h1_low_momentum"
+                    out["momentum_gate_passed"] = False
+                    out["scanner_state_flow"]   = (
+                        "range_active → range_low_broken → retest_held → follow_through"
+                        " → opposing_h1_low_momentum → SKIP"
+                    )
+                    _apply_watch_only_gate(out)
+                    return out
+
+                if mom < MIN_MOMENTUM_REQUIRED:
+                    out["entry_state"]          = "WAIT_MOMENTUM"
+                    out["skip_reason"]          = "low_momentum"
+                    out["momentum_gate_passed"] = False
+                    out["scanner_state_flow"]   = (
+                        "range_active → range_low_broken → retest_held → follow_through"
+                        " → low_momentum → WAIT_MOMENTUM"
+                    )
+                    _apply_watch_only_gate(out)
+                    return out
+
+                out["momentum_gate_passed"] = True
                 out.update(levels)
                 out["entry_state"]        = "ENTER_NOW"
                 out["direction"]          = "bearish"
@@ -599,7 +632,6 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 out["should_alert"]       = True
                 out["entry_quality"]      = "high"
                 out["skip_reason"]        = ""
-                out["momentum_score"]     = _momentum_score(m5_candles, "bearish", confluence)
                 out["scanner_state_flow"] = (
                     "range_active → range_low_broken → retest_held → follow_through → ENTER_NOW short"
                 )
@@ -672,7 +704,37 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 _apply_watch_only_gate(out)
                 return out
 
+            # ── MOMENTUM GATE ─────────────────────────────────────────────────
+            mom = _momentum_score(m5_candles, "bullish", confluence)
+            out["momentum_score"]        = mom
+            out["min_momentum_required"] = MIN_MOMENTUM_REQUIRED
+
+            # H1 opposing hard skip: H1 directional against bullish entry + low momentum
+            if (h1_trend in ("bearish", "downtrend", "weak_bearish", "weak_downtrend")
+                    and mom < 35):
+                out["entry_state"]          = "SKIP"
+                out["skip_reason"]          = "opposing_h1_low_momentum"
+                out["momentum_gate_passed"] = False
+                out["scanner_state_flow"]   = (
+                    "sweep_detected → reclaim_confirmed → displacement"
+                    " → opposing_h1_low_momentum → SKIP"
+                )
+                _apply_watch_only_gate(out)
+                return out
+
+            if mom < MIN_MOMENTUM_REQUIRED:
+                out["entry_state"]          = "WAIT_MOMENTUM"
+                out["skip_reason"]          = "low_momentum"
+                out["momentum_gate_passed"] = False
+                out["scanner_state_flow"]   = (
+                    "sweep_detected → reclaim_confirmed → displacement"
+                    " → low_momentum → WAIT_MOMENTUM"
+                )
+                _apply_watch_only_gate(out)
+                return out
+
             # All gates passed — ENTER_NOW long
+            out["momentum_gate_passed"] = True
             out.update(levels)
             out["entry_state"]        = "ENTER_NOW"
             out["direction"]          = "bullish"
@@ -682,7 +744,6 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             out["should_alert"]       = True
             out["entry_quality"]      = "high"
             out["skip_reason"]        = ""
-            out["momentum_score"]     = _momentum_score(m5_candles, "bullish", confluence)
             out["scanner_state_flow"] = (
                 "sweep_detected → reclaim_confirmed → displacement → ENTER_NOW long"
             )
@@ -724,6 +785,36 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                         _apply_watch_only_gate(out)
                         return out
 
+                    # ── MOMENTUM GATE ─────────────────────────────────────────
+                    mom = _momentum_score(m5_candles, "bearish", confluence)
+                    out["momentum_score"]        = mom
+                    out["min_momentum_required"] = MIN_MOMENTUM_REQUIRED
+
+                    # H1 opposing hard skip: H1 directional against bearish entry + low momentum
+                    if (h1_trend in ("bullish", "uptrend", "weak_bullish", "weak_uptrend")
+                            and mom < 35):
+                        out["entry_state"]          = "SKIP"
+                        out["skip_reason"]          = "opposing_h1_low_momentum"
+                        out["momentum_gate_passed"] = False
+                        out["scanner_state_flow"]   = (
+                            "bullish_sweep → reclaim_failed → bearish_displacement"
+                            " → opposing_h1_low_momentum → SKIP"
+                        )
+                        _apply_watch_only_gate(out)
+                        return out
+
+                    if mom < MIN_MOMENTUM_REQUIRED:
+                        out["entry_state"]          = "WAIT_MOMENTUM"
+                        out["skip_reason"]          = "low_momentum"
+                        out["momentum_gate_passed"] = False
+                        out["scanner_state_flow"]   = (
+                            "bullish_sweep → reclaim_failed → bearish_displacement"
+                            " → low_momentum → WAIT_MOMENTUM"
+                        )
+                        _apply_watch_only_gate(out)
+                        return out
+
+                    out["momentum_gate_passed"] = True
                     out.update(levels)
                     out["entry_state"]        = "ENTER_NOW"
                     out["direction"]          = "bearish"
@@ -733,7 +824,6 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                     out["should_alert"]       = True
                     out["entry_quality"]      = "high"
                     out["skip_reason"]        = ""
-                    out["momentum_score"]     = _momentum_score(m5_candles, "bearish", confluence)
                     out["scanner_state_flow"] = (
                         "bullish_sweep → reclaim_failed → bearish_displacement → ENTER_NOW short"
                     )

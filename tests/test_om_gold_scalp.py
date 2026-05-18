@@ -235,8 +235,11 @@ class TestSweepReclaimLong:
         monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
 
         m5 = self._build_sweep_reclaim_m5(base=2300.0)
-        confluence = make_confluence(m5_candles=m5, m5_trend="bearish",
-                                     h1_trend="bearish", m15_trend="bearish")
+        # Confluent trends required: momentum_gate (>=50) must pass.
+        # m5="bullish" (+35), m15="bullish" (+25), displacement (+10), M1 (+7) = 77 >= 50.
+        # h1="bullish" is not opposing bullish direction → no opposing-H1 skip.
+        confluence = make_confluence(m5_candles=m5, m5_trend="bullish",
+                                     h1_trend="bullish", m15_trend="bullish")
         candles = make_candles_dict(m5=m5)
         result  = mod.run({}, confluence, "XAU_USD", candles)
 
@@ -620,6 +623,109 @@ class TestTradeLevels:
             if sl_dist > 0:
                 rr = tp1_dist / sl_dist
                 assert rr >= 1.5, f"RR={rr:.2f} below minimum 1.5"
+
+
+# ---------------------------------------------------------------------------
+# MOMENTUM GATE TESTS
+# ---------------------------------------------------------------------------
+
+class TestMomentumGate:
+    """
+    momentum_score < MIN_MOMENTUM_REQUIRED (50) must prevent ENTER_NOW.
+    Audit fields min_momentum_required and momentum_gate_passed must always be present.
+    """
+
+    def _build_sweep_reclaim_m5(self, base=2300.0):
+        """Same geometric fixture as TestSweepReclaimLong — sweep + reclaim + displacement."""
+        bars = bearish_candles(start=base + 20, step=1.5, n=20)
+        sweep    = candle(base - 2, base + 1, base - 13, base - 3)
+        reclaim  = candle(base - 3, base + 2, base - 4,  base + 1)
+        hold     = candle(base + 1, base + 3, base,      base + 2)
+        displace = candle(base - 2, base + 4, base - 3,  base + 1)
+        bars += [sweep, reclaim, hold, displace]
+        return bars
+
+    def test_low_momentum_no_enter_now(self, monkeypatch):
+        """
+        Sweep + reclaim + displacement fires, but chop trends → momentum ≈ 17 < 50.
+        Must produce WAIT_MOMENTUM (or SKIP), never ENTER_NOW.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        m5 = self._build_sweep_reclaim_m5(base=2300.0)
+        # h1="bullish" (not opposing bullish direction, so no opposing-H1 skip)
+        # m5/m15="chop" → 0 M5/M15 pts → momentum ≈ 10(displace)+7(M1) = 17 < 50
+        confluence = make_confluence(
+            m5_candles=m5,
+            h1_trend="bullish",
+            m5_trend="chop",
+            m15_trend="chop",
+        )
+        candles = make_candles_dict(m5=m5)
+        result  = mod.run({}, confluence, "XAU_USD", candles)
+
+        assert result["entry_state"] != "ENTER_NOW", (
+            f"Expected WAIT_MOMENTUM or SKIP, got ENTER_NOW "
+            f"(momentum_score={result.get('momentum_score')})"
+        )
+        assert result["entry_state"] in ("WAIT_MOMENTUM", "SKIP", "SKIP_CHOP"), (
+            f"Unexpected entry_state={result['entry_state']}"
+        )
+
+    def test_high_momentum_can_enter_now(self, monkeypatch):
+        """
+        Same geometry + strong confluent trends → momentum ≈ 77 >= 50 → ENTER_NOW allowed.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        m5 = self._build_sweep_reclaim_m5(base=2300.0)
+        # m5="bullish"(+35) + m15="bullish"(+25) + displacement(+10) + M1(+7) = 77 >= 50
+        # h1="bullish" → not opposing bullish direction
+        confluence = make_confluence(
+            m5_candles=m5,
+            h1_trend="bullish",
+            m5_trend="bullish",
+            m15_trend="bullish",
+        )
+        candles = make_candles_dict(m5=m5)
+        result  = mod.run({}, confluence, "XAU_USD", candles)
+
+        assert result["entry_state"] == "ENTER_NOW", (
+            f"Expected ENTER_NOW with high momentum, got {result['entry_state']} "
+            f"(momentum_score={result.get('momentum_score')})"
+        )
+        assert result["direction"]  == "bullish"
+        assert result["setup_type"] == "sweep_reclaim_long"
+
+    def test_momentum_audit_fields_present(self, monkeypatch):
+        """min_momentum_required and momentum_gate_passed must be in every result."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        m5 = self._build_sweep_reclaim_m5(base=2300.0)
+        # Low-momentum path (chop trends) so we exercise the WAIT_MOMENTUM branch
+        confluence = make_confluence(
+            m5_candles=m5,
+            h1_trend="bullish",
+            m5_trend="chop",
+            m15_trend="chop",
+        )
+        candles = make_candles_dict(m5=m5)
+        result  = mod.run({}, confluence, "XAU_USD", candles)
+
+        assert "min_momentum_required" in result, \
+            "min_momentum_required missing from output"
+        assert "momentum_gate_passed"  in result, \
+            "momentum_gate_passed missing from output"
+        assert result["min_momentum_required"] == 50, \
+            f"min_momentum_required should be 50, got {result['min_momentum_required']}"
+        assert isinstance(result["momentum_gate_passed"], bool), \
+            "momentum_gate_passed must be bool"
 
 
 # ---------------------------------------------------------------------------
