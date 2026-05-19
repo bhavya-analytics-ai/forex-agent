@@ -307,6 +307,7 @@ def _detect_displacement(m5_candles, direction="bullish", avg_body=None):
                     "displacement_body_pts": round(b, 3),
                     "avg_body_pts":          round(avg_body, 3),
                     "displacement_ratio":    round(b / avg_body, 2),
+                    "fail_reason":           "",
                 }
             if direction == "bearish" and _is_bearish(c):
                 return {
@@ -314,15 +315,25 @@ def _detect_displacement(m5_candles, direction="bullish", avg_body=None):
                     "displacement_body_pts": round(b, 3),
                     "avg_body_pts":          round(avg_body, 3),
                     "displacement_ratio":    round(b / avg_body, 2),
+                    "fail_reason":           "",
                 }
 
-    # Not detected — still return avg_body for observability
+    # Not detected — surface what actually failed for audit/rejection reason.
+    # max_b is the largest body in the last 2 bars (any direction) so we can
+    # distinguish: body was big enough but wrong direction vs body too small.
     max_b = max((_body(c) for c in m5_candles[-2:]), default=0.0)
+    ratio = round(max_b / avg_body, 2) if avg_body > 0 else 0.0
+    # fail_reason: "direction_mismatch" when ratio >= threshold but bar points
+    # the wrong way; "ratio_below_threshold" when body is simply too small.
+    fail_reason = (
+        "direction_mismatch" if ratio >= DISPLACE_MIN_MULT else "ratio_below_threshold"
+    )
     return {
         "detected":              False,
         "displacement_body_pts": round(max_b, 3),
         "avg_body_pts":          round(avg_body, 3),
-        "displacement_ratio":    round(max_b / avg_body, 2) if avg_body > 0 else 0.0,
+        "displacement_ratio":    ratio,
+        "fail_reason":           fail_reason,
     }
 
 
@@ -866,10 +877,20 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             out["displacement_ratio"]    = disp["displacement_ratio"]
 
             if not disp["detected"]:
+                _fail = disp.get("fail_reason", "ratio_below_threshold")
+                if _fail == "direction_mismatch":
+                    _disp_rej = (
+                        f"displacement_ratio={disp['displacement_ratio']} >= {DISPLACE_MIN_MULT}"
+                        f" but bar is not bullish (direction_mismatch)"
+                    )
+                else:
+                    _disp_rej = (
+                        f"displacement_ratio={disp['displacement_ratio']} < {DISPLACE_MIN_MULT}"
+                    )
                 out["entry_state"]     = "WAIT_HOLD"
                 out["skip_reason"]     = ""
                 out["rejection_stage"] = "displacement_check"
-                out["rejection_reason"] = f"displacement_ratio={disp['displacement_ratio']} < {DISPLACE_MIN_MULT}"
+                out["rejection_reason"] = _disp_rej
                 out["scanner_state_flow"] = "sweep_detected → reclaim_confirmed → awaiting_displacement → WAIT_HOLD"
                 out["evaluated_branches"] = _branches
                 _apply_watch_only_gate(out)
@@ -1047,8 +1068,18 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                     return out
 
                 # Bearish displacement not confirmed yet
+                _fail3 = disp.get("fail_reason", "ratio_below_threshold")
+                if _fail3 == "direction_mismatch":
+                    _disp_rej3 = (
+                        f"displacement_ratio={disp['displacement_ratio']} >= {DISPLACE_MIN_MULT}"
+                        f" but bar is not bearish (direction_mismatch)"
+                    )
+                else:
+                    _disp_rej3 = (
+                        f"displacement_ratio={disp['displacement_ratio']} < {DISPLACE_MIN_MULT}"
+                    )
                 out["rejection_stage"]  = "displacement_check"
-                out["rejection_reason"] = f"displacement_ratio={disp['displacement_ratio']} < {DISPLACE_MIN_MULT}"
+                out["rejection_reason"] = _disp_rej3
 
             # Sweep detected but no failed reclaim yet (or failed reclaim but no displacement)
             out["entry_state"]        = "WAIT_REACTION"

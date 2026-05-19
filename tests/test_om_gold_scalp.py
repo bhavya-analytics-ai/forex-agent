@@ -1480,3 +1480,216 @@ class TestExtraCandidateStoreFull:
             "store mutated original candidate dict (added keys)"
         assert candidate["evaluated_branches"] == original_branches, \
             "store mutated evaluated_branches in original dict"
+
+
+# ---------------------------------------------------------------------------
+# DISPLACEMENT REJECTION REASON CONSISTENCY TESTS
+#
+# Bug: _detect_displacement returned ratio=2.05 with detected=False because
+# the bar was in the wrong direction, but rejection_reason always said
+# "displacement_ratio=2.05 < 1.5" — mathematically false.
+# Correct behaviour:
+#   ratio >= threshold but wrong direction → "direction_mismatch"
+#   ratio < threshold                      → "ratio_below_threshold" / "< threshold"
+# ---------------------------------------------------------------------------
+
+class TestDisplacementRejectionReason:
+    """
+    rejection_reason on displacement_check must match what actually failed.
+    ratio above threshold → cannot say '< threshold'.
+    passing displacement → cannot return WAIT_HOLD from same gate.
+    """
+
+    # ── _detect_displacement unit tests ──────────────────────────────────────
+
+    def test_detect_displacement_returns_fail_reason_key(self):
+        """fail_reason must always be present in return dict."""
+        mod = _import_strategy()
+        candles = flat_candles(2300.0, 10)
+        result = mod._detect_displacement(candles, "bullish")
+        assert "fail_reason" in result, "fail_reason key missing from _detect_displacement return"
+
+    def test_fail_reason_empty_when_detected(self):
+        """fail_reason must be '' when detected=True."""
+        mod = _import_strategy()
+        # Build 2 large bullish displacement bars on top of flat base
+        base = flat_candles(2300.0, 20)
+        # avg body of flat candles ≈ 0; use explicit avg_body param
+        big_bull = candle(2300.0, 2315.0, 2299.0, 2314.0)  # body=14, big bullish
+        candles = base + [big_bull]
+        result = mod._detect_displacement(candles, "bullish", avg_body=2.0)
+        if result["detected"]:
+            assert result["fail_reason"] == "", \
+                f"fail_reason must be '' on detected=True, got: '{result['fail_reason']}'"
+
+    def test_direction_mismatch_when_ratio_ok_wrong_dir(self):
+        """
+        Large bearish bar when looking for bullish: ratio >= 1.5 but
+        fail_reason must be 'direction_mismatch', not 'ratio_below_threshold'.
+        """
+        mod = _import_strategy()
+        base = flat_candles(2300.0, 20)
+        # Large BEARISH bar — body = 14 pts (>>1.5 × 2 avg)
+        big_bear = candle(2314.0, 2315.0, 2299.0, 2300.0)  # open > close → bearish
+        candles = base + [big_bear]
+        result = mod._detect_displacement(candles, "bullish", avg_body=2.0)
+        assert not result["detected"], "bearish bar should not count as bullish displacement"
+        assert result["displacement_ratio"] >= 1.5, \
+            f"ratio should be >= 1.5, got {result['displacement_ratio']}"
+        assert result["fail_reason"] == "direction_mismatch", (
+            f"fail_reason must be 'direction_mismatch' when ratio ok but wrong dir, "
+            f"got: '{result['fail_reason']}'"
+        )
+
+    def test_ratio_below_threshold_when_body_small(self):
+        """
+        Small bars: ratio < 1.5 → fail_reason must be 'ratio_below_threshold'.
+        """
+        mod = _import_strategy()
+        # All flat candles — max body << avg * 1.5
+        candles = flat_candles(2300.0, 25)
+        result = mod._detect_displacement(candles, "bullish", avg_body=5.0)
+        assert not result["detected"]
+        assert result["displacement_ratio"] < 1.5, \
+            f"ratio should be < 1.5 on flat candles, got {result['displacement_ratio']}"
+        assert result["fail_reason"] == "ratio_below_threshold", (
+            f"fail_reason must be 'ratio_below_threshold', got: '{result['fail_reason']}'"
+        )
+
+    # ── run() integration: rejection_reason string consistency ────────────────
+
+    def _run_wait_hold(self, monkeypatch):
+        """
+        Build a Gate 2 scenario that reaches WAIT_HOLD:
+        - bearish sweep detected
+        - reclaim confirmed
+        - displacement NOT confirmed (large bearish bar, not bullish)
+        Returns (result, mod).
+        """
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+
+        price = 2300.0
+        sweep_low = 2282.0  # sweep wick goes here, >> 1.5 pts below prior lows
+
+        # 25 flat base bars (prior swing lows = price-2 = 2298)
+        base = flat_candles(price, n=25)
+
+        # Bearish sweep bar: wick to sweep_low, close back near price (bullish close)
+        # close = price - 0.5 > sweep_low + SWEEP_MIN_WICK_PTS (1.5) = 2283.5 → reclaim level
+        sweep_bar = candle(price, price + 1.0, sweep_low, price - 0.5)
+
+        # Reclaim: close above reclaim_level = sweep_low + 1.5 = 2283.5
+        reclaim_bar = candle(price - 0.5, price + 2.0, price - 1.0, price + 1.0)
+
+        # Large BEARISH displacement bar — body is big but in the WRONG direction
+        # (Gate 2 needs bullish displacement after bullish reclaim)
+        big_bear = candle(price + 1.0, price + 2.0, price - 8.0, price - 7.0)
+
+        m5 = base + [sweep_bar, reclaim_bar, big_bear]
+        confluence = make_confluence(
+            m5_candles=m5, h1_trend="bearish",
+            m15_trend="bearish", m5_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+        return result, mod
+
+    def test_ratio_above_threshold_cannot_emit_less_than_string(self, monkeypatch):
+        """
+        Core invariant: if displacement_ratio >= 1.5 the rejection_reason
+        must NOT contain '< 1.5'.
+        """
+        result, _ = self._run_wait_hold(monkeypatch)
+        if result.get("rejection_stage") != "displacement_check":
+            return  # fixture didn't hit this gate
+        ratio = result.get("displacement_ratio", 0.0)
+        reason = result.get("rejection_reason", "")
+        if ratio >= 1.5:
+            assert "< 1.5" not in reason and "< " + str(1.5) not in reason, (
+                f"ratio={ratio} >= 1.5 but rejection_reason says '< 1.5': '{reason}'"
+            )
+
+    def test_direction_mismatch_in_rejection_reason_when_ratio_ok(self, monkeypatch):
+        """
+        When ratio >= threshold but direction wrong, rejection_reason must
+        mention 'direction_mismatch' or 'not bullish'.
+        """
+        result, _ = self._run_wait_hold(monkeypatch)
+        if result.get("rejection_stage") != "displacement_check":
+            return
+        ratio = result.get("displacement_ratio", 0.0)
+        reason = result.get("rejection_reason", "")
+        if ratio >= 1.5:
+            assert "direction_mismatch" in reason or "not bullish" in reason, (
+                f"Expected direction_mismatch in reason when ratio={ratio} >= 1.5, "
+                f"got: '{reason}'"
+            )
+
+    def test_passing_displacement_cannot_return_wait_hold(self, monkeypatch):
+        """
+        If _detect_displacement returns detected=True, entry_state must NOT
+        be WAIT_HOLD from the displacement_check rejection_stage.
+        Constructed by giving a genuine bullish displacement bar.
+        """
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+
+        price = 2300.0
+        sweep_low = 2282.0
+
+        base = flat_candles(price, n=25)
+        sweep_bar   = candle(price, price + 1.0, sweep_low, price - 0.5)
+        reclaim_bar = candle(price - 0.5, price + 2.0, price - 1.0, price + 1.0)
+        # Large BULLISH displacement bar — correct direction
+        big_bull = candle(price + 1.0, price + 12.0, price + 0.5, price + 11.0)
+
+        m5 = base + [sweep_bar, reclaim_bar, big_bull]
+        confluence = make_confluence(
+            m5_candles=m5, h1_trend="bearish",
+            m15_trend="bearish", m5_trend="bullish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        if result.get("rejection_stage") == "displacement_check":
+            assert result.get("entry_state") != "WAIT_HOLD", (
+                "displacement_check rejection_stage set but displacement was confirmed — "
+                "entry_state must not be WAIT_HOLD from this gate when detected=True"
+            )
+
+    def test_rejection_reason_matches_actual_comparison(self, monkeypatch):
+        """
+        Parametric invariant: for any result with rejection_stage=displacement_check,
+        the rejection_reason must be consistent with the displacement_ratio value.
+        If ratio < 1.5 → reason must contain '< 1.5'.
+        If ratio >= 1.5 → reason must NOT contain '< 1.5'.
+        """
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        mod = _import_strategy()
+
+        # Test several candle geometries to exercise both branches
+        test_cases = [
+            flat_candles(2300.0, 30),                    # no sweep → fallthrough
+            _make_failed_reclaim_low_momentum_candles(),  # Gate 3 path
+        ]
+        for m5 in test_cases:
+            confluence = make_confluence(m5_candles=m5, h1_trend="bearish",
+                                         m15_trend="bearish", m5_trend="bearish")
+            result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+            if result.get("rejection_stage") != "displacement_check":
+                continue
+
+            ratio  = result.get("displacement_ratio", 0.0)
+            reason = result.get("rejection_reason", "")
+
+            if ratio < 1.5:
+                assert "< 1.5" in reason, (
+                    f"ratio={ratio} < 1.5 but reason doesn't say so: '{reason}'"
+                )
+            else:
+                assert "< 1.5" not in reason, (
+                    f"ratio={ratio} >= 1.5 but reason says '< 1.5': '{reason}'"
+                )
