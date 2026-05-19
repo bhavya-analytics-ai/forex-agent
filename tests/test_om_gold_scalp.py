@@ -562,6 +562,165 @@ class TestRangeBreakdownBearish:
         assert result["setup_type"]  == "range_breakdown_bearish"
 
 
+class TestRangeBreakoutBullish:
+    """Range high broken + retest held above + follow-through → ENTER_NOW long."""
+
+    def _build_breakout_m5(self, range_high=2310.0):
+        """
+        Bullish mirror of TestRangeBreakdownBearish._build_breakdown_m5.
+
+        bars[0..19]: range context — flat below range_high, inside H1 range
+        bars[20]:    breakout — body closes ABOVE range_high
+        bars[21]:    retest — wicks down toward range_high, body holds above
+        bars[22]:    follow-through — closes higher
+
+        The flat baseline sits at range_high - 2 so it does NOT trigger fake_breakout
+        (fake_breakout requires a body close ABOVE range_high followed by close BELOW —
+        here bars 20+ stay above range_high, so the detector never fires).
+        """
+        bars = flat_candles(price=range_high - 2, n=20)
+        breakout     = candle(range_high - 1, range_high + 5, range_high - 1, range_high + 3)
+        retest       = candle(range_high + 3, range_high + 4, range_high + 0.5, range_high + 1.5)
+        follow       = candle(range_high + 1.5, range_high + 10, range_high + 1, range_high + 9)
+        bars += [breakout, retest, follow]
+        return bars, range_high
+
+    def test_range_breakout_enter_now_long(self, monkeypatch):
+        """All three gates pass → ENTER_NOW long, setup_type=range_breakout_bullish."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        range_high = 2310.0
+        m5, rhigh = self._build_breakout_m5(range_high=range_high)
+        # H1: flat so swing_high ≈ range_high; H1 trend chop to avoid opposing-H1 skip
+        h1 = flat_candles(price=range_high - 2, n=60)
+        confluence = make_confluence(h1_candles=h1, m5_candles=m5,
+                                     h1_trend="chop", m5_trend="bullish")
+        candles = make_candles_dict(h1=h1, m5=m5)
+        result  = mod.run({}, confluence, "XAU_USD", candles)
+
+        assert result["entry_state"] == "ENTER_NOW"
+        assert result["direction"]   == "bullish"
+        assert result["setup_type"]  == "range_breakout_bullish"
+
+    def test_range_breakout_audit_fields(self, monkeypatch):
+        """range_high_broken, range_retest_held_above, bullish_follow_through all True on ENTER_NOW."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        range_high = 2310.0
+        m5, rhigh = self._build_breakout_m5(range_high=range_high)
+        h1 = flat_candles(price=range_high - 2, n=60)
+        confluence = make_confluence(h1_candles=h1, m5_candles=m5,
+                                     h1_trend="chop", m5_trend="bullish")
+        candles = make_candles_dict(h1=h1, m5=m5)
+        result  = mod.run({}, confluence, "XAU_USD", candles)
+
+        assert result["range_high_broken"]       is True
+        assert result["range_retest_held_above"] is True
+        assert result["bullish_follow_through"]  is True
+
+    def test_range_breakout_no_retest_no_enter(self, monkeypatch):
+        """
+        Breakout bar closes above range_high but no retest / follow-through bars follow →
+        htf_range_no_trade fallthrough (not ENTER_NOW).
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        range_high = 2310.0
+        bars = flat_candles(price=range_high - 2, n=20)
+        # Only a single breakout bar; no subsequent retest/follow-through inside last-5 window
+        breakout = candle(range_high - 1, range_high + 5, range_high - 1, range_high + 3)
+        bars.append(breakout)
+        h1 = flat_candles(price=range_high - 2, n=60)
+        confluence = make_confluence(h1_candles=h1, m5_candles=bars,
+                                     h1_trend="chop", m5_trend="bullish")
+        candles = make_candles_dict(h1=h1, m5=bars)
+        result  = mod.run({}, confluence, "XAU_USD", candles)
+
+        # No retest + follow-through → falls to htf_range_no_trade
+        assert result["entry_state"] in ("SKIP", "SKIP_INSIDE_RANGE", "WAIT_MOMENTUM")
+        assert result["setup_type"] in ("htf_range_no_trade", "range_breakout_bullish")
+        # Must NOT be ENTER_NOW
+        assert result["entry_state"] != "ENTER_NOW"
+
+    def test_range_breakout_low_momentum_wait_momentum(self, monkeypatch):
+        """All structural gates pass but momentum < 50 → WAIT_MOMENTUM."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        range_high = 2310.0
+        m5, rhigh = self._build_breakout_m5(range_high=range_high)
+        h1 = flat_candles(price=range_high - 2, n=60)
+        confluence = make_confluence(h1_candles=h1, m5_candles=m5,
+                                     h1_trend="chop", m5_trend="chop")  # neutral → low momentum
+        candles = make_candles_dict(h1=h1, m5=m5)
+
+        # Force momentum score below threshold
+        def _low_momentum(candles_, direction, conf):
+            return 20.0
+
+        monkeypatch.setattr(mod, "_momentum_score", _low_momentum)
+        result = mod.run({}, confluence, "XAU_USD", candles)
+
+        assert result["entry_state"] == "WAIT_MOMENTUM"
+        assert result["setup_type"]  == "range_breakout_bullish"
+        assert result["momentum_gate_passed"] is False
+
+    def test_range_breakout_does_not_affect_bearish_breakdown(self, monkeypatch):
+        """
+        Bearish breakdown fixture still produces range_breakdown_bearish ENTER_NOW short.
+        The new bullish branch must not interfere.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        range_low = 2290.0
+        bars = flat_candles(price=range_low + 2, n=20)
+        breakdown = candle(range_low + 1, range_low + 3, range_low - 5, range_low - 3)
+        retest    = candle(range_low - 3, range_low - 0.5, range_low - 6, range_low - 4)
+        follow    = candle(range_low - 4, range_low - 3,  range_low - 12, range_low - 10)
+        m5 = bars + [breakdown, retest, follow]
+        h1 = flat_candles(price=range_low + 2, n=60)
+        confluence = make_confluence(h1_candles=h1, m5_candles=m5,
+                                     h1_trend="chop", m5_trend="bearish")
+        candles = make_candles_dict(h1=h1, m5=m5)
+        result  = mod.run({}, confluence, "XAU_USD", candles)
+
+        assert result["entry_state"] == "ENTER_NOW"
+        assert result["direction"]   == "bearish"
+        assert result["setup_type"]  == "range_breakdown_bearish"
+
+    def test_range_breakout_fake_breakout_takes_priority(self, monkeypatch):
+        """
+        Fake breakout (body above then body back below range_high within 1-2 bars) is
+        detected FIRST in Gate 1 and returns range_fake_breakout_no_trade, NOT range_breakout_bullish.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        range_high = 2310.0
+        bars = flat_candles(price=range_high - 10, n=20)
+        breakout = candle(range_high - 1, range_high + 8, range_high - 2, range_high + 5)
+        reclaim  = candle(range_high + 5, range_high + 6, range_high - 5, range_high - 3)
+        m5 = bars + [breakout, reclaim]
+        h1 = flat_candles(price=range_high - 2, n=60)
+        confluence = make_confluence(h1_candles=h1, m5_candles=m5, h1_trend="chop")
+        candles = make_candles_dict(h1=h1, m5=m5)
+        result  = mod.run({}, confluence, "XAU_USD", candles)
+
+        assert result["setup_type"]  == "range_fake_breakout_no_trade"
+        assert result["entry_state"] in ("SKIP", "SKIP_INSIDE_RANGE")
+        assert result["entry_allowed"] is False
+
+
 class TestRangeFakeBreakoutSkip:
     """Breakout above range + body reclaims back inside → SKIP_INSIDE_RANGE, entry_allowed=False."""
 

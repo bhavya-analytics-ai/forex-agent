@@ -392,6 +392,65 @@ def _detect_range_breakdown(m5_candles, range_low):
     }
 
 
+def _detect_range_breakout(m5_candles, range_high):
+    """
+    Bullish mirror of _detect_range_breakdown.
+
+    Path: range_high_broken → retest_held_above → bullish_follow_through → ENTER_NOW long.
+
+    Looks for body close ABOVE range_high in last 5 bars, then retest bar
+    wicks down toward range_high but body holds above, then follow-through
+    bar closes higher.
+
+    Returns dict with each gate flag.
+    """
+    if len(m5_candles) < 5 or range_high <= 0:
+        return {
+            "range_high_broken":       False,
+            "range_retest_held_above": False,
+            "bullish_follow_through":  False,
+        }
+
+    # Look for body close above range_high in the last 5 bars
+    breakout_idx = None
+    for i, c in enumerate(m5_candles[-5:]):
+        if c["close"] > range_high:
+            breakout_idx = i
+            break
+
+    if breakout_idx is None:
+        return {
+            "range_high_broken":       False,
+            "range_retest_held_above": False,
+            "bullish_follow_through":  False,
+        }
+
+    remaining = m5_candles[-5:][breakout_idx + 1:]
+    if not remaining:
+        return {
+            "range_high_broken":       True,
+            "range_retest_held_above": False,
+            "bullish_follow_through":  False,
+        }
+
+    # Retest: a bar wicks toward range_high but body closes above
+    retest_held = any(
+        c["low"] <= range_high + 2 and c["close"] > range_high
+        for c in remaining
+    )
+
+    # Follow-through: after retest, a bar closes higher
+    follow_through = False
+    if retest_held and len(remaining) >= 2:
+        follow_through = remaining[-1]["close"] > remaining[0]["close"]
+
+    return {
+        "range_high_broken":       True,
+        "range_retest_held_above": retest_held,
+        "bullish_follow_through":  follow_through,
+    }
+
+
 def _detect_fake_breakout(m5_candles, range_high):
     """
     Fake breakout: body closes above range_high, then body closes back below range_high
@@ -590,10 +649,14 @@ def _base_audit():
         "displacement_body_pts": 0.0,
         "avg_body_pts":          0.0,
         "displacement_ratio":    0.0,
-        # Range breakdown
+        # Range breakdown (bearish)
         "range_low_broken":        False,
         "range_retest_held_below": False,
         "bearish_follow_through":  False,
+        # Range breakout (bullish)
+        "range_high_broken":       False,
+        "range_retest_held_above": False,
+        "bullish_follow_through":  False,
         # Fake breakout
         "breakout_failed":             False,
         "reclaim_back_inside_range":   False,
@@ -780,7 +843,95 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 _apply_watch_only_gate(out)
                 return out
 
-            # Still inside range, no breakdown
+            # Check for range breakout (bullish)
+            bo = _detect_range_breakout(m5_candles, range_high)
+            out.update(bo)
+            if bo["range_high_broken"] and bo["range_retest_held_above"] and bo["bullish_follow_through"]:
+                # Valid breakout — proceed to entry
+                entry_price = m5_candles[-1]["close"] if m5_candles else 0.0
+                sl_extreme  = range_high - 1.0  # retest support level
+                # Record entry/SL candidates for debug visibility
+                out["entry_price_candidate"] = round(entry_price, 3)
+                out["sl_anchor"]             = round(sl_extreme, 3)
+                levels = _calc_trade_levels(entry_price, sl_extreme, "bullish",
+                                            htf_magnet=h1["htf_magnet"])
+                if levels is not None:
+                    out["sl_price_candidate"] = levels["sl_price"]
+                if levels is None:
+                    _raw_sl_price, _raw_sl_pts = _compute_sl_raw(entry_price, sl_extreme, "bullish")
+                    out["sl_price_candidate"] = _raw_sl_price
+                    out["sl_pts"]             = _raw_sl_pts
+                    out["sl_gate_passed"]     = False
+                    out["rejection_stage"]    = "sl_check"
+                    out["rejection_reason"]   = f"sl_pts={_raw_sl_pts} > max={MAX_SL_PTS}"
+                    out["skip_reason"]        = "sl_too_wide"
+                    out["scanner_state_flow"] = "range_breakout → sl_too_wide"
+                    _apply_watch_only_gate(out)
+                    return out
+                out["sl_gate_passed"] = True
+                out["setup_type"]     = "range_breakout_bullish"
+                out["direction"]      = "bullish"
+
+                entry_dist = abs(entry_price - range_high)
+                if entry_dist > MAX_CHASE_PTS:
+                    out["entry_state"]        = "SKIP_CHASE"
+                    out["skip_reason"]        = "chase_distance"
+                    out["rejection_stage"]    = "chase_check"
+                    out["rejection_reason"]   = "chase_distance"
+                    out["scanner_state_flow"] = "range_breakout → chase_distance"
+                    _apply_watch_only_gate(out)
+                    return out
+
+                # ── MOMENTUM GATE ─────────────────────────────────────────────
+                mom = _momentum_score(m5_candles, "bullish", confluence)
+                out["momentum_score"]        = mom
+                out["min_momentum_required"] = MIN_MOMENTUM_REQUIRED
+
+                # H1 opposing hard skip
+                if (h1_trend in ("bearish", "downtrend", "weak_bearish", "weak_downtrend")
+                        and mom < 35):
+                    out["entry_state"]          = "SKIP"
+                    out["skip_reason"]          = "opposing_h1_low_momentum"
+                    out["momentum_gate_passed"] = False
+                    out["rejection_stage"]      = "momentum_gate"
+                    out["rejection_reason"]     = "opposing_h1_low_momentum"
+                    out["scanner_state_flow"]   = (
+                        "range_active → range_high_broken → retest_held → follow_through"
+                        " → opposing_h1_low_momentum → SKIP"
+                    )
+                    _apply_watch_only_gate(out)
+                    return out
+
+                if mom < MIN_MOMENTUM_REQUIRED:
+                    out["entry_state"]          = "WAIT_MOMENTUM"
+                    out["skip_reason"]          = "low_momentum"
+                    out["momentum_gate_passed"] = False
+                    out["rejection_stage"]      = "momentum_gate"
+                    out["rejection_reason"]     = f"momentum={mom} < {MIN_MOMENTUM_REQUIRED}"
+                    out["scanner_state_flow"]   = (
+                        "range_active → range_high_broken → retest_held → follow_through"
+                        " → low_momentum → WAIT_MOMENTUM"
+                    )
+                    _apply_watch_only_gate(out)
+                    return out
+
+                out["momentum_gate_passed"] = True
+                out.update(levels)
+                out["entry_state"]        = "ENTER_NOW"
+                out["direction"]          = "bullish"
+                out["setup_type"]         = "range_breakout_bullish"
+                out["entry_allowed"]      = True
+                out["should_log"]         = True
+                out["should_alert"]       = True
+                out["entry_quality"]      = "high"
+                out["skip_reason"]        = ""
+                out["scanner_state_flow"] = (
+                    "range_active → range_high_broken → retest_held → follow_through → ENTER_NOW long"
+                )
+                _apply_watch_only_gate(out)
+                return out
+
+            # Still inside range, no breakdown or breakout confirmed
             out["setup_type"]        = "htf_range_no_trade"
             out["entry_state"]       = "SKIP"
             out["skip_reason"]       = "inside_range_chop"
