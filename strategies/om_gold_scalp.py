@@ -451,6 +451,46 @@ def _detect_range_breakout(m5_candles, range_high):
     }
 
 
+def _detect_acceptance(m5_candles, reclaim_level, direction="bullish"):
+    """
+    Measure acceptance depth above (bullish) or below (bearish) a reclaimed level.
+
+    Counts consecutive M5 body closes on the correct side of reclaim_level,
+    walking backward from the most recent completed bar (i.e. m5_candles[-1]).
+
+    direction="bullish" → count consecutive closes ABOVE reclaim_level
+    direction="bearish" → count consecutive closes BELOW reclaim_level
+
+    Stops counting at the first bar that violates the direction.
+
+    Returns:
+      acceptance_window_bars  int   — number of consecutive confirming closes
+      acceptance_confirmed    bool  — True when acceptance_window_bars >= 3
+    """
+    _no_acceptance = {"acceptance_window_bars": 0, "acceptance_confirmed": False}
+
+    if not m5_candles or reclaim_level <= 0:
+        return _no_acceptance
+
+    count = 0
+    for c in reversed(m5_candles):
+        if direction == "bullish":
+            if c["close"] > reclaim_level:
+                count += 1
+            else:
+                break
+        else:  # bearish
+            if c["close"] < reclaim_level:
+                count += 1
+            else:
+                break
+
+    return {
+        "acceptance_window_bars": count,
+        "acceptance_confirmed":   count >= 3,
+    }
+
+
 def _detect_fake_breakout(m5_candles, range_high):
     """
     Fake breakout: body closes above range_high, then body closes back below range_high
@@ -662,6 +702,14 @@ def _base_audit():
         "reclaim_back_inside_range":   False,
         "avoid_long_reason":           "",
         "avoid_short_reason":          "",
+        # Acceptance depth — Phase 2C audit fields
+        # acceptance_window_bars: consecutive M5 body closes on the correct side
+        #   of the reclaimed level (bullish: closes above; bearish: closes below)
+        # acceptance_confirmed: True when acceptance_window_bars >= 3
+        # Populated: Gate 2 after reclaim_confirmed, Gate 3 Path A after sl_gate_passed
+        # NOT populated: Gate 3 Path B, Gate 1 range paths, no_setup paths
+        "acceptance_window_bars": 0,
+        "acceptance_confirmed":   False,
         # S/R continuation context — Phase 2A/2B audit foundation
         # key_sr_level:          swept/broken level is a key S/R extreme (prior swing)
         # reclaimed_zone_active: reclaim was confirmed and zone context is still active
@@ -1041,6 +1089,9 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             # Reclaim confirmed — zone is now active context; structure directionally preserved
             out["reclaimed_zone_active"]  = True
             out["continuation_candidate"] = True
+            # Acceptance depth — how many consecutive M5 closes are above the reclaim level?
+            acc = _detect_acceptance(m5_candles, reclaim_level, direction="bullish")
+            out.update(acc)
             # Check displacement
             avg = _avg_body(m5_candles)
             disp = _detect_displacement(m5_candles, "bullish", avg)
@@ -1183,6 +1234,9 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                         return out
                     out["sl_gate_passed"]         = True
                     out["continuation_candidate"] = True  # displacement confirmed after failed reclaim
+                    # Acceptance depth — how many consecutive M5 closes are below the reclaim level?
+                    acc = _detect_acceptance(m5_candles, sr_level, direction="bearish")
+                    out.update(acc)
 
                     entry_dist = abs(entry_price - sl_extreme)
                     if entry_dist > MAX_CHASE_PTS:

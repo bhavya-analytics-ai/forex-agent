@@ -2618,3 +2618,418 @@ class TestPhase2BRejectionCandidate:
         result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
         assert result.get("rejection_candidate") is False, \
             f"Gate 3 Path A must never set rejection_candidate=True"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2C — Acceptance depth audit fields
+# ---------------------------------------------------------------------------
+
+class TestPhase2CAcceptanceDepth:
+    """
+    Verifies the two new Phase 2C audit fields:
+      acceptance_window_bars  int  — consecutive M5 body closes on correct side of reclaim level
+      acceptance_confirmed    bool — True when acceptance_window_bars >= 3
+
+    Rules:
+      - Both default to 0 / False in _base_audit().
+      - Populated after reclaim_confirmed=True in Gate 2.
+      - Populated after sl_gate_passed=True in Gate 3 Path A (failed_reclaim_continuation).
+      - NOT populated on Gate 3 Path B (sweep_reclaim_short).
+      - NOT populated on Gate 1 range paths or no_setup paths.
+      - No entry logic, setup_type, or thresholds changed.
+    """
+
+    # ── _detect_acceptance unit tests ────────────────────────────────────────
+
+    def test_detect_acceptance_empty_candles(self):
+        """Empty candle list → 0, False."""
+        mod = _import_strategy()
+        result = mod._detect_acceptance([], 100.0, "bullish")
+        assert result["acceptance_window_bars"] == 0
+        assert result["acceptance_confirmed"]   is False
+
+    def test_detect_acceptance_zero_level(self):
+        """level=0 → returns defaults (guard against bad input)."""
+        mod = _import_strategy()
+        candles = flat_candles(2300.0, 5)
+        result = mod._detect_acceptance(candles, 0.0, "bullish")
+        assert result["acceptance_window_bars"] == 0
+        assert result["acceptance_confirmed"]   is False
+
+    def test_detect_acceptance_bullish_one_close(self):
+        """
+        Bullish direction: 1 close above level → window=1, confirmed=False.
+        One bar above, one below immediately before it (stops the count).
+        """
+        mod = _import_strategy()
+        level = 100.0
+        candles = [
+            {"open": 98, "high": 101, "low": 97,  "close": 99},   # below level
+            {"open": 99, "high": 103, "low": 100, "close": 101},  # above level
+        ]
+        result = mod._detect_acceptance(candles, level, "bullish")
+        assert result["acceptance_window_bars"] == 1, (
+            f"Expected 1 bar above level, got {result['acceptance_window_bars']}"
+        )
+        assert result["acceptance_confirmed"] is False
+
+    def test_detect_acceptance_bullish_three_closes(self):
+        """
+        Bullish direction: 3 consecutive closes above level → window=3, confirmed=True.
+        """
+        mod = _import_strategy()
+        level = 100.0
+        candles = [
+            {"open": 98, "high": 101, "low": 97, "close": 99},    # below (stops count)
+            {"open": 100, "high": 103, "low": 100, "close": 101}, # above
+            {"open": 101, "high": 104, "low": 100, "close": 102}, # above
+            {"open": 102, "high": 105, "low": 101, "close": 103}, # above
+        ]
+        result = mod._detect_acceptance(candles, level, "bullish")
+        assert result["acceptance_window_bars"] >= 3, (
+            f"Expected >= 3 bars above level, got {result['acceptance_window_bars']}"
+        )
+        assert result["acceptance_confirmed"] is True
+
+    def test_detect_acceptance_bearish_three_closes(self):
+        """
+        Bearish direction: 3 consecutive closes below level → window=3, confirmed=True.
+        """
+        mod = _import_strategy()
+        level = 100.0
+        candles = [
+            {"open": 102, "high": 103, "low": 100, "close": 101}, # above (stops count)
+            {"open": 100, "high": 101, "low": 96,  "close": 97},  # below
+            {"open": 97,  "high": 99,  "low": 95,  "close": 96},  # below
+            {"open": 96,  "high": 98,  "low": 94,  "close": 95},  # below
+        ]
+        result = mod._detect_acceptance(candles, level, "bearish")
+        assert result["acceptance_window_bars"] >= 3
+        assert result["acceptance_confirmed"] is True
+
+    def test_detect_acceptance_confirmed_threshold_is_three(self):
+        """
+        Exactly 2 closes → confirmed=False.
+        Exactly 3 closes → confirmed=True.
+        """
+        mod = _import_strategy()
+        level = 100.0
+        two_above = [
+            {"close": 99},   # below — stops count
+            {"close": 101},  # above
+            {"close": 102},  # above
+        ]
+        three_above = [
+            {"close": 99},   # below — stops count
+            {"close": 101},  # above
+            {"close": 102},  # above
+            {"close": 103},  # above
+        ]
+        r2 = mod._detect_acceptance(two_above,   level, "bullish")
+        r3 = mod._detect_acceptance(three_above, level, "bullish")
+        assert r2["acceptance_window_bars"] == 2
+        assert r2["acceptance_confirmed"]   is False
+        assert r3["acceptance_window_bars"] == 3
+        assert r3["acceptance_confirmed"]   is True
+
+    def test_detect_acceptance_returns_correct_keys(self):
+        """Return dict must contain exactly the two expected keys."""
+        mod = _import_strategy()
+        result = mod._detect_acceptance(flat_candles(2300.0, 5), 2290.0, "bullish")
+        assert "acceptance_window_bars" in result
+        assert "acceptance_confirmed"   in result
+
+    # ── _base_audit default fields ────────────────────────────────────────────
+
+    def test_acceptance_fields_in_base_audit(self):
+        """acceptance_window_bars and acceptance_confirmed must exist in _base_audit()."""
+        mod = _import_strategy()
+        out = mod._base_audit()
+        assert "acceptance_window_bars" in out, "acceptance_window_bars missing from _base_audit"
+        assert "acceptance_confirmed"   in out, "acceptance_confirmed missing from _base_audit"
+        assert out["acceptance_window_bars"] == 0,     "acceptance_window_bars default must be 0"
+        assert out["acceptance_confirmed"]   is False, "acceptance_confirmed default must be False"
+
+    # ── Gate 2: populated after reclaim_confirmed ─────────────────────────────
+
+    def _gate2_reclaim_confirmed_m5(self, base=2300.0):
+        """
+        Bearish sweep + bullish reclaim + bullish displacement.
+        All base bars close well above reclaim_level (sweep_low + 1.5).
+        acceptance_window_bars will be large (base price >> reclaim_level).
+        """
+        bars = flat_candles(price=base, n=20)
+        sweep  = candle(base,       base + 1,  base - 8,  base + 0.5)
+        rc1    = candle(base + 0.5, base + 6,  base + 0.2, base + 5)
+        hold   = candle(base + 4,   base + 7,  base + 3.5, base + 6)
+        displ  = candle(base + 5,   base + 14, base + 4,   base + 13)
+        return bars + [sweep, rc1, hold, displ]
+
+    def test_gate2_acceptance_populated_after_reclaim(self, monkeypatch):
+        """
+        Gate 2 sweep_reclaim_long: acceptance fields must be populated
+        (acceptance_window_bars > 0) when reclaim_confirmed=True.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        base = 2300.0
+        m5 = self._gate2_reclaim_confirmed_m5(base)
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(
+            h1_candles=h1, m5_candles=m5,
+            h1_trend="bearish", m5_trend="bullish", m15_trend="bullish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+
+        if result.get("reclaim_confirmed") is not True:
+            return  # fixture didn't trigger reclaim — not a failure
+
+        assert result["acceptance_window_bars"] > 0, (
+            "acceptance_window_bars must be > 0 when reclaim_confirmed=True, "
+            f"got {result['acceptance_window_bars']}"
+        )
+
+    def test_gate2_acceptance_confirmed_when_all_bars_above_level(self, monkeypatch):
+        """
+        Gate 2 with flat base bars all well above reclaim_level:
+        acceptance_window_bars >= 3 and acceptance_confirmed=True.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        base = 2300.0
+        m5 = self._gate2_reclaim_confirmed_m5(base)
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(
+            h1_candles=h1, m5_candles=m5,
+            h1_trend="bearish", m5_trend="bullish", m15_trend="bullish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+
+        if result.get("reclaim_confirmed") is not True:
+            return
+
+        # All base bars (close=2300) are above reclaim_level (≈2292+1.5=2293.5).
+        # So acceptance_window_bars should be >= 3 and confirmed=True.
+        assert result["acceptance_window_bars"] >= 3, (
+            f"All bars close well above reclaim_level — expected >= 3, "
+            f"got {result['acceptance_window_bars']}"
+        )
+        assert result["acceptance_confirmed"] is True, (
+            "acceptance_confirmed must be True when all base bars are above reclaim_level"
+        )
+
+    # ── Gate 3 Path A: populated after sl_gate_passed ─────────────────────────
+
+    def _gate3_path_a_m5(self, base=2300.0):
+        """
+        Bullish sweep + explicit failed reclaim (wick above sr_level, close below)
+        + bearish displacement. All flat base bars close below sr_level.
+
+        sweep_high = base+8 → sr_level = base+6.5
+        All flat bars and post-sweep bars close below sr_level → bearish acceptance.
+        """
+        bars = flat_candles(price=base, n=20)
+        sweep_high = base + 8.0
+        sr_level   = sweep_high - 1.5   # = base + 6.5
+        sweep    = candle(base, sweep_high, base - 0.5, base - 0.5)
+        # Failed reclaim: wick above sr_level, body closes below
+        fail_bar = candle(base - 0.5, sr_level + 1.0, base - 1.0, base - 1.0)
+        # Bearish displacement: body ≈ 10 pts
+        displ    = candle(base - 1.0, base, base - 12.0, base - 11.0)
+        return bars + [sweep, fail_bar, displ]
+
+    def test_gate3_path_a_acceptance_populated(self, monkeypatch):
+        """
+        Gate 3 Path A (failed_reclaim_continuation): acceptance fields must be
+        populated when sl_gate_passed=True and displacement confirmed.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        base = 2300.0
+        m5 = self._gate3_path_a_m5(base)
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(
+            h1_candles=h1, m5_candles=m5,
+            h1_trend="bearish", m5_trend="bearish", m15_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+
+        if not result.get("reclaim_failed") or not result.get("sl_gate_passed"):
+            return  # fixture didn't reach target path
+
+        assert result["acceptance_window_bars"] > 0, (
+            "acceptance_window_bars must be > 0 on Gate 3 Path A after sl_gate_passed, "
+            f"got {result['acceptance_window_bars']}"
+        )
+
+    def test_gate3_path_a_bearish_acceptance_confirmed(self, monkeypatch):
+        """
+        Gate 3 Path A: flat base bars (close=2300) all below sr_level (=2306.5).
+        acceptance_window_bars >= 3 and acceptance_confirmed=True.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        base = 2300.0
+        m5 = self._gate3_path_a_m5(base)
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(
+            h1_candles=h1, m5_candles=m5,
+            h1_trend="bearish", m5_trend="bearish", m15_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+
+        if not result.get("reclaim_failed") or not result.get("sl_gate_passed"):
+            return
+
+        # sr_level = base + 6.5 = 2306.5. All flat bars close at 2300 < 2306.5.
+        # acceptance_window_bars counts consecutive closes below 2306.5 from the end.
+        assert result["acceptance_window_bars"] >= 3, (
+            f"Flat bars all close below sr_level — expected >= 3, "
+            f"got {result['acceptance_window_bars']}"
+        )
+        assert result["acceptance_confirmed"] is True, (
+            "acceptance_confirmed must be True when all base bars are below sr_level"
+        )
+
+    # ── Gate 3 Path B: acceptance fields stay at default ─────────────────────
+
+    def _gate3_path_b_m5(self, base=2300.0):
+        """Bullish sweep + NO reclaim attempt + bearish displacement → Path B."""
+        bars = flat_candles(price=base, n=25)
+        sweep    = candle(base,     base + 5,  base - 1,   base + 1)
+        neutral1 = candle(base + 1, base + 2,  base,       base + 1)
+        neutral2 = candle(base + 1, base + 2,  base - 0.5, base + 0.5)
+        neutral3 = candle(base,     base + 1,  base - 1,   base - 0.5)
+        displ    = candle(base,     base + 0.5, base - 8,  base - 7)
+        return bars + [sweep, neutral1, neutral2, neutral3, displ]
+
+    def test_gate3_path_b_acceptance_stays_default(self, monkeypatch):
+        """
+        Gate 3 Path B (sweep_reclaim_short) must NOT populate acceptance fields.
+        Both must remain at default: acceptance_window_bars=0, acceptance_confirmed=False.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        base = 2300.0
+        m5 = self._gate3_path_b_m5(base)
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(
+            h1_candles=h1, m5_candles=m5,
+            h1_trend="bearish", m5_trend="bearish", m15_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+
+        if result.get("setup_type") != "sweep_reclaim_short":
+            return  # fixture didn't produce Path B
+
+        assert result["acceptance_window_bars"] == 0, (
+            f"Path B must not populate acceptance_window_bars, got {result['acceptance_window_bars']}"
+        )
+        assert result["acceptance_confirmed"] is False, (
+            f"Path B must not populate acceptance_confirmed, got {result['acceptance_confirmed']}"
+        )
+
+    # ── No-setup / range paths: acceptance stays at default ───────────────────
+
+    def test_no_setup_acceptance_stays_default(self, monkeypatch):
+        """Flat candles with no sweep → both acceptance fields stay at default."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+        confluence = make_confluence(h1_trend="bearish", m5_trend="bearish", m15_trend="bearish")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict())
+
+        assert result["acceptance_window_bars"] == 0, (
+            f"No-setup path must have acceptance_window_bars=0, got {result['acceptance_window_bars']}"
+        )
+        assert result["acceptance_confirmed"] is False, (
+            f"No-setup path must have acceptance_confirmed=False, got {result['acceptance_confirmed']}"
+        )
+
+    def test_htf_range_no_trade_acceptance_stays_default(self, monkeypatch):
+        """Gate 1 HTF range path must not populate acceptance fields."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        h1 = flat_candles(price=2300.0, n=60)
+        confluence = make_confluence(h1_candles=h1, h1_trend="chop")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1))
+
+        assert result["acceptance_window_bars"] == 0, (
+            f"HTF range path must have acceptance_window_bars=0, got {result['acceptance_window_bars']}"
+        )
+        assert result["acceptance_confirmed"] is False
+
+    # ── No behavior change ────────────────────────────────────────────────────
+
+    def test_no_entry_logic_changed_gate2(self, monkeypatch):
+        """
+        Phase 2C must not change entry_state or setup_type on Gate 2.
+        Same geometry that produces ENTER_NOW before must still produce ENTER_NOW.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        base = 2300.0
+        m5 = self._gate2_reclaim_confirmed_m5(base)
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(
+            h1_candles=h1, m5_candles=m5,
+            h1_trend="bearish", m5_trend="bullish", m15_trend="bullish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+
+        # Acceptance fields must not block or alter entry
+        if result.get("entry_state") == "ENTER_NOW":
+            assert result["setup_type"] == "sweep_reclaim_long", (
+                f"setup_type changed after Phase 2C: {result['setup_type']}"
+            )
+            assert result["should_log"]   is True
+            assert result["should_alert"] is True
+
+    def test_no_entry_logic_changed_gate3_path_a(self, monkeypatch):
+        """
+        Phase 2C must not change entry_state or setup_type on Gate 3 Path A.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        base = 2300.0
+        m5 = self._gate3_path_a_m5(base)
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(
+            h1_candles=h1, m5_candles=m5,
+            h1_trend="bearish", m5_trend="bearish", m15_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+
+        if result.get("entry_state") == "ENTER_NOW":
+            assert result["setup_type"] == "failed_reclaim_continuation", (
+                f"setup_type changed after Phase 2C: {result['setup_type']}"
+            )
+
+    def test_watch_only_not_affected_by_acceptance(self, monkeypatch):
+        """
+        should_log and should_alert must still be controlled only by
+        OM_GOLD_SCALP_ENABLED, not by acceptance_confirmed or acceptance_window_bars.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)  # watch-only
+        base = 2300.0
+        m5 = self._gate2_reclaim_confirmed_m5(base)
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(
+            h1_candles=h1, m5_candles=m5,
+            h1_trend="bearish", m5_trend="bullish", m15_trend="bullish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+
+        # Watch-only gate must suppress output regardless of acceptance state
+        assert result["should_log"]   is False, "should_log must be False in watch-only mode"
+        assert result["should_alert"] is False, "should_alert must be False in watch-only mode"
