@@ -242,6 +242,7 @@ def apply_forex_strategy(scored: dict, confluence: dict, pair: str) -> dict:
     news_safe    = scored.get("news_check", {}).get("safe", True)
 
     if valid_rr and valid_setup and valid_struct and news_safe:
+        scored["entry_state"]  = "ENTER_NOW"   # execution-ready contract — logged by briefing.py
         scored["should_alert"] = True
         scored["should_log"]   = True
         if scored.get("grade") == "C":

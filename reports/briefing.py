@@ -213,8 +213,11 @@ def scan_pair(pair: str, return_confluence: bool = False):
             # Gold + news-sniper: ENTER_NOW is the gate (unchanged behavior)
             _log_now = scored.get("entry_state") == "ENTER_NOW"
         else:
-            # Forex: should_log flag — dedup handled inside log_signal()
-            _log_now = scored.get("should_log", False)
+            # Forex: ENTER_NOW gate — restores May 12 execution-ready contract.
+            # forex_strategy.py sets entry_state="ENTER_NOW" only on strict FOREX PASS
+            # (valid_rr >= 1.5 + valid_setup + valid_struct + news_safe).
+            # EARLY ENTRY and watch candidates never set ENTER_NOW → never logged.
+            _log_now = scored.get("entry_state") == "ENTER_NOW"
 
         if _log_now:
             signal_id = log_signal(scored, confluence, alerted=scored.get("should_alert", False))
