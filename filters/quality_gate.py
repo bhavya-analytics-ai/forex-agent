@@ -72,7 +72,12 @@ def minimum_quality_gate(scored: dict, confluence: dict, pair: str) -> dict:
         zone_str    = float(top_zone.get("strength") or 0)
         trade_lvls  = scored.get("trade_levels") or {}
         sl_pips     = float(trade_lvls.get("sl_pips") or 0)
-        entry_pat   = (scored.get("entry_pattern") or "").strip()
+        # entry_pattern is a dict {pattern, direction, ...} from confluence,
+        # or a plain string in legacy callers, or None.  Extract the name safely.
+        _ep         = scored.get("entry_pattern")
+        entry_pat   = (
+            (_ep.get("pattern") if isinstance(_ep, dict) else _ep) or ""
+        ).strip()
 
         extra_flags: list[str] = []
         penalty = 0
