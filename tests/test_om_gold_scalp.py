@@ -1176,3 +1176,307 @@ class TestSkipClassificationConsistency:
             "Guard must reclassify stray sl_too_wide to no_setup"
         assert stray_out["rejection_stage"]  == "setup_detection"
         assert stray_out["rejection_reason"] == "no_valid_candidate"
+
+
+# ---------------------------------------------------------------------------
+# WAIT_MOMENTUM FAILED-RECLAIM PATH — AUDIT CONSISTENCY TESTS
+#
+# Root cause captured here: update_extra_candidate() in dashboard/app.py was
+# storing only a hardcoded whitelist of ~15 fields, silently dropping all debug
+# audit fields before storage.  The strategy code was correct; the store stripped
+# the output.  These tests verify the strategy-level dict directly — if the
+# store ever reverts to a whitelist the strategy tests still pass, but a
+# separate app.py test (TestExtraCandidateStoreFull) catches the strip.
+# ---------------------------------------------------------------------------
+
+def _make_failed_reclaim_low_momentum_candles(price=2300.0, sweep_up_to=2320.0):
+    """
+    M5 candle sequence designed to drive Gate 3 → WAIT_MOMENTUM:
+
+      Phase 1 – 25 flat baseline bars  (establishes prior swing high = price+2)
+      Phase 2 – 1 bullish sweep bar    (wick to sweep_up_to >> price+2, body back below)
+      Phase 3 – 1 failed-reclaim bar   (wick above sr_level, body closes back below)
+      Phase 4 – 2 large bearish disp.  (body >= 1.5 × avg → displacement confirmed)
+      Phase 5 – 1 current bar          (entry candidate price)
+
+    With chop H1/M15/M5 trends, momentum score stays well below 50.
+    """
+    base = [candle(price, price + 2, price - 2, price) for _ in range(25)]
+
+    # Bullish sweep: wick to sweep_up_to (>> prior high of price+2 by 16+ pts),
+    # body closes back well below sr_level = sweep_up_to - 1.5
+    sweep_bar = candle(price, sweep_up_to, price - 1.0, price - 0.5)
+
+    # sr_level = sweep_up_to - SWEEP_MIN_WICK_PTS = sweep_up_to - 1.5
+    sr_level = sweep_up_to - 1.5
+    # Failed reclaim: wick goes above sr_level, body closes below → reclaim_failed=True
+    fail_bar = candle(price - 0.5, sr_level + 0.5, price - 2.0, price - 1.5)
+
+    # Large bearish displacement bars — body ~9 pts, avg body of base bars ~2 pts
+    # displacement_ratio ≈ 9/2 = 4.5 >> DISPLACE_MIN_MULT=1.5 → confirmed
+    disp1 = candle(price - 1.5, price - 1.0, price - 11.0, price - 10.5)
+    disp2 = candle(price - 10.5, price - 10.0, price - 20.0, price - 19.5)
+
+    current = candle(price - 19.5, price - 19.0, price - 21.0, price - 20.0)
+
+    return base + [sweep_bar, fail_bar, disp1, disp2, current]
+
+
+def _run_failed_reclaim_low_momentum(monkeypatch):
+    """
+    Run strategy with the failed-reclaim fixture.
+    Returns result dict from run(); caller skips assertions if entry_state is
+    not WAIT_MOMENTUM (fixture may not trigger on every candle geometry).
+    """
+    import config
+    monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", False)
+    mod = _import_strategy()
+    m5 = _make_failed_reclaim_low_momentum_candles()
+    # chop trends → momentum score stays low (no M5/M15 alignment bonus)
+    confluence = make_confluence(
+        m5_candles=m5,
+        h1_trend="chop",
+        m15_trend="chop",
+        m5_trend="chop",
+    )
+    return mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+
+def _is_gate3_wait_momentum(result):
+    """True when result is clearly the Gate 3 failed-reclaim WAIT_MOMENTUM output."""
+    return (
+        result.get("entry_state") == "WAIT_MOMENTUM"
+        and "bearish_displacement" in result.get("scanner_state_flow", "")
+    )
+
+
+class TestWaitMomentumFailedReclaimAudit:
+    """
+    When entry_state=WAIT_MOMENTUM via the Gate 3 failed-reclaim path,
+    ALL audit/debug fields that describe that path must be populated in the
+    returned dict — not left at _base_audit() defaults.
+    """
+
+    def test_sweep_detected_true(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["sweep_detected"] is True, \
+            "sweep_detected must be True on Gate 3 WAIT_MOMENTUM"
+
+    def test_swept_side_bullish(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["swept_side"] == "bullish"
+
+    def test_evaluated_branches_includes_gate3(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        branches = result.get("evaluated_branches", [])
+        assert isinstance(branches, list), "evaluated_branches must be a list"
+        assert "bullish_sweep_failed_reclaim_short" in branches, (
+            f"Gate 3 branch missing from evaluated_branches: {branches}"
+        )
+
+    def test_active_branch_is_gate3(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["active_branch"] == "bullish_sweep_failed_reclaim_short", (
+            f"active_branch wrong: {result['active_branch']}"
+        )
+
+    def test_setup_candidates_found_positive(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["setup_candidates_found"] >= 1
+
+    def test_reclaim_failed_true(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["reclaim_failed"] is True
+
+    def test_bearish_displacement_confirmed(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["bearish_displacement_after_failed_reclaim"] is True
+
+    def test_displacement_detail_fields_populated(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["displacement_body_pts"] > 0.0, \
+            "displacement_body_pts must be > 0 when displacement confirmed"
+        assert result["avg_body_pts"] > 0.0, \
+            "avg_body_pts must be > 0 when displacement confirmed"
+        assert result["displacement_ratio"] >= 1.5, \
+            f"displacement_ratio={result['displacement_ratio']} must be >= 1.5 (DISPLACE_MIN_MULT)"
+
+    def test_rejection_stage_is_momentum_gate(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["rejection_stage"] == "momentum_gate", (
+            f"rejection_stage must be 'momentum_gate', got: {result['rejection_stage']}"
+        )
+
+    def test_rejection_reason_mentions_momentum(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        reason = result.get("rejection_reason", "")
+        assert "momentum" in reason.lower() or "mom" in reason.lower(), (
+            f"rejection_reason must mention momentum, got: '{reason}'"
+        )
+
+    def test_entry_price_candidate_populated(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["entry_price_candidate"] is not None, \
+            "entry_price_candidate must be set — displacement + SL passed before momentum gate"
+        assert result["sl_anchor"] is not None, \
+            "sl_anchor must be set — SL was evaluated before momentum gate"
+
+    def test_sl_candidate_populated_and_gate_passed(self, monkeypatch):
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return
+        assert result["sl_price_candidate"] is not None, \
+            "sl_price_candidate must be set when SL gate passed"
+        assert result["sl_gate_passed"] is True, \
+            "sl_gate_passed must be True — SL passed before momentum gate"
+
+    def test_consistency_all_path_fields_non_default(self, monkeypatch):
+        """
+        Regression guard for the store-stripping bug: if any of these fields
+        stayed at _base_audit defaults while entry_state=WAIT_MOMENTUM via Gate 3,
+        it means audit population was skipped somewhere.
+        """
+        result = _run_failed_reclaim_low_momentum(monkeypatch)
+        if not _is_gate3_wait_momentum(result):
+            return  # fixture didn't produce target state — not a failure
+
+        errors = []
+        if result.get("sweep_detected") is not True:
+            errors.append(f"sweep_detected={result.get('sweep_detected')} (expected True)")
+        branches = result.get("evaluated_branches", [])
+        if not isinstance(branches, list) or len(branches) == 0:
+            errors.append(f"evaluated_branches={branches!r} (expected non-empty list)")
+        if result.get("active_branch", "") == "":
+            errors.append("active_branch is empty string")
+        if result.get("setup_candidates_found", 0) == 0:
+            errors.append("setup_candidates_found is 0")
+        if result.get("rejection_stage", "") == "":
+            errors.append("rejection_stage is empty string")
+        if result.get("rejection_reason", "") == "":
+            errors.append("rejection_reason is empty string")
+        if result.get("displacement_body_pts", 0.0) == 0.0:
+            errors.append("displacement_body_pts is 0.0")
+        if result.get("entry_price_candidate") is None:
+            errors.append("entry_price_candidate is None")
+
+        assert not errors, (
+            "Gate 3 WAIT_MOMENTUM audit fields at defaults — store-stripping regression:\n"
+            + "\n".join(f"  • {e}" for e in errors)
+        )
+
+
+class TestExtraCandidateStoreFull:
+    """
+    Verifies that update_extra_candidate() stores the FULL candidate dict,
+    not a hardcoded field whitelist.  The real bug: all debug audit fields were
+    silently dropped before storage so the API served defaults to the dashboard.
+    """
+
+    def test_store_preserves_evaluated_branches(self):
+        """evaluated_branches must survive the store round-trip."""
+        try:
+            from dashboard.app import update_extra_candidate, _extra_store
+        except ImportError:
+            pytest.skip("dashboard/app.py not importable")
+
+        candidate = {
+            "signal_mode":       "om_gold_scalp",
+            "entry_state":       "WAIT_MOMENTUM",
+            "skip_reason":       "low_momentum",
+            "scanner_state_flow": "bullish_sweep → low_momentum → WAIT_MOMENTUM",
+            "momentum_score":    17,
+            "evaluated_branches": ["bearish_sweep_reclaim_long",
+                                   "bullish_sweep_failed_reclaim_short"],
+            "active_branch":     "bullish_sweep_failed_reclaim_short",
+            "setup_candidates_found": 1,
+            "sweep_detected":    True,
+            "swept_side":        "bullish",
+            "rejection_stage":   "momentum_gate",
+            "rejection_reason":  "momentum=17 < 50",
+            "displacement_body_pts": 9.0,
+            "avg_body_pts":      2.0,
+            "displacement_ratio": 4.5,
+            "entry_price_candidate": 2280.0,
+            "sl_anchor":         2320.0,
+            "sl_price_candidate": 2322.0,
+            "sl_gate_passed":    True,
+            "max_sl_pts":        20.0,
+            "should_log":        False,
+            "should_alert":      False,
+        }
+
+        update_extra_candidate("XAU_USD", "om_gold_scalp", candidate)
+
+        stored = _extra_store.get("XAU_USD|om_gold_scalp", {})
+
+        assert stored.get("evaluated_branches") == candidate["evaluated_branches"], \
+            "evaluated_branches dropped by store — whitelist regression"
+        assert stored.get("active_branch") == "bullish_sweep_failed_reclaim_short", \
+            "active_branch dropped by store"
+        assert stored.get("sweep_detected") is True, \
+            "sweep_detected dropped by store"
+        assert stored.get("rejection_stage") == "momentum_gate", \
+            "rejection_stage dropped by store"
+        assert stored.get("rejection_reason") == "momentum=17 < 50", \
+            "rejection_reason dropped by store"
+        assert stored.get("displacement_body_pts") == 9.0, \
+            "displacement_body_pts dropped by store"
+        assert stored.get("entry_price_candidate") == 2280.0, \
+            "entry_price_candidate dropped by store"
+        assert stored.get("sl_gate_passed") is True, \
+            "sl_gate_passed dropped by store"
+
+    def test_store_preserves_pair_and_signal_mode(self):
+        """pair and signal_mode must be set from caller args, not candidate dict."""
+        try:
+            from dashboard.app import update_extra_candidate, _extra_store
+        except ImportError:
+            pytest.skip("dashboard/app.py not importable")
+
+        candidate = {"entry_state": "SKIP", "skip_reason": "no_setup",
+                     "pair": "WRONG", "signal_mode": "WRONG"}
+        update_extra_candidate("XAU_USD", "om_gold_scalp", candidate)
+        stored = _extra_store.get("XAU_USD|om_gold_scalp", {})
+        assert stored["pair"]        == "XAU_USD"
+        assert stored["signal_mode"] == "om_gold_scalp"
+
+    def test_store_does_not_mutate_original_candidate(self):
+        """update_extra_candidate must not mutate the caller's candidate dict."""
+        try:
+            from dashboard.app import update_extra_candidate
+        except ImportError:
+            pytest.skip("dashboard/app.py not importable")
+
+        candidate = {"entry_state": "SKIP", "skip_reason": "no_setup",
+                     "evaluated_branches": ["bearish_sweep_reclaim_long"]}
+        original_branches = list(candidate["evaluated_branches"])
+        original_keys = set(candidate.keys())
+
+        update_extra_candidate("XAU_USD", "om_gold_scalp", candidate)
+
+        assert set(candidate.keys()) == original_keys, \
+            "store mutated original candidate dict (added keys)"
+        assert candidate["evaluated_branches"] == original_branches, \
+            "store mutated evaluated_branches in original dict"

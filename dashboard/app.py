@@ -39,31 +39,20 @@ def update_extra_candidate(pair: str, signal_mode: str, candidate: dict):
     Push an extra strategy candidate (e.g. om_gold_scalp) to the isolated
     extra store. Never touches _signal_store — existing /api/signals is unaffected.
     Thread-safe.
+
+    Stores the FULL candidate dict so all audit/debug fields (evaluated_branches,
+    sweep_detected, rejection_stage, displacement_body_pts, etc.) are available
+    to the /api/signals/extra endpoint and dashboard. Metadata fields (pair,
+    signal_mode, updated_at) are overlaid after copy to ensure they are always
+    correct regardless of what the strategy dict contains.
     """
     key = f"{pair}|{signal_mode}"
     with _store_lock:
-        _extra_store[key] = {
-            "pair":            pair,
-            "signal_mode":     signal_mode,
-            "entry_state":     candidate.get("entry_state", ""),
-            "direction":       candidate.get("direction", ""),
-            "setup_type":      candidate.get("setup_type", ""),
-            "should_log":      candidate.get("should_log", False),
-            "should_alert":    candidate.get("should_alert", False),
-            "entry_allowed":   candidate.get("entry_allowed", False),
-            "skip_reason":     candidate.get("skip_reason", ""),
-            "momentum_score":  candidate.get("momentum_score", 0),
-            "scanner_state_flow": candidate.get("scanner_state_flow", ""),
-            "entry_price":     candidate.get("entry_price"),
-            "sl_price":        candidate.get("sl_price"),
-            "tp1_price":       candidate.get("tp1_price"),
-            "sl_pips":         candidate.get("sl_pips", 0),
-            "sl_pts":          candidate.get("sl_pts", 0.0),
-            "rr":              candidate.get("rr", 0.0),
-            "htf_range_active": candidate.get("htf_range_active", False),
-            "zone_state":      candidate.get("zone_state", ""),
-            "updated_at":      datetime.now(timezone.utc).strftime("%H:%M:%S"),
-        }
+        stored = dict(candidate)          # shallow copy — never mutate the live candidate
+        stored["pair"]       = pair       # always authoritative from caller
+        stored["signal_mode"] = signal_mode
+        stored["updated_at"] = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        _extra_store[key] = stored
 
 
 def update_dashboard(pair: str, scored: dict, confluence: dict, ict: dict = None):
