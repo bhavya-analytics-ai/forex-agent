@@ -781,6 +781,7 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 return out
 
             # Still inside range, no breakdown
+            out["setup_type"]        = "htf_range_no_trade"
             out["entry_state"]       = "SKIP"
             out["skip_reason"]       = "inside_range_chop"
             out["rejection_stage"]   = "range_breakdown_check"
@@ -971,6 +972,9 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             out["reclaim_distance_pts"] = rec_fail["reclaim_distance_pts"]
 
             if rec_fail["reclaim_failed"]:
+                # ── PATH A: failed_reclaim_continuation ──────────────────────
+                # At least one of the last 3 bars pushed above sr_level and closed
+                # back below — an explicit reclaim attempt that failed.
                 avg_b = _avg_body(m5_candles)
                 disp = _detect_displacement(m5_candles, "bearish", avg_b)
                 out["bearish_displacement_after_failed_reclaim"] = disp["detected"]
@@ -1080,11 +1084,144 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                     )
                 out["rejection_stage"]  = "displacement_check"
                 out["rejection_reason"] = _disp_rej3
+                # Falls through to WAIT_REACTION below
 
-            # Sweep detected but no failed reclaim yet (or failed reclaim but no displacement)
-            out["entry_state"]        = "WAIT_REACTION"
+            else:
+                # ── PATH B: sweep_reclaim_short ───────────────────────────────
+                # Bullish sweep is in the detection window (last 20 bars) but none
+                # of the last 3 bars pushed above sr_level. No explicit reclaim
+                # attempt observed — the market simply rolled over after the sweep.
+                # Check for immediate bearish displacement: if present this is a
+                # clean sweep-and-reject short (sweep_reclaim_short), distinct from
+                # failed_reclaim_continuation which requires a separate reclaim bar.
+                avg_b = _avg_body(m5_candles)
+                disp  = _detect_displacement(m5_candles, "bearish", avg_b)
+                out["bearish_displacement_after_failed_reclaim"] = disp["detected"]
+                out["displacement_body_pts"] = disp["displacement_body_pts"]
+                out["avg_body_pts"]          = disp["avg_body_pts"]
+                out["displacement_ratio"]    = disp["displacement_ratio"]
+
+                if disp["detected"]:
+                    entry_price = m5_candles[-1]["close"] if m5_candles else 0.0
+                    sl_extreme  = sweep_bull["sweep_high"]
+                    out["entry_price_candidate"] = round(entry_price, 3)
+                    out["sl_anchor"]             = round(sl_extreme, 3)
+                    levels = _calc_trade_levels(entry_price, sl_extreme, "bearish",
+                                                h1["htf_magnet"])
+                    if levels is not None:
+                        out["sl_price_candidate"] = levels["sl_price"]
+
+                    if levels is None:
+                        _raw_sl_price, _raw_sl_pts = _compute_sl_raw(
+                            entry_price, sl_extreme, "bearish"
+                        )
+                        out["sl_price_candidate"] = _raw_sl_price
+                        out["sl_pts"]             = _raw_sl_pts
+                        out["sl_gate_passed"]     = False
+                        out["skip_reason"]        = "sl_too_wide"
+                        out["rejection_stage"]    = "sl_check"
+                        out["rejection_reason"]   = f"sl_pts={_raw_sl_pts} > max={MAX_SL_PTS}"
+                        out["scanner_state_flow"] = "bullish_sweep → direct_rejection → sl_too_wide"
+                        out["evaluated_branches"] = _branches
+                        _apply_watch_only_gate(out)
+                        return out
+                    out["sl_gate_passed"] = True
+
+                    entry_dist = abs(entry_price - sl_extreme)
+                    if entry_dist > MAX_CHASE_PTS:
+                        out["entry_state"]      = "SKIP_CHASE"
+                        out["skip_reason"]      = "chase_distance"
+                        out["rejection_stage"]  = "chase_check"
+                        out["rejection_reason"] = "chase_distance"
+                        out["scanner_state_flow"] = (
+                            "bullish_sweep → direct_rejection → chase_distance → SKIP_CHASE"
+                        )
+                        out["evaluated_branches"] = _branches
+                        _apply_watch_only_gate(out)
+                        return out
+
+                    # ── MOMENTUM GATE ─────────────────────────────────────────
+                    mom = _momentum_score(m5_candles, "bearish", confluence)
+                    out["momentum_score"]        = mom
+                    out["min_momentum_required"] = MIN_MOMENTUM_REQUIRED
+
+                    if (h1_trend in ("bullish", "uptrend", "weak_bullish", "weak_uptrend")
+                            and mom < 35):
+                        out["entry_state"]          = "SKIP"
+                        out["skip_reason"]          = "opposing_h1_low_momentum"
+                        out["momentum_gate_passed"] = False
+                        out["rejection_stage"]      = "momentum_gate"
+                        out["rejection_reason"]     = f"opposing_h1({h1_trend})_momentum={mom}"
+                        out["scanner_state_flow"]   = (
+                            "bullish_sweep → direct_rejection → bearish_displacement"
+                            " → opposing_h1_low_momentum → SKIP"
+                        )
+                        out["evaluated_branches"] = _branches
+                        _apply_watch_only_gate(out)
+                        return out
+
+                    if mom < MIN_MOMENTUM_REQUIRED:
+                        out["entry_state"]          = "WAIT_MOMENTUM"
+                        out["skip_reason"]          = "low_momentum"
+                        out["momentum_gate_passed"] = False
+                        out["rejection_stage"]      = "momentum_gate"
+                        out["rejection_reason"]     = f"momentum={mom} < {MIN_MOMENTUM_REQUIRED}"
+                        out["scanner_state_flow"]   = (
+                            "bullish_sweep → direct_rejection → bearish_displacement"
+                            " → low_momentum → WAIT_MOMENTUM"
+                        )
+                        out["evaluated_branches"] = _branches
+                        _apply_watch_only_gate(out)
+                        return out
+
+                    out["momentum_gate_passed"] = True
+                    out["evaluated_branches"]   = _branches
+                    out.update(levels)
+                    out["entry_state"]        = "ENTER_NOW"
+                    out["direction"]          = "bearish"
+                    out["setup_type"]         = "sweep_reclaim_short"
+                    out["entry_allowed"]      = True
+                    out["should_log"]         = True
+                    out["should_alert"]       = True
+                    out["entry_quality"]      = "high"
+                    out["skip_reason"]        = ""
+                    out["scanner_state_flow"] = (
+                        "bullish_sweep → direct_rejection → bearish_displacement → ENTER_NOW short"
+                    )
+                    _apply_watch_only_gate(out)
+                    return out
+
+                # Displacement not confirmed yet — set rejection reason
+                _fail_b = disp.get("fail_reason", "ratio_below_threshold")
+                if _fail_b == "direction_mismatch":
+                    _disp_rej_b = (
+                        f"displacement_ratio={disp['displacement_ratio']} >= {DISPLACE_MIN_MULT}"
+                        f" but bar is not bearish (direction_mismatch)"
+                    )
+                else:
+                    _disp_rej_b = (
+                        f"displacement_ratio={disp['displacement_ratio']} < {DISPLACE_MIN_MULT}"
+                    )
+                out["rejection_stage"]  = "displacement_check"
+                out["rejection_reason"] = _disp_rej_b
+                # Falls through to WAIT_HOLD below
+
+            # Sweep detected but no actionable outcome yet.
+            # Path A (rec_fail=True, no displacement): WAIT_REACTION — failed reclaim
+            #   confirmed, waiting for displacement bar.
+            # Path B (rec_fail=False, no displacement): WAIT_HOLD — sweep seen, no
+            #   reclaim attempt observed, waiting for rejection/displacement to form.
+            if rec_fail["reclaim_failed"]:
+                out["entry_state"]        = "WAIT_REACTION"
+                out["scanner_state_flow"] = (
+                    "bullish_sweep_detected → awaiting_reclaim_outcome → WAIT_REACTION"
+                )
+            else:
+                out["entry_state"]        = "WAIT_HOLD"
+                out["scanner_state_flow"] = (
+                    "bullish_sweep_detected → awaiting_rejection_displacement → WAIT_HOLD"
+                )
             out["skip_reason"]        = ""
-            out["scanner_state_flow"] = "bullish_sweep_detected → awaiting_reclaim_outcome → WAIT_REACTION"
             out["evaluated_branches"] = _branches
             _apply_watch_only_gate(out)
             return out

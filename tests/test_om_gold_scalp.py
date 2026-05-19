@@ -206,6 +206,30 @@ class TestHtfRangeSkipChop:
         result = mod.run({}, confluence, "XAU_USD", candles)
         assert result.get("entry_allowed") is False
 
+    def test_htf_range_no_trade_setup_type_label(self, monkeypatch):
+        """
+        HTF range/no-trade fallthrough must set setup_type = 'htf_range_no_trade'.
+        skip_reason and entry_state must be unchanged from before the label fix.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        h1 = flat_candles(price=2300.0, n=60)
+        confluence = make_confluence(h1_candles=h1, h1_trend="chop")
+        candles    = make_candles_dict(h1=h1)
+
+        result = mod.run({}, confluence, "XAU_USD", candles)
+
+        # Label fix: setup_type must now be the named category, not the default "no_setup"
+        assert result["setup_type"] == "htf_range_no_trade", (
+            f"Expected setup_type='htf_range_no_trade', got '{result['setup_type']}'"
+        )
+        # Existing behavior unchanged
+        assert result["entry_state"] in ("SKIP", "SKIP_CHOP")
+        assert result["skip_reason"] == "inside_range_chop"
+        assert result["entry_allowed"] is False
+
 
 class TestSweepReclaimLong:
     """Bearish sweep wick + bullish reclaim body close + displacement → ENTER_NOW long."""
@@ -304,6 +328,199 @@ class TestFailedReclaimShort:
         assert result["entry_state"] == "ENTER_NOW"
         assert result["direction"]   == "bearish"
         assert result["setup_type"]  == "failed_reclaim_continuation"
+
+
+class TestSweepReclaimShort:
+    """
+    Bullish sweep + no reclaim attempt in last 3 bars + bearish displacement
+    → ENTER_NOW short, setup_type="sweep_reclaim_short".
+
+    Behavioral distinction from failed_reclaim_continuation:
+      failed_reclaim_continuation: sweep detected AND a SEPARATE reclaim bar
+        (wick above sr_level, body below) is visible in the last 3 bars.
+      sweep_reclaim_short: sweep detected AND none of the last 3 bars pushed
+        above sr_level (market rolled over without a second push attempt),
+        AND bearish displacement is present.
+
+    Fixture puts sweep at -5 position so it is outside _detect_reclaim's
+    last-3-bar window, guaranteeing rec_fail["reclaim_failed"] = False.
+    """
+
+    def _build_sweep_reclaim_short_m5(self, base=2300.0):
+        """
+        bars[0..24]:  flat baseline (prior swing high ≈ base+2)
+        bars[25]:     bullish sweep — wick to base+5 clears prior high by >1.5 pts,
+                      body closes at base+1 (below sr_level = base+3.5)
+        bars[26..28]: three neutral bars that stay well below sr_level, ensuring
+                      none of them push above sr_level → rec_fail["reclaim_failed"]=False
+        bars[29]:     bearish displacement — large bearish body, entry close ≈ base-7
+
+        SL = sweep_high + SL_BUFFER = (base+5) + 2 = base+7
+        entry ≈ base-7  →  sl_pts ≈ (base+7) - (base-7) = 14 ≤ 20 ✓
+        chase_dist = |(base-7) - (base+5)| = 12 ≤ 25 ✓
+        """
+        bars = flat_candles(price=base, n=25)
+        sweep_up = candle(base,     base + 5,  base - 1,  base + 1)  # wick up, body back below
+        neutral1 = candle(base + 1, base + 2,  base,      base + 1)
+        neutral2 = candle(base + 1, base + 2,  base - 0.5, base + 0.5)
+        neutral3 = candle(base,     base + 1,  base - 1,  base - 0.5)
+        displace = candle(base,     base + 0.5, base - 8,  base - 7)  # large bearish body
+        bars += [sweep_up, neutral1, neutral2, neutral3, displace]
+        return bars
+
+    def test_sweep_reclaim_short_enter_now(self, monkeypatch):
+        """Clean path: bullish sweep + no reclaim + bearish displacement → ENTER_NOW."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        m5 = self._build_sweep_reclaim_short_m5(base=2300.0)
+        # bearish h1/m5/m15 → momentum passes (35+25+7 = 67 ≥ 50), no opposing-H1 skip
+        confluence = make_confluence(
+            m5_candles=m5, m5_trend="bearish", m15_trend="bearish", h1_trend="bearish",
+        )
+        candles = make_candles_dict(m5=m5)
+        result  = mod.run({}, confluence, "XAU_USD", candles)
+
+        assert result["entry_state"] == "ENTER_NOW", (
+            f"Expected ENTER_NOW, got {result['entry_state']} "
+            f"(skip_reason={result.get('skip_reason')}, "
+            f"rejection_stage={result.get('rejection_stage')}, "
+            f"rejection_reason={result.get('rejection_reason')})"
+        )
+        assert result["direction"]  == "bearish"
+        assert result["setup_type"] == "sweep_reclaim_short"
+
+    def test_sweep_reclaim_short_audit_fields(self, monkeypatch):
+        """All required audit fields are populated on sweep_reclaim_short ENTER_NOW."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        m5 = self._build_sweep_reclaim_short_m5(base=2300.0)
+        confluence = make_confluence(
+            m5_candles=m5, m5_trend="bearish", m15_trend="bearish", h1_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        if result["entry_state"] == "ENTER_NOW":
+            assert result["sweep_detected"]        is True
+            assert result["sweep_high"]            > 0.0
+            assert result["sweep_reference_level"] > 0.0
+            assert result["displacement_ratio"]    > 0.0
+            assert result["entry_price_candidate"] is not None
+            assert result["sl_price_candidate"]    is not None
+            assert result["sl_gate_passed"]        is True
+            assert result["momentum_gate_passed"]  is True
+            assert result["scanner_state_flow"].startswith(
+                "bullish_sweep → direct_rejection → bearish_displacement"
+            )
+
+    def test_sweep_reclaim_short_wait_hold_no_displacement(self, monkeypatch):
+        """
+        Bullish sweep + no reclaim attempt + NO bearish displacement → WAIT_HOLD.
+        (Sweep seen, but rejection bar not confirmed yet.)
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        base = 2300.0
+        bars = flat_candles(price=base, n=25)
+        sweep_up = candle(base, base + 5, base - 1, base + 1)
+        # Three tiny bars — no bearish displacement (body well below 1.5× avg)
+        neutral1 = candle(base + 1, base + 1.5, base + 0.5, base + 1)
+        neutral2 = candle(base + 1, base + 1.5, base + 0.5, base + 1)
+        neutral3 = candle(base + 1, base + 1.5, base + 0.5, base + 1)
+        bars += [sweep_up, neutral1, neutral2, neutral3]
+
+        confluence = make_confluence(
+            m5_candles=bars, m5_trend="bearish", h1_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=bars))
+
+        assert result["entry_state"] == "WAIT_HOLD", (
+            f"Expected WAIT_HOLD (sweep fresh, no displacement), "
+            f"got {result['entry_state']}"
+        )
+        assert result["sweep_detected"] is True
+
+    def test_sweep_reclaim_short_low_momentum_wait(self, monkeypatch):
+        """
+        Sweep + no reclaim + bearish displacement but chop trends → WAIT_MOMENTUM,
+        never ENTER_NOW.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        m5 = self._build_sweep_reclaim_short_m5(base=2300.0)
+        # chop trends → M5=0, M15=0 → momentum ≈ displacement(varies) + 7 < 50
+        confluence = make_confluence(
+            m5_candles=m5, m5_trend="chop", m15_trend="chop", h1_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        assert result["entry_state"] != "ENTER_NOW", (
+            f"Low momentum must not reach ENTER_NOW "
+            f"(momentum_score={result.get('momentum_score')})"
+        )
+        assert result["entry_state"] in ("WAIT_MOMENTUM", "SKIP", "WAIT_HOLD"), (
+            f"Unexpected state {result['entry_state']}"
+        )
+
+    def test_sweep_reclaim_short_no_false_long(self, monkeypatch):
+        """Bullish displacement after a bullish sweep (wrong direction) must not fire ENTER_NOW."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        base = 2300.0
+        bars = flat_candles(price=base, n=25)
+        sweep_up  = candle(base, base + 5, base - 1, base + 1)
+        neutral1  = candle(base + 1, base + 1.5, base + 0.5, base + 1)
+        neutral2  = candle(base + 1, base + 1.5, base + 0.5, base + 1)
+        neutral3  = candle(base + 1, base + 1.5, base + 0.5, base + 1)
+        # Bullish displacement — wrong direction for sweep_reclaim_short
+        bull_disp = candle(base + 1, base + 9, base, base + 8)
+        bars += [sweep_up, neutral1, neutral2, neutral3, bull_disp]
+
+        confluence = make_confluence(
+            m5_candles=bars, m5_trend="bullish", h1_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=bars))
+
+        # Must not fire ENTER_NOW short on a bullish displacement bar
+        assert not (result["entry_state"] == "ENTER_NOW" and result["direction"] == "bearish"), (
+            "sweep_reclaim_short must not fire ENTER_NOW bearish on bullish displacement"
+        )
+
+    def test_failed_reclaim_continuation_unchanged(self, monkeypatch):
+        """
+        The existing failed_reclaim_continuation path must be completely unaffected.
+        Explicit reclaim_fail bar in last 3 → still produces failed_reclaim_continuation.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+
+        sr = 2300.0
+        bars = flat_candles(price=sr - 5, n=20)
+        sweep_up     = candle(sr - 5, sr + 3,  sr - 7,  sr - 4)
+        reclaim_fail = candle(sr - 2, sr + 5,  sr - 3,  sr - 1)  # explicit reclaim bar in last3
+        displace     = candle(sr - 1, sr,       sr - 14, sr - 13)
+        bars += [sweep_up, reclaim_fail, displace]
+
+        confluence = make_confluence(
+            m5_candles=bars, m5_trend="bearish", h1_trend="bearish",
+        )
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=bars))
+
+        assert result["entry_state"] == "ENTER_NOW"
+        assert result["direction"]   == "bearish"
+        assert result["setup_type"]  == "failed_reclaim_continuation", (
+            "failed_reclaim_continuation path must not be reclassified as sweep_reclaim_short"
+        )
 
 
 class TestRangeBreakdownBearish:
