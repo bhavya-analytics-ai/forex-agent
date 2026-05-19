@@ -6,7 +6,7 @@ Sessions: tokyo, london, new_york
 
 import logging
 from datetime import datetime
-from config import PAIRS, DEBUG_DECISIONS, OM_STRATEGY_ENABLED
+from config import PAIRS, DEBUG_DECISIONS, OM_STRATEGY_ENABLED, LEGACY_GOLD_ENABLED, LEGACY_FOREX_ENABLED
 from filters.market_hours import market_hours_gate
 from filters.quality_gate import minimum_quality_gate
 from core.fetcher import fetch_all_timeframes
@@ -108,6 +108,27 @@ def scan_pair(pair: str, return_confluence: bool = False):
             scored["entry_allowed"]  = False
             scored["strategy_mode"]  = "legacy_watch_only"
             scored["scanner_action"] = "WATCH_ONLY_GLOBAL_DISABLED"
+
+        # ── PER-STRATEGY LEGACY GATES ─────────────────────────────────────────
+        # Only evaluated when OM_STRATEGY_ENABLED=true (global master is on).
+        # Allows enabling gold-only or forex-only logging independently.
+        # news_sniper and OM Gold Scalp are NOT gated here — separate paths.
+        if OM_STRATEGY_ENABLED:
+            _lg_gold   = scored.get("gold_mode", False)
+            _lg_sniper = scored.get("signal_mode") == "news_sniper"
+            _lg_forex  = not _lg_gold and not _lg_sniper
+
+            if _lg_gold and not LEGACY_GOLD_ENABLED:
+                scored["entry_state"]    = "WATCH_ONLY_LEGACY_GOLD_DISABLED"
+                scored["should_alert"]   = False
+                scored["should_log"]     = False
+                scored["entry_allowed"]  = False
+
+            elif _lg_forex and not LEGACY_FOREX_ENABLED:
+                scored["entry_state"]    = "WATCH_ONLY_LEGACY_FOREX_DISABLED"
+                scored["should_alert"]   = False
+                scored["should_log"]     = False
+                scored["entry_allowed"]  = False
 
         # ── MARKET HOURS GATE ─────────────────────────────────────────────────
         # Hard blocks (Saturday, Sunday pre-22:00, Friday 21:30+):
