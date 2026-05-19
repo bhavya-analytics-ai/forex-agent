@@ -662,15 +662,19 @@ def _base_audit():
         "reclaim_back_inside_range":   False,
         "avoid_long_reason":           "",
         "avoid_short_reason":          "",
-        # S/R continuation context — Phase 2A audit foundation
+        # S/R continuation context — Phase 2A/2B audit foundation
         # key_sr_level:          swept/broken level is a key S/R extreme (prior swing)
         # reclaimed_zone_active: reclaim was confirmed and zone context is still active
         # zone_role_flip:        level's structural role has inverted (support→resistance or vice versa)
         # continuation_candidate: structural conditions support a directional continuation trade
+        #                         (Gate 3 Path B: only True when HTF context is bearish)
+        # rejection_candidate:   trade is a counter-trend reversal/rejection, not a continuation
+        #                         (Gate 3 Path B: True when HTF context is NOT bearish)
         "key_sr_level":           False,
         "reclaimed_zone_active":  False,
         "zone_role_flip":         False,
         "continuation_candidate": False,
+        "rejection_candidate":    False,
         # Entry quality
         "entry_quality":         "low",
         "momentum_score":        0,
@@ -1297,8 +1301,22 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                         out["evaluated_branches"] = _branches
                         _apply_watch_only_gate(out)
                         return out
-                    out["sl_gate_passed"]         = True
-                    out["continuation_candidate"] = True  # bearish displacement confirmed after sweep rejection
+                    out["sl_gate_passed"] = True
+
+                    # Phase 2B: distinguish continuation vs reversal/rejection on Path B.
+                    # sweep_reclaim_short can be a bearish continuation short (HTF context
+                    # already bearish → sweep just flushed remaining longs) OR a pure
+                    # counter-trend reversal (HTF still bullish → direct rejection off level).
+                    _h1_bearish  = h1_trend  in ("bearish", "downtrend",
+                                                  "weak_bearish", "weak_downtrend")
+                    _m15_bearish = m15_trend in ("bearish", "downtrend",
+                                                  "weak_bearish", "weak_downtrend")
+                    if _h1_bearish or _m15_bearish:
+                        out["continuation_candidate"] = True
+                        out["rejection_candidate"]    = False
+                    else:
+                        out["continuation_candidate"] = False
+                        out["rejection_candidate"]    = True
 
                     entry_dist = abs(entry_price - sl_extreme)
                     if entry_dist > MAX_CHASE_PTS:

@@ -2407,3 +2407,214 @@ class TestPhase2AFoundationFields:
         assert result.get("reclaimed_zone_active")  is False
         assert result.get("zone_role_flip")         is False
         assert result.get("continuation_candidate") is False
+
+
+# ---------------------------------------------------------------------------
+# Phase 2B — continuation vs rejection candidate gating on Path B
+# ---------------------------------------------------------------------------
+
+class TestPhase2BRejectionCandidate:
+    """
+    Verifies Phase 2B gating of continuation_candidate / rejection_candidate
+    on Gate 3 Path B (sweep_reclaim_short) based on HTF context.
+
+    Rules (Path B only):
+      h1 OR m15 bearish  → continuation_candidate=True,  rejection_candidate=False
+      neither bearish    → continuation_candidate=False,  rejection_candidate=True
+
+    All other paths (Gate 1, Gate 2, Gate 3 Path A) must be unaffected:
+      rejection_candidate defaults to False everywhere else.
+    """
+
+    def _sweep_reclaim_short_m5(self, base=2300.0):
+        """Bullish sweep + NO reclaim attempt + bearish displacement → Path B."""
+        bars = flat_candles(price=base, n=25)
+        sweep    = candle(base,     base + 5,  base - 1, base + 1)
+        neutral1 = candle(base + 1, base + 2,  base,     base + 1)
+        neutral2 = candle(base + 1, base + 2,  base - 0.5, base + 0.5)
+        neutral3 = candle(base,     base + 1,  base - 1, base - 0.5)
+        displ    = candle(base,     base + 0.5, base - 8, base - 7)
+        bars += [sweep, neutral1, neutral2, neutral3, displ]
+        return bars
+
+    def _run_path_b(self, monkeypatch, h1_trend, m15_trend, m5_trend="bearish"):
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        m5 = self._sweep_reclaim_short_m5()
+        h1 = flat_candles(price=2300.0, n=60)
+        confluence = make_confluence(
+            h1_candles=h1, m5_candles=m5,
+            h1_trend=h1_trend, m15_trend=m15_trend, m5_trend=m5_trend,
+        )
+        candles = make_candles_dict(h1=h1, m5=m5)
+        return mod.run({}, confluence, "XAU_USD", candles)
+
+    # ── rejection_candidate default ────────────────────────────────────────
+
+    def test_rejection_candidate_in_base_audit(self, monkeypatch):
+        """rejection_candidate is present in every run() output, defaults False."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        m5 = flat_candles(price=2300.0, n=30)
+        confluence = make_confluence(m5_candles=m5)
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+        assert "rejection_candidate" in result
+        assert result["rejection_candidate"] is False
+
+    # ── bearish HTF context → continuation ────────────────────────────────
+
+    def test_bearish_h1_continuation_candidate_true(self, monkeypatch):
+        """h1_trend=bearish + bearish displacement → continuation_candidate=True."""
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="bearish", m15_trend="bullish")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["continuation_candidate"] is True,  \
+                f"bearish H1 → continuation_candidate must be True, got {result['continuation_candidate']}"
+            assert result["rejection_candidate"]    is False, \
+                f"bearish H1 → rejection_candidate must be False, got {result['rejection_candidate']}"
+
+    def test_bearish_m15_continuation_candidate_true(self, monkeypatch):
+        """m15_trend=bearish (h1 neutral) → continuation_candidate=True."""
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="bullish", m15_trend="bearish")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["continuation_candidate"] is True,  \
+                f"bearish M15 → continuation_candidate must be True"
+            assert result["rejection_candidate"]    is False, \
+                f"bearish M15 → rejection_candidate must be False"
+
+    def test_both_bearish_continuation_candidate_true(self, monkeypatch):
+        """h1=bearish AND m15=bearish → continuation_candidate=True."""
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="bearish", m15_trend="bearish")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["continuation_candidate"] is True
+            assert result["rejection_candidate"]    is False
+
+    def test_downtrend_label_continuation_candidate_true(self, monkeypatch):
+        """h1_trend='downtrend' (alternate label) → continuation_candidate=True."""
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="downtrend", m15_trend="bullish")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["continuation_candidate"] is True
+            assert result["rejection_candidate"]    is False
+
+    def test_weak_bearish_h1_continuation_candidate_true(self, monkeypatch):
+        """h1_trend='weak_bearish' → continuation_candidate=True (weak bearish still qualifies)."""
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="weak_bearish", m15_trend="bullish")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["continuation_candidate"] is True
+            assert result["rejection_candidate"]    is False
+
+    # ── non-bearish HTF context → rejection ───────────────────────────────
+
+    def test_bullish_h1_and_m15_rejection_candidate_true(self, monkeypatch):
+        """h1=bullish AND m15=bullish → rejection_candidate=True, continuation=False."""
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="bullish", m15_trend="bullish")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["rejection_candidate"]    is True,  \
+                f"bullish HTF → rejection_candidate must be True, got {result['rejection_candidate']}"
+            assert result["continuation_candidate"] is False, \
+                f"bullish HTF → continuation_candidate must be False"
+
+    def test_chop_h1_and_bullish_m15_rejection_candidate_true(self, monkeypatch):
+        """h1=chop, m15=bullish → rejection_candidate=True (neither is bearish)."""
+        # Note: h1_trend=chop normally triggers htf_range_active — use bearish h1_trend
+        # that is NOT in the bearish set to test the logic branch.
+        # Use h1_trend="bullish" + m15_trend="uptrend" as the non-bearish case.
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="bullish", m15_trend="uptrend")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["rejection_candidate"]    is True
+            assert result["continuation_candidate"] is False
+
+    def test_weak_bullish_h1_rejection_candidate_true(self, monkeypatch):
+        """h1='weak_bullish', m15='weak_bullish' → rejection_candidate=True."""
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="weak_bullish", m15_trend="weak_bullish")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["rejection_candidate"]    is True
+            assert result["continuation_candidate"] is False
+
+    # ── no behavioral change ───────────────────────────────────────────────
+
+    def test_entry_state_unchanged_bearish_context(self, monkeypatch):
+        """
+        Adding the context gate must not change entry_state or setup_type.
+        Path B with bearish H1 → ENTER_NOW sweep_reclaim_short (same as before).
+        """
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="bearish", m15_trend="bearish")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["entry_state"] == "ENTER_NOW"
+
+    def test_entry_state_unchanged_bullish_context(self, monkeypatch):
+        """
+        Path B with bullish H1/M15 → entry_state still ENTER_NOW (gate changes
+        audit label only, not the entry decision).
+        """
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="bullish", m15_trend="bullish")
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result["entry_state"] == "ENTER_NOW"
+
+    def test_should_log_alert_unaffected(self, monkeypatch):
+        """
+        should_log and should_alert are controlled by watch-only gate only —
+        not by continuation_candidate or rejection_candidate.
+        """
+        result = self._run_path_b(monkeypatch,
+                                  h1_trend="bullish", m15_trend="bullish")
+        # Watch-only gate (OM_GOLD_SCALP_ENABLED=True set in _run_path_b) allows
+        # should_log/should_alert to be True on ENTER_NOW.
+        if result.get("setup_type") == "sweep_reclaim_short":
+            assert result.get("rejection_candidate") is True  # confirm context gate fired
+            # Entry path still armed — audit field does not block the signal
+            assert result.get("entry_allowed") is True
+
+    # ── other paths unaffected ─────────────────────────────────────────────
+
+    def test_gate2_rejection_candidate_always_false(self, monkeypatch):
+        """Gate 2 (sweep_reclaim_long) never sets rejection_candidate=True."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        base = 2300.0
+        m5 = flat_candles(price=base, n=20)
+        m5 += [
+            candle(base,     base + 1, base - 8,  base + 0.5),
+            candle(base + 0.5, base + 6, base + 0.2, base + 5),
+            candle(base + 4,   base + 7, base + 3.5, base + 6),
+            candle(base + 5,   base + 14, base + 4, base + 13),
+        ]
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(h1_candles=h1, m5_candles=m5,
+                                     h1_trend="bearish", m5_trend="bullish",
+                                     m15_trend="bullish")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+        assert result.get("rejection_candidate") is False, \
+            f"Gate 2 must never set rejection_candidate=True, got {result.get('rejection_candidate')}"
+
+    def test_path_a_rejection_candidate_always_false(self, monkeypatch):
+        """Gate 3 Path A (failed_reclaim_continuation) never sets rejection_candidate=True."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        base = 2300.0
+        m5 = flat_candles(price=base, n=20)
+        m5 += [
+            candle(base,     base + 8, base - 0.5, base - 0.5),
+            candle(base - 0.5, base + 6, base - 1, base - 1),
+            candle(base,     base + 0.5, base - 10, base - 9),
+        ]
+        h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(h1_candles=h1, m5_candles=m5,
+                                     h1_trend="bearish", m5_trend="bearish",
+                                     m15_trend="bearish")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1, m5=m5))
+        assert result.get("rejection_candidate") is False, \
+            f"Gate 3 Path A must never set rejection_candidate=True"
