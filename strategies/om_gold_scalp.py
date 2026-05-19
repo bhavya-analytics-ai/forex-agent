@@ -662,6 +662,15 @@ def _base_audit():
         "reclaim_back_inside_range":   False,
         "avoid_long_reason":           "",
         "avoid_short_reason":          "",
+        # S/R continuation context — Phase 2A audit foundation
+        # key_sr_level:          swept/broken level is a key S/R extreme (prior swing)
+        # reclaimed_zone_active: reclaim was confirmed and zone context is still active
+        # zone_role_flip:        level's structural role has inverted (support→resistance or vice versa)
+        # continuation_candidate: structural conditions support a directional continuation trade
+        "key_sr_level":           False,
+        "reclaimed_zone_active":  False,
+        "zone_role_flip":         False,
+        "continuation_candidate": False,
         # Entry quality
         "entry_quality":         "low",
         "momentum_score":        0,
@@ -761,7 +770,9 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             bd = _detect_range_breakdown(m5_candles, range_low)
             out.update(bd)
             if bd["range_low_broken"] and bd["range_retest_held_below"] and bd["bearish_follow_through"]:
-                # Valid breakdown — proceed to entry
+                # Valid breakdown — range_low (support) now confirmed as resistance (zone_role_flip)
+                out["zone_role_flip"]         = True
+                out["continuation_candidate"] = True
                 entry_price = m5_candles[-1]["close"] if m5_candles else 0.0
                 sl_extreme  = range_low + 1.0  # retest resistance level
                 # Record entry/SL candidates for debug visibility
@@ -847,7 +858,9 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             bo = _detect_range_breakout(m5_candles, range_high)
             out.update(bo)
             if bo["range_high_broken"] and bo["range_retest_held_above"] and bo["bullish_follow_through"]:
-                # Valid breakout — proceed to entry
+                # Valid breakout — range_high (resistance) now confirmed as support (zone_role_flip)
+                out["zone_role_flip"]         = True
+                out["continuation_candidate"] = True
                 entry_price = m5_candles[-1]["close"] if m5_candles else 0.0
                 sl_extreme  = range_high - 1.0  # retest support level
                 # Record entry/SL candidates for debug visibility
@@ -956,6 +969,7 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
         if sweep_bear["detected"]:
             out["active_branch"]          = "bearish_sweep_reclaim_long"
             out["setup_candidates_found"] = out["setup_candidates_found"] + 1
+            out["key_sr_level"]           = True   # swept level is a prior swing low (key S/R)
             sweep_extreme = sweep_bear["sweep_low"]
             entry_price_candidate = m5_candles[-1]["close"] if m5_candles else 0.0
             out["entry_price_candidate"] = round(entry_price_candidate, 3)
@@ -1020,7 +1034,10 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 _apply_watch_only_gate(out)
                 return out
 
-            # Reclaim confirmed — check displacement
+            # Reclaim confirmed — zone is now active context; structure directionally preserved
+            out["reclaimed_zone_active"]  = True
+            out["continuation_candidate"] = True
+            # Check displacement
             avg = _avg_body(m5_candles)
             disp = _detect_displacement(m5_candles, "bullish", avg)
             out["bullish_displacement"]  = disp["detected"]
@@ -1115,6 +1132,7 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
             out["sweep_distance_pts"]    = sweep_bull["sweep_distance_pts"]
             out["active_branch"]         = "bullish_sweep_failed_reclaim_short"
             out["setup_candidates_found"] = out["setup_candidates_found"] + 1
+            out["key_sr_level"]           = True   # swept level is a prior swing high (key S/R)
 
             sr_level = sweep_bull["sweep_high"] - SWEEP_MIN_WICK_PTS
             rec_fail = _detect_reclaim(m5_candles, sr_level, direction="bearish")
@@ -1126,6 +1144,8 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                 # ── PATH A: failed_reclaim_continuation ──────────────────────
                 # At least one of the last 3 bars pushed above sr_level and closed
                 # back below — an explicit reclaim attempt that failed.
+                # sr_level is now confirmed as resistance → zone role has flipped.
+                out["zone_role_flip"] = True
                 avg_b = _avg_body(m5_candles)
                 disp = _detect_displacement(m5_candles, "bearish", avg_b)
                 out["bearish_displacement_after_failed_reclaim"] = disp["detected"]
@@ -1157,7 +1177,8 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                         out["evaluated_branches"] = _branches
                         _apply_watch_only_gate(out)
                         return out
-                    out["sl_gate_passed"] = True
+                    out["sl_gate_passed"]         = True
+                    out["continuation_candidate"] = True  # displacement confirmed after failed reclaim
 
                     entry_dist = abs(entry_price - sl_extreme)
                     if entry_dist > MAX_CHASE_PTS:
@@ -1276,7 +1297,8 @@ def run(scored: dict, confluence: dict, pair: str, candles: dict) -> dict:
                         out["evaluated_branches"] = _branches
                         _apply_watch_only_gate(out)
                         return out
-                    out["sl_gate_passed"] = True
+                    out["sl_gate_passed"]         = True
+                    out["continuation_candidate"] = True  # bearish displacement confirmed after sweep rejection
 
                     entry_dist = abs(entry_price - sl_extreme)
                     if entry_dist > MAX_CHASE_PTS:

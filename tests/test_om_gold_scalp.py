@@ -2069,3 +2069,341 @@ class TestDisplacementRejectionReason:
                 assert "< 1.5" not in reason, (
                     f"ratio={ratio} >= 1.5 but reason says '< 1.5': '{reason}'"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2A — S/R continuation context foundation fields
+# ---------------------------------------------------------------------------
+
+class TestPhase2AFoundationFields:
+    """
+    Verifies the four new Phase 2A audit fields:
+      key_sr_level           — swept/broken level is a key S/R extreme
+      reclaimed_zone_active  — reclaim confirmed and zone context is active
+      zone_role_flip         — level's structural role has inverted
+      continuation_candidate — structural conditions support a continuation trade
+
+    Rules:
+      - All four default to False in _base_audit().
+      - No new ENTER_NOW paths are created.
+      - No existing thresholds, gates, or setup behaviors are changed.
+      - These are purely observational audit labels.
+    """
+
+    # ── helpers ────────────────────────────────────────────────────────────
+
+    def _sweep_reclaim_long_m5(self, base=2300.0):
+        """Bearish sweep + bullish reclaim + bullish displacement → sweep_reclaim_long."""
+        bars = flat_candles(price=base, n=20)
+        sweep  = candle(base,     base + 1, base - 8,  base + 0.5)   # wick down, body back up
+        rc1    = candle(base + 0.5, base + 6, base + 0.2, base + 5)  # body closes above reclaim level
+        hold   = candle(base + 4,   base + 7, base + 3.5, base + 6)  # hold bar above level
+        displ  = candle(base + 5,   base + 14, base + 4, base + 13)  # bullish displacement
+        bars += [sweep, rc1, hold, displ]
+        return bars
+
+    def _failed_reclaim_m5(self, base=2300.0):
+        """Bullish sweep + explicit failed reclaim + bearish displacement."""
+        bars = flat_candles(price=base, n=20)
+        sweep   = candle(base,     base + 8, base - 0.5, base - 0.5)  # wick up, close below
+        attempt = candle(base - 0.5, base + 6, base - 1, base - 1)    # push above sr, close back below
+        displ   = candle(base,     base + 0.5, base - 10, base - 9)   # bearish displacement
+        bars += [sweep, attempt, displ]
+        return bars
+
+    def _sweep_reclaim_short_m5(self, base=2300.0):
+        """Bullish sweep + NO reclaim attempt + bearish displacement → sweep_reclaim_short."""
+        bars = flat_candles(price=base, n=25)
+        sweep    = candle(base,     base + 5,  base - 1, base + 1)
+        neutral1 = candle(base + 1, base + 2,  base,     base + 1)
+        neutral2 = candle(base + 1, base + 2,  base - 0.5, base + 0.5)
+        neutral3 = candle(base,     base + 1,  base - 1, base - 0.5)
+        displ    = candle(base,     base + 0.5, base - 8, base - 7)
+        bars += [sweep, neutral1, neutral2, neutral3, displ]
+        return bars
+
+    def _range_breakdown_m5(self, range_low=2290.0):
+        """Flat bars + range_low broken + retest holds below + follow-through."""
+        bars = flat_candles(price=range_low + 2, n=20)
+        breakdown = candle(range_low + 1, range_low + 3, range_low - 5, range_low - 3)
+        retest    = candle(range_low - 3, range_low - 0.5, range_low - 6, range_low - 4)
+        follow    = candle(range_low - 4, range_low - 3,  range_low - 12, range_low - 10)
+        return bars + [breakdown, retest, follow]
+
+    def _range_breakout_m5(self, range_high=2310.0):
+        """Flat bars + range_high broken + retest holds above + follow-through."""
+        bars = flat_candles(price=range_high - 2, n=20)
+        breakout = candle(range_high - 1, range_high + 5, range_high - 1, range_high + 3)
+        retest   = candle(range_high + 3, range_high + 4, range_high + 0.5, range_high + 1.5)
+        follow   = candle(range_high + 1.5, range_high + 10, range_high + 1, range_high + 9)
+        return bars + [breakout, retest, follow]
+
+    def _run(self, monkeypatch, m5, h1=None, h1_trend="bearish", m5_trend="bearish",
+             m15_trend="bearish"):
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        _h1 = h1 or flat_candles(price=2300.0, n=60)
+        confluence = make_confluence(h1_candles=_h1, m5_candles=m5,
+                                     h1_trend=h1_trend, m5_trend=m5_trend,
+                                     m15_trend=m15_trend)
+        candles = make_candles_dict(h1=_h1, m5=m5)
+        return mod.run({}, confluence, "XAU_USD", candles)
+
+    # ── default / unrelated path tests ────────────────────────────────────
+
+    def test_all_four_fields_default_false_on_no_setup(self, monkeypatch):
+        """Flat candles — no sweep, no range event — all four fields remain False."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        m5 = flat_candles(price=2300.0, n=30)
+        confluence = make_confluence(m5_candles=m5)
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        assert result["key_sr_level"]           is False
+        assert result["reclaimed_zone_active"]  is False
+        assert result["zone_role_flip"]         is False
+        assert result["continuation_candidate"] is False
+
+    def test_fields_present_in_base_audit(self, monkeypatch):
+        """All four fields exist in every run() output regardless of path."""
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        m5 = flat_candles(price=2300.0, n=30)
+        confluence = make_confluence(m5_candles=m5)
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(m5=m5))
+
+        for field in ("key_sr_level", "reclaimed_zone_active",
+                      "zone_role_flip", "continuation_candidate"):
+            assert field in result, f"Field '{field}' missing from run() output"
+
+    # ── Gate 2: sweep_reclaim_long ─────────────────────────────────────────
+
+    def test_sweep_reclaim_long_key_sr_level(self, monkeypatch):
+        """Bearish sweep detected → key_sr_level = True (swept level is prior swing low)."""
+        m5 = self._sweep_reclaim_long_m5()
+        # h1_trend="bearish" avoids htf_range_active so Gate 2 is reached.
+        # Bearish H1 is "opposing" for the long entry but momentum ≥ 35 bypasses hard skip.
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bullish",
+                           m15_trend="bullish")
+        assert result.get("key_sr_level") is True, (
+            f"Expected key_sr_level=True when bearish sweep detected, "
+            f"got {result.get('key_sr_level')}, entry_state={result.get('entry_state')}"
+        )
+
+    def test_sweep_reclaim_long_reclaimed_zone_active_when_reclaim_confirmed(self, monkeypatch):
+        """
+        reclaimed_zone_active = True as soon as reclaim is confirmed in Gate 2,
+        regardless of whether displacement has fired yet.
+        """
+        m5 = self._sweep_reclaim_long_m5()
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bullish",
+                           m15_trend="bullish")
+        # Sweep detected AND reclaim confirmed (fixture has reclaim bar) →
+        # reclaimed_zone_active must be True
+        if result.get("reclaim_confirmed") is True:
+            assert result.get("reclaimed_zone_active") is True, (
+                f"reclaim_confirmed=True but reclaimed_zone_active="
+                f"{result.get('reclaimed_zone_active')}"
+            )
+
+    def test_sweep_reclaim_long_continuation_candidate_when_reclaim_confirmed(self, monkeypatch):
+        """continuation_candidate = True when reclaim confirmed in Gate 2."""
+        m5 = self._sweep_reclaim_long_m5()
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bullish",
+                           m15_trend="bullish")
+        if result.get("reclaim_confirmed") is True:
+            assert result.get("continuation_candidate") is True, (
+                f"reclaim_confirmed=True but continuation_candidate="
+                f"{result.get('continuation_candidate')}"
+            )
+
+    def test_sweep_not_detected_key_sr_level_false(self, monkeypatch):
+        """No sweep → key_sr_level must remain False."""
+        m5 = flat_candles(price=2300.0, n=30)
+        result = self._run(monkeypatch, m5, m5_trend="bearish")
+        assert result.get("key_sr_level") is False
+
+    def test_wait_reaction_reclaimed_zone_false(self, monkeypatch):
+        """
+        Sweep detected but reclaim NOT yet confirmed (WAIT_REACTION) →
+        reclaimed_zone_active remains False.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        # Build only a sweep bar — no reclaim bar follows
+        base = 2300.0
+        m5 = flat_candles(price=base, n=20)
+        m5 += [candle(base, base + 1, base - 8, base + 0.5)]  # sweep only
+        _h1 = flat_candles(price=base, n=60)
+        confluence = make_confluence(h1_candles=_h1, m5_candles=m5,
+                                     h1_trend="chop", m5_trend="bullish")
+        candles = make_candles_dict(h1=_h1, m5=m5)
+        result = mod.run({}, confluence, "XAU_USD", candles)
+
+        if result.get("entry_state") == "WAIT_REACTION":
+            assert result.get("reclaimed_zone_active") is False, (
+                f"WAIT_REACTION (no reclaim yet) must have reclaimed_zone_active=False, "
+                f"got {result.get('reclaimed_zone_active')}"
+            )
+
+    # ── Gate 3 Path A: failed_reclaim_continuation ────────────────────────
+
+    def test_failed_reclaim_key_sr_level(self, monkeypatch):
+        """Bullish sweep detected in Gate 3 → key_sr_level = True."""
+        m5 = self._failed_reclaim_m5()
+        # h1_trend="bearish" avoids htf_range_active; bearish H1 aligns with bearish entry.
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bearish",
+                           m15_trend="bearish")
+        assert result.get("key_sr_level") is True, (
+            f"Expected key_sr_level=True for Gate 3 bullish sweep, "
+            f"got {result.get('key_sr_level')}, entry_state={result.get('entry_state')}"
+        )
+
+    def test_failed_reclaim_zone_role_flip(self, monkeypatch):
+        """
+        reclaim_failed = True → zone_role_flip = True.
+        The level that rejected the reclaim attempt is confirmed as resistance.
+        """
+        m5 = self._failed_reclaim_m5()
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bearish",
+                           m15_trend="bearish")
+        if result.get("reclaim_failed") is True:
+            assert result.get("zone_role_flip") is True, (
+                f"reclaim_failed=True but zone_role_flip={result.get('zone_role_flip')}"
+            )
+
+    def test_failed_reclaim_continuation_candidate_when_displacement_confirmed(self, monkeypatch):
+        """
+        continuation_candidate = True when bearish displacement is confirmed
+        in Gate 3 Path A (reclaim_failed + displacement both True).
+        """
+        m5 = self._failed_reclaim_m5()
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bearish",
+                           m15_trend="bearish")
+        if (result.get("reclaim_failed") is True
+                and result.get("bearish_displacement_after_failed_reclaim") is True):
+            assert result.get("continuation_candidate") is True, (
+                f"reclaim_failed + displacement confirmed but continuation_candidate="
+                f"{result.get('continuation_candidate')}"
+            )
+
+    def test_failed_reclaim_reclaimed_zone_active_false(self, monkeypatch):
+        """
+        Gate 3 Path A: reclaim FAILED — zone was NOT reclaimed.
+        reclaimed_zone_active must remain False.
+        """
+        m5 = self._failed_reclaim_m5()
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bearish",
+                           m15_trend="bearish")
+        # reclaim_failed=True means the zone was NOT reclaimed (attempt failed)
+        assert result.get("reclaimed_zone_active") is False, (
+            f"Gate 3 Path A (failed reclaim): reclaimed_zone_active must be False, "
+            f"got {result.get('reclaimed_zone_active')}"
+        )
+
+    # ── Gate 3 Path B: sweep_reclaim_short ───────────────────────────────
+
+    def test_sweep_reclaim_short_key_sr_level(self, monkeypatch):
+        """Bullish sweep in Gate 3 Path B → key_sr_level = True."""
+        m5 = self._sweep_reclaim_short_m5()
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bearish",
+                           m15_trend="bearish")
+        assert result.get("key_sr_level") is True, (
+            f"Expected key_sr_level=True for Gate 3 Path B, "
+            f"got {result.get('key_sr_level')}, entry_state={result.get('entry_state')}"
+        )
+
+    def test_sweep_reclaim_short_continuation_candidate_when_displacement(self, monkeypatch):
+        """
+        continuation_candidate = True when bearish displacement confirmed in
+        Gate 3 Path B (sweep_reclaim_short).
+        """
+        m5 = self._sweep_reclaim_short_m5()
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bearish",
+                           m15_trend="bearish")
+        if result.get("bearish_displacement_after_failed_reclaim") is True:
+            assert result.get("continuation_candidate") is True, (
+                f"Gate 3 Path B displacement confirmed but continuation_candidate="
+                f"{result.get('continuation_candidate')}"
+            )
+
+    def test_sweep_reclaim_short_reclaimed_zone_active_false(self, monkeypatch):
+        """Gate 3 Path B: no reclaim — reclaimed_zone_active must remain False."""
+        m5 = self._sweep_reclaim_short_m5()
+        result = self._run(monkeypatch, m5, h1_trend="bearish", m5_trend="bearish",
+                           m15_trend="bearish")
+        assert result.get("reclaimed_zone_active") is False
+
+    # ── Gate 1: range paths ───────────────────────────────────────────────
+
+    def test_range_breakdown_bearish_zone_role_flip(self, monkeypatch):
+        """
+        range_breakdown_bearish: range_low was support, now broken and
+        retest holds below → confirmed as resistance → zone_role_flip = True.
+        """
+        range_low = 2290.0
+        m5 = self._range_breakdown_m5(range_low=range_low)
+        h1 = flat_candles(price=range_low + 2, n=60)
+        result = self._run(monkeypatch, m5, h1=h1, h1_trend="chop", m5_trend="bearish",
+                           m15_trend="bearish")
+        if result.get("setup_type") == "range_breakdown_bearish":
+            assert result.get("zone_role_flip") is True, (
+                f"range_breakdown_bearish but zone_role_flip={result.get('zone_role_flip')}"
+            )
+
+    def test_range_breakdown_bearish_continuation_candidate(self, monkeypatch):
+        """range_breakdown_bearish → continuation_candidate = True."""
+        range_low = 2290.0
+        m5 = self._range_breakdown_m5(range_low=range_low)
+        h1 = flat_candles(price=range_low + 2, n=60)
+        result = self._run(monkeypatch, m5, h1=h1, h1_trend="chop", m5_trend="bearish",
+                           m15_trend="bearish")
+        if result.get("setup_type") == "range_breakdown_bearish":
+            assert result.get("continuation_candidate") is True
+
+    def test_range_breakout_bullish_zone_role_flip(self, monkeypatch):
+        """
+        range_breakout_bullish: range_high was resistance, now broken and
+        retest holds above → confirmed as support → zone_role_flip = True.
+        """
+        range_high = 2310.0
+        m5 = self._range_breakout_m5(range_high=range_high)
+        h1 = flat_candles(price=range_high - 2, n=60)
+        result = self._run(monkeypatch, m5, h1=h1, h1_trend="chop", m5_trend="bullish",
+                           m15_trend="bullish")
+        if result.get("setup_type") == "range_breakout_bullish":
+            assert result.get("zone_role_flip") is True, (
+                f"range_breakout_bullish but zone_role_flip={result.get('zone_role_flip')}"
+            )
+
+    def test_range_breakout_bullish_continuation_candidate(self, monkeypatch):
+        """range_breakout_bullish → continuation_candidate = True."""
+        range_high = 2310.0
+        m5 = self._range_breakout_m5(range_high=range_high)
+        h1 = flat_candles(price=range_high - 2, n=60)
+        result = self._run(monkeypatch, m5, h1=h1, h1_trend="chop", m5_trend="bullish",
+                           m15_trend="bullish")
+        if result.get("setup_type") == "range_breakout_bullish":
+            assert result.get("continuation_candidate") is True
+
+    def test_htf_range_no_trade_all_fields_false(self, monkeypatch):
+        """
+        Inside HTF range (no breakdown/breakout) → all four Phase 2A fields
+        must remain at their False defaults.
+        """
+        mod = _import_strategy()
+        import config
+        monkeypatch.setattr(config, "OM_GOLD_SCALP_ENABLED", True)
+        h1 = flat_candles(price=2300.0, n=60)
+        confluence = make_confluence(h1_candles=h1, h1_trend="chop")
+        result = mod.run({}, confluence, "XAU_USD", make_candles_dict(h1=h1))
+
+        assert result.get("setup_type") == "htf_range_no_trade"
+        assert result.get("key_sr_level")           is False
+        assert result.get("reclaimed_zone_active")  is False
+        assert result.get("zone_role_flip")         is False
+        assert result.get("continuation_candidate") is False
