@@ -3115,6 +3115,15 @@ function buildOmCard(c) {
   const slGate    = c.sl_gate_passed === true ? "✓ passed" : "✗ blocked";
   const maxSl     = typeof c.max_sl_pts === "number" ? c.max_sl_pts + " pts" : "—";
 
+  // Phase 2A / 2B / 2C audit fields
+  const keySr    = c.key_sr_level          === true ? "yes" : "no";
+  const rclmZone = c.reclaimed_zone_active === true ? "yes" : "no";
+  const roleFlip = c.zone_role_flip        === true ? "yes" : "no";
+  const contCand = c.continuation_candidate === true ? "yes" : "no";
+  const rejCand  = c.rejection_candidate   === true ? "yes" : "no";
+  const accBars  = typeof c.acceptance_window_bars === "number" ? c.acceptance_window_bars : 0;
+  const accConf  = c.acceptance_confirmed  === true ? "yes" : "no";
+
   const uid = Math.random().toString(36).slice(2, 8);
 
   const debugBlock = `
@@ -3144,6 +3153,15 @@ function buildOmCard(c) {
     <div class="om-dbg-row"><span>reclaim level</span><span>${rclmLevel}</span></div>
     <div class="om-dbg-row"><span>distance past</span><span>${rclmDist}</span></div>
     <div class="om-dbg-row"><span>hold bar</span><span>${holdBar}</span></div>
+
+    <div class="om-dbg-section">CONTINUATION CONTEXT</div>
+    <div class="om-dbg-row"><span>key S/R level</span><span>${keySr}</span></div>
+    <div class="om-dbg-row"><span>reclaimed zone active</span><span>${rclmZone}</span></div>
+    <div class="om-dbg-row"><span>zone role flip</span><span>${roleFlip}</span></div>
+    <div class="om-dbg-row"><span>continuation candidate</span><span>${contCand}</span></div>
+    <div class="om-dbg-row"><span>rejection candidate</span><span>${rejCand}</span></div>
+    <div class="om-dbg-row"><span>acceptance bars</span><span>${accBars}</span></div>
+    <div class="om-dbg-row"><span>acceptance confirmed</span><span>${accConf}</span></div>
 
     <div class="om-dbg-section">DISPLACEMENT</div>
     <div class="om-dbg-row"><span>body / avg</span><span>${dispBody} / ${avgBody}</span></div>
