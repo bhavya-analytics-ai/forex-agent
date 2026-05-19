@@ -164,6 +164,34 @@ def get_live_price(pair: str) -> float:
         return None
 
 
+def get_live_bid_ask(pair: str):
+    """
+    Fetch current bid and ask prices for a pair via OANDA PricingInfo.
+    Returns (bid, ask) tuple, or (None, None) on failure.
+
+    Used by the SL/TP monitor for correct execution-side evaluation:
+      LONG:  SL and TP both trigger when BID reaches the level
+             (closing a long = selling at bid)
+      SHORT: SL and TP both trigger when ASK reaches the level
+             (closing a short = buying at ask)
+
+    Using mid-price for SL/TP detection creates a systematic gap equal to
+    half the spread. For gold (spread ~0.20–0.50 pts) this causes OANDA to
+    fire SL before the mid-price monitor detects it — the "didn't touch"
+    false impression on a mid-price chart.
+    """
+    try:
+        req = PricingInfo(accountID=OANDA_ACCOUNT_ID, params={"instruments": pair})
+        client.request(req)
+        px  = req.response["prices"][0]
+        bid = round(float(px["bids"][0]["price"]), 5)
+        ask = round(float(px["asks"][0]["price"]), 5)
+        return bid, ask
+    except Exception as e:
+        logger.warning(f"get_live_bid_ask({pair}) failed: {e}")
+        return None, None
+
+
 def pip_size(pair: str) -> float:
     """
     Return pip size for a given pair.

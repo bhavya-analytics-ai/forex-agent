@@ -4055,6 +4055,25 @@ function renderManualTrades(trades) {
       ? _liveTracker(t.pair, t.direction, t.entry_price, t.sl_price, t.tp1_price)
       : "";
 
+    // ── Forensic close info (compact, closed trades only) ──────────────────
+    const exitTs  = t.exit_timestamp ? utcToNY(t.exit_timestamp) : null;
+    const exitReason = t.exit_reason || null;
+    const exitReasonColor = exitReason === "TP_HIT"      ? "var(--green)"
+                          : exitReason === "SL_HIT"      ? "var(--red)"
+                          : exitReason === "MANUAL_CLOSE" ? "var(--yellow)"
+                          : "var(--text-muted)";
+    const exitReasonLabel = exitReason ? exitReason.replace(/_/g," ") : null;
+    const forensicHtml = !isOpen && (exitTs || exitReasonLabel) ? `
+      <div style="font-size:9px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;
+                  margin-top:2px;padding:2px 4px;line-height:1.6;">
+        <span>closed:</span> ${exitTs || "—"}
+        ${exitReasonLabel ? `<span style="color:${exitReasonColor};margin-left:4px;">${exitReasonLabel}</span>` : ""}
+        ${t.exit_price != null ? `<span style="margin-left:4px;">@ <b>${t.exit_price}</b></span>` : ""}
+        ${t.trade_duration_minutes != null ? `<span style="color:var(--text-muted);margin-left:4px;">${t.trade_duration_minutes}min</span>` : ""}
+        ${t.max_favorable_excursion != null ? `<span style="color:var(--green);margin-left:4px;">MFE +${parseFloat(t.max_favorable_excursion).toFixed(1)}p</span>` : ""}
+        ${t.max_adverse_excursion != null ? `<span style="color:var(--red);margin-left:4px;">MAE -${parseFloat(t.max_adverse_excursion).toFixed(1)}p</span>` : ""}
+      </div>` : "";
+
     const tvPair = (t.pair||"").replace("_","");  // XAU_USD → XAUUSD
     return `
       <div style="margin-bottom:6px;">
@@ -4080,6 +4099,7 @@ function renderManualTrades(trades) {
         <div id="chart-${t.signal_id}" style="display:none;"></div>
         ${inlineEditHtml}
         ${manualTrackerHtml}
+        ${forensicHtml}
         ${postMortem}
       </div>`;
   }).join("");

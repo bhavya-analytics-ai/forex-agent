@@ -178,7 +178,7 @@ def init_db():
         except Exception:
             pass  # column already exists
 
-    # manual_trades: model-training context fields
+    # manual_trades: model-training context fields + forensic execution fields
     for col, typedef in [
         ("session",     "TEXT"),
         ("killzone",    "TEXT"),
@@ -188,6 +188,13 @@ def init_db():
         ("news_safe",   "INTEGER"),
         ("is_archived", "INTEGER DEFAULT 0"),  # soft-delete for manual trades
         ("signal_mode", "TEXT"),               # "normal" or "news_sniper"
+        # ── Forensic execution fields (SL/TP integrity audit) ──────────────────
+        ("exit_timestamp",          "TEXT"),     # UTC HH:MM:SS when SL/TP/manual triggered
+        ("exit_reason",             "TEXT"),     # SL_HIT | TP_HIT | MANUAL_CLOSE
+        ("exit_price",              "REAL"),     # bid/ask/mid price system saw at trigger
+        ("max_favorable_excursion", "REAL"),     # MFE: max profit in pips reached during trade
+        ("max_adverse_excursion",   "REAL"),     # MAE: max drawdown in pips reached during trade
+        ("trade_duration_minutes",  "INTEGER"),  # entry → exit elapsed minutes
     ]:
         try:
             conn.execute(f"ALTER TABLE manual_trades ADD COLUMN {col} {typedef}")
@@ -279,14 +286,34 @@ def insert_manual_trade(row: dict):
         conn.commit()
 
 
-def update_manual_trade_outcome(signal_id: str, outcome: str, outcome_pips: float, post_mortem: str):
+def update_manual_trade_outcome(
+    signal_id: str,
+    outcome: str,
+    outcome_pips: float,
+    post_mortem: str,
+    exit_timestamp: str = None,
+    exit_reason: str = None,
+    exit_price: float = None,
+    max_favorable_excursion: float = None,
+    max_adverse_excursion: float = None,
+    trade_duration_minutes: int = None,
+):
     conn = _get_conn()
     with _write_lock:
         conn.execute("""
             UPDATE manual_trades
-            SET outcome=?, outcome_pips=?, post_mortem=?
+            SET outcome=?, outcome_pips=?, post_mortem=?,
+                exit_timestamp=?, exit_reason=?, exit_price=?,
+                max_favorable_excursion=?, max_adverse_excursion=?,
+                trade_duration_minutes=?
             WHERE signal_id=?
-        """, (outcome, outcome_pips, post_mortem, signal_id))
+        """, (
+            outcome, outcome_pips, post_mortem,
+            exit_timestamp, exit_reason, exit_price,
+            max_favorable_excursion, max_adverse_excursion,
+            trade_duration_minutes,
+            signal_id,
+        ))
         conn.commit()
 
 
