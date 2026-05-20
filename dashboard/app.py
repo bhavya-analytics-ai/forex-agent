@@ -1351,6 +1351,127 @@ def api_signals_extra():
     })
 
 
+@app.route("/api/debug/status")
+def api_debug_status():
+    """
+    Trusted live debug/status endpoint.
+
+    Read-only. Safe if DB or tables are missing.
+    Returns: version identity, live env flags, DB introspection, scanner mode.
+    Use this instead of `railway run` guessing for post-deploy verification.
+    """
+    import os
+    import sqlite3 as _sqlite3
+
+    # ── VERSION ───────────────────────────────────────────────────────────────
+    from version import get_version
+    _v = get_version()
+    version_block = {
+        "git_sha":        _v["git_sha"],
+        "branch":         _v["git_branch"],
+        "build_time_utc": _v["build_time_utc"],
+    }
+
+    # ── ENV (read live from os.getenv — not the module-level cached config) ──
+    def _flag(key: str) -> bool:
+        return os.getenv(key, "false").lower() == "true"
+
+    env_block = {
+        "OM_STRATEGY_ENABLED":   _flag("OM_STRATEGY_ENABLED"),
+        "LEGACY_GOLD_ENABLED":   _flag("LEGACY_GOLD_ENABLED"),
+        "LEGACY_FOREX_ENABLED":  _flag("LEGACY_FOREX_ENABLED"),
+        "OM_GOLD_SCALP_ENABLED": _flag("OM_GOLD_SCALP_ENABLED"),
+    }
+
+    # ── DATABASE ──────────────────────────────────────────────────────────────
+    from db.database import _db_path
+    db_path   = _db_path()
+    db_exists = os.path.exists(db_path)
+
+    tables          = []
+    signals_table   = None
+    recent_count    = None
+    last_ts         = None
+    db_error        = None
+
+    if db_exists:
+        try:
+            conn = _sqlite3.connect(db_path)
+            cur  = conn.cursor()
+
+            # List all tables — no hardcoded assumptions
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            tables = [r[0] for r in cur.fetchall()]
+
+            # Auto-detect signals table: prefer agent_signals, then any table
+            # whose name contains "signal"
+            _candidates = ["agent_signals"] + [
+                t for t in tables
+                if "signal" in t.lower() and t != "agent_signals"
+            ]
+            for _c in _candidates:
+                if _c in tables:
+                    signals_table = _c
+                    break
+
+            if signals_table:
+                # Auto-detect timestamp column
+                cur.execute(f"PRAGMA table_info({signals_table})")
+                _cols = [r[1] for r in cur.fetchall()]
+                _ts_col = next(
+                    (c for c in ("timestamp_utc", "created_at", "timestamp") if c in _cols),
+                    None,
+                )
+
+                if _ts_col:
+                    cur.execute(
+                        f"SELECT COUNT(*) FROM {signals_table} "          # nosec (no user input)
+                        f"WHERE {_ts_col} > datetime('now', '-30 minutes')"
+                    )
+                    recent_count = cur.fetchone()[0]
+
+                    cur.execute(
+                        f"SELECT {_ts_col} FROM {signals_table} "
+                        f"ORDER BY {_ts_col} DESC LIMIT 1"
+                    )
+                    _row = cur.fetchone()
+                    last_ts = _row[0] if _row else None
+
+            conn.close()
+        except Exception as _e:
+            db_error = str(_e)
+
+    db_block = {
+        "resolved_path":           db_path,
+        "exists":                  db_exists,
+        "tables":                  tables,
+        "signals_table":           signals_table,
+        "recent_signal_count_30m": recent_count,
+        "last_signal_timestamp":   last_ts,
+    }
+    if db_error:
+        db_block["error"] = db_error
+
+    # ── SCANNER ───────────────────────────────────────────────────────────────
+    try:
+        from filters.mode_manager import get_active_mode
+        _mode = get_active_mode()
+    except Exception as _e:
+        _mode = f"ERROR: {_e}"
+
+    scanner_block = {
+        "mode":       _mode,
+        "watch_only": not _flag("OM_STRATEGY_ENABLED"),
+    }
+
+    return jsonify({
+        "version":  version_block,
+        "env":      env_block,
+        "database": db_block,
+        "scanner":  scanner_block,
+    })
+
+
 @app.route("/api/version")
 def api_version():
     """
