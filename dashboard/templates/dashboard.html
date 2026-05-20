@@ -2499,9 +2499,25 @@ async function fetchAndRender() {
         tp1_pips:  s.tp1_pips  || _tl.tp1_pips  || "",
       });
     });
-    // Keep live price lookup for performance panel
-    window._livePrices = {};
-    signals.forEach(s => { if (s.current_price) window._livePrices[s.pair] = s.current_price; });
+    // Keep live price lookup — track prev price and update timestamp per pair
+    const _prevPrices = Object.assign({}, window._livePrices || {});
+    window._livePrices     = {};
+    window._livePricesMeta = window._livePricesMeta || {};
+    signals.forEach(s => {
+      if (s.current_price) {
+        window._livePrices[s.pair] = s.current_price;
+        window._livePricesMeta[s.pair] = {
+          updatedAt: Date.now(),
+          prev:      _prevPrices[s.pair] || s.current_price,
+        };
+      }
+    });
+    // Re-render manual trades if tab is active so progress bar stays current
+    const _manualSection = document.getElementById("perf-manual-section");
+    if (window._lastManualTrades && window._lastManualTrades.length &&
+        _manualSection && _manualSection.style.display !== "none") {
+      renderManualTrades(window._lastManualTrades);
+    }
 
   } catch(e) { console.warn("Fetch error:", e); }
 }
@@ -2908,11 +2924,12 @@ function _liveTracker(pair, direction, entryPx, slPx, tpPx) {
   const tp     = parseFloat(tpPx);
   if (!livePx || !entry || !sl || !tp) return "";
 
-  const pip    = _ttmPipSize(pair);
-  const _lbl   = (pair || "").includes("XAU") ? "pts" : "p";
-  const isBull = (direction||"").toLowerCase() === "bullish";
+  const pip      = _ttmPipSize(pair);
+  const _isXmetal = !!(pair||"").toUpperCase().match(/XAU|XAG/);
+  const _lbl     = _isXmetal ? "pts" : "pips";
+  const isBull   = (direction||"").toLowerCase() === "bullish";
 
-  // P&L pips from entry — positive = profitable
+  // P&L from entry — positive = profitable
   const pipsDiff = isBull ? (livePx - entry) / pip : (entry - livePx) / pip;
   const isProfit = pipsDiff >= 0;
 
@@ -2932,6 +2949,24 @@ function _liveTracker(pair, direction, entryPx, slPx, tpPx) {
   const barColor = progress > 60 ? "#00e676" : progress > 30 ? "#ffc107" : "#ff4444";
   const pipsClr  = isProfit ? "#00e676" : "#ff4444";
 
+  // ── Freshness and delta ────────────────────────────────────────────────────
+  const _meta    = (window._livePricesMeta||{})[pair] || {};
+  const _prevPx  = parseFloat(_meta.prev) || livePx;
+  const _updAt   = _meta.updatedAt || null;
+  const _delta   = livePx - _prevPx;
+  const _deltaPts = _delta / pip;
+  let _deltaStr  = "";
+  let _deltaClr  = "rgba(255,255,255,.35)";
+  if (Math.abs(_deltaPts) >= 0.05) {
+    _deltaStr = (_delta > 0 ? "▲ +" : "▼ ") + _deltaPts.toFixed(1) + " " + _lbl;
+    _deltaClr = _delta > 0 ? "#00e676" : "#ff4444";
+  }
+  let _ageStr = "";
+  if (_updAt) {
+    const _secs = Math.floor((Date.now() - _updAt) / 1000);
+    _ageStr = _secs < 60 ? `${_secs}s ago` : `${Math.floor(_secs/60)}m ${_secs%60}s ago`;
+  }
+
   return `
     <div style="margin-top:5px;padding:7px 10px 12px;background:rgba(255,255,255,.02);
                 border-radius:4px;border:1px solid rgba(255,255,255,.06);
@@ -2940,11 +2975,13 @@ function _liveTracker(pair, direction, entryPx, slPx, tpPx) {
         <span style="font-size:8px;font-weight:700;letter-spacing:1.5px;color:#fff;
                      background:rgba(77,159,255,.2);padding:1px 6px;border-radius:3px;">LIVE</span>
         <span style="font-size:12px;font-weight:700;color:#4d9fff;">${livePx}</span>
-        <span style="font-size:12px;font-weight:700;color:${pipsClr};">${pipsSign}${pipsDiff.toFixed(1)}${_lbl}</span>
-        <span style="margin-left:auto;font-size:9px;">
-          <span style="color:#ff4444;">SL ${distSL}${_lbl} away</span>
-          <span style="color:rgba(255,255,255,.3);margin:0 5px;">·</span>
-          <span style="color:#00e676;">TP ${distTP}${_lbl} away</span>
+        <span style="font-size:12px;font-weight:700;color:${pipsClr};">${pipsSign}${pipsDiff.toFixed(1)} ${_lbl}</span>
+        ${_deltaStr ? `<span style="font-size:9px;color:${_deltaClr};">${_deltaStr}</span>` : ""}
+        <span style="margin-left:auto;font-size:9px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+          <span style="color:#ff4444;">SL ${distSL} ${_lbl} away</span>
+          <span style="color:rgba(255,255,255,.3);">·</span>
+          <span style="color:#00e676;">TP ${distTP} ${_lbl} away</span>
+          ${_ageStr ? `<span style="color:rgba(255,255,255,.22);">· ${_ageStr}</span>` : ""}
         </span>
       </div>
       <div style="position:relative;height:4px;background:rgba(255,255,255,.07);border-radius:2px;margin:0 6px;">
@@ -3960,9 +3997,80 @@ function switchPerfTab(tab) {
   document.getElementById("tab-agent").classList.toggle("active",   tab === "agent");
   document.getElementById("tab-manual").classList.toggle("active",  tab === "manual");
   document.getElementById("tab-journal").classList.toggle("active", tab === "journal");
-  if (tab === "manual")  fetchManualTrades();
+  if (tab === "manual") { fetchManualTrades(); _startLiveTradePoller(); }
+  else                  { _stopLiveTradePoller(); }
   if (tab === "journal") fetchJournal();
 }
+
+// ── LIVE PRICE POLLER FOR OPEN MANUAL TRADES ─────────────────────────────────
+// Polls /api/live-price every 4s for each unique open trade pair.
+// Only runs when the Manual Trades tab is visible.
+// Stops on tab switch, page hide, or when no open trades remain.
+
+let _liveTradePollerTimer = null;
+const _LIVE_POLL_MS = 4000;
+
+function _startLiveTradePoller() {
+  _stopLiveTradePoller();   // clear any existing timer first
+  _pollLivePricesNow();     // immediate first hit
+  _liveTradePollerTimer = setInterval(_pollLivePricesNow, _LIVE_POLL_MS);
+}
+
+function _stopLiveTradePoller() {
+  if (_liveTradePollerTimer !== null) {
+    clearInterval(_liveTradePollerTimer);
+    _liveTradePollerTimer = null;
+  }
+}
+
+async function _pollLivePricesNow() {
+  const trades = window._lastManualTrades || [];
+  // Unique pairs for open trades only (outcome absent or empty)
+  const openPairs = [...new Set(
+    trades
+      .filter(t => !t.outcome || t.outcome === "")
+      .map(t => t.pair)
+      .filter(Boolean)
+  )];
+  if (!openPairs.length) { _stopLiveTradePoller(); return; }
+
+  for (const pair of openPairs) {
+    try {
+      const resp = await fetch(`/api/live-price?pair=${encodeURIComponent(pair)}`);
+      if (!resp.ok) continue;
+      const d = await resp.json();
+      if (d.error || !d.mid) continue;
+
+      // Preserve previous price for delta, then update
+      const prevPx = (window._livePrices || {})[pair];
+      window._livePrices = window._livePrices || {};
+      window._livePricesMeta = window._livePricesMeta || {};
+      window._livePrices[pair] = d.mid;
+      window._livePricesMeta[pair] = {
+        updatedAt: Date.now(),
+        prev:      prevPx || d.mid,
+        source:    d.source || "oanda_pricing",
+        bid:       d.bid,
+        ask:       d.ask,
+      };
+    } catch(_e) { /* network error — skip silently */ }
+  }
+  // Re-render manual trades with fresh prices
+  if (window._lastManualTrades && window._lastManualTrades.length) {
+    renderManualTrades(window._lastManualTrades);
+  }
+}
+
+// Stop poller when browser tab is hidden (e.g. user switches browser tabs)
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { _stopLiveTradePoller(); }
+  else {
+    // Restart only if manual trades tab is currently active
+    if (typeof _currentPerfTab !== "undefined" && _currentPerfTab === "manual") {
+      _startLiveTradePoller();
+    }
+  }
+});
 
 // ── JOURNAL ──────────────────────────────────────────────────────────────────
 

@@ -1472,6 +1472,85 @@ def api_debug_status():
     })
 
 
+@app.route("/api/live-price")
+def api_live_price():
+    """
+    Real-time OANDA bid/ask/mid for a single pair.
+    Used by the manual trades tracker to get true live price every 3-5s.
+
+    Query param: ?pair=XAU_USD  (also accepts XAU/USD, USD_JPY, USD/JPY)
+
+    Returns:
+      {pair, bid, ask, mid, timestamp_utc, source, cache_age_ms}
+
+    Server-side cache: 2s TTL per pair — prevents hammering OANDA.
+    Returns 503 JSON on OANDA failure (never crashes dashboard).
+    """
+    import time as _time
+    from datetime import datetime, timezone
+
+    pair_raw = request.args.get("pair", "").strip()
+    if not pair_raw:
+        return jsonify({"error": "pair parameter required", "code": 400}), 400
+
+    # Normalize: XAU/USD or XAU_USD → XAU_USD
+    pair = pair_raw.upper().replace("/", "_")
+
+    # ── Cache check ───────────────────────────────────────────────────────────
+    _now = _time.time()
+    cached = _live_price_cache.get(pair)
+    if cached and (_now - cached["cached_at"]) < _LIVE_PRICE_CACHE_TTL:
+        age_ms = int((_now - cached["cached_at"]) * 1000)
+        return jsonify({
+            "pair":          pair,
+            "bid":           cached["bid"],
+            "ask":           cached["ask"],
+            "mid":           cached["mid"],
+            "timestamp_utc": cached["timestamp_utc"],
+            "source":        "oanda_pricing_cached",
+            "cache_age_ms":  age_ms,
+        })
+
+    # ── Live OANDA fetch ──────────────────────────────────────────────────────
+    try:
+        from core.fetcher import get_live_bid_ask
+        bid, ask = get_live_bid_ask(pair)
+        if bid is None or ask is None:
+            raise ValueError("OANDA returned None prices")
+        mid = round((bid + ask) / 2, 5)
+        ts  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        _live_price_cache[pair] = {
+            "bid":          bid,
+            "ask":          ask,
+            "mid":          mid,
+            "timestamp_utc": ts,
+            "cached_at":    _time.time(),
+        }
+        return jsonify({
+            "pair":          pair,
+            "bid":           bid,
+            "ask":           ask,
+            "mid":           mid,
+            "timestamp_utc": ts,
+            "source":        "oanda_pricing",
+            "cache_age_ms":  0,
+        })
+
+    except Exception as e:
+        logger.warning(f"/api/live-price error for {pair}: {e}")
+        return jsonify({
+            "error":  f"OANDA unavailable: {e}",
+            "pair":   pair,
+            "code":   503,
+        }), 503
+
+
+# Per-pair live price cache: pair -> {bid, ask, mid, timestamp_utc, cached_at}
+_live_price_cache: dict = {}
+_LIVE_PRICE_CACHE_TTL   = 2.0  # seconds
+
+
 @app.route("/api/version")
 def api_version():
     """
