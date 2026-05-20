@@ -48,6 +48,112 @@
     --c-border:  #ff9100;
   }
 
+  /* ── LIGHT THEME ──────────────────────────── */
+  html[data-theme="light"] {
+    --navy-darkest: #f0f4f9;
+    --navy-dark:    #e4ecf5;
+    --navy-mid:     #d5e0ef;
+    --navy-light:   #c2d1e8;
+    --navy-border:  #9fb8d8;
+    --navy-glow:    #b0c8e8;
+    --blue-bright:  #1a73e8;
+    --blue-mid:     #1557c0;
+    --blue-dim:     #0d47a1;
+    --green:        #1b8a3e;
+    --green-dim:    #137030;
+    --green-glow:   rgba(27,138,62,.12);
+    --red:          #c62828;
+    --red-dim:      #a01010;
+    --red-glow:     rgba(198,40,40,.12);
+    --yellow:       #b07800;
+    --yellow-dim:   #8a5c00;
+    --orange:       #bf5000;
+    --purple:       #8b00be;
+    --text-primary:   #0d1a2e;
+    --text-secondary: #1a4080;
+    --text-muted:     #4a6a9a;
+    --text-dim:       #8096b8;
+    --aplus-bg:       rgba(27,138,62,.1);
+    --a-bg:           rgba(26,115,232,.08);
+    --b-bg:           rgba(176,120,0,.07);
+    --c-bg:           rgba(191,80,0,.06);
+  }
+  html[data-theme="light"] body { background: var(--navy-darkest); color: var(--text-primary); }
+  html[data-theme="light"] .header {
+    background: linear-gradient(180deg, #dce8f5 0%, #e8f0fb 100%);
+    box-shadow: 0 2px 12px rgba(0,0,0,.12);
+  }
+
+  /* ── HIGH-CONTRAST THEME ─────────────────── */
+  html[data-theme="high-contrast"] {
+    --navy-darkest: #000000;
+    --navy-dark:    #0a0a0a;
+    --navy-mid:     #111111;
+    --navy-light:   #1c1c1c;
+    --navy-border:  #606060;
+    --navy-glow:    #303030;
+    --blue-bright:  #00e5ff;
+    --blue-mid:     #00b0d0;
+    --blue-dim:     #007a98;
+    --green:        #00ff66;
+    --green-dim:    #00cc50;
+    --green-glow:   rgba(0,255,102,.18);
+    --red:          #ff3333;
+    --red-dim:      #cc2020;
+    --red-glow:     rgba(255,51,51,.18);
+    --yellow:       #ffee00;
+    --yellow-dim:   #ddcc00;
+    --orange:       #ff8800;
+    --purple:       #ee44ff;
+    --text-primary:   #ffffff;
+    --text-secondary: #ccddff;
+    --text-muted:     #aaaaaa;
+    --text-dim:       #666666;
+    --aplus-bg:       rgba(0,255,102,.12);
+    --a-bg:           rgba(0,229,255,.10);
+    --b-bg:           rgba(255,238,0,.09);
+    --c-bg:           rgba(255,136,0,.08);
+    --aplus-border:   #00ff66;
+    --a-border:       #00e5ff;
+    --b-border:       #ffee00;
+    --c-border:       #ff8800;
+  }
+
+  /* ── CRIMSON THEME ───────────────────────── */
+  html[data-theme="crimson"] {
+    --navy-darkest: #0d0508;
+    --navy-dark:    #180a0e;
+    --navy-mid:     #260e15;
+    --navy-light:   #38141e;
+    --navy-border:  #5c2030;
+    --navy-glow:    #7a2840;
+    --blue-bright:  #ff4d6d;
+    --blue-mid:     #c9184a;
+    --blue-dim:     #900030;
+    --green:        #ff8fab;
+    --green-dim:    #ff6b8a;
+    --green-glow:   rgba(255,77,109,.12);
+    --red:          #ff9a3c;
+    --red-dim:      #e07820;
+    --red-glow:     rgba(255,154,60,.12);
+    --yellow:       #ffccd5;
+    --yellow-dim:   #ffb3c1;
+    --orange:       #ff8fa3;
+    --purple:       #ffb3c6;
+    --text-primary:   #ffe0e8;
+    --text-secondary: #ff8fab;
+    --text-muted:     #9b4060;
+    --text-dim:       #5c2030;
+    --aplus-bg:       rgba(255,77,109,.1);
+    --aplus-border:   #ff4d6d;
+    --a-bg:           rgba(201,24,74,.1);
+    --a-border:       #c9184a;
+    --b-bg:           rgba(255,143,171,.08);
+    --b-border:       #ff8fab;
+    --c-bg:           rgba(255,77,109,.05);
+    --c-border:       #ff6b8a;
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
@@ -102,6 +208,39 @@
     align-items: center;
     gap: 24px;
   }
+
+  /* ── THEME TOGGLE ─────────────────────────── */
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--navy-border);
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .theme-btn {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    letter-spacing: .5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-muted);
+    transition: background .15s, color .15s;
+    white-space: nowrap;
+  }
+  .theme-btn:hover { color: var(--text-primary); }
+  .theme-btn.active {
+    background: var(--blue-mid);
+    color: #fff;
+  }
+  html[data-theme="light"]         .theme-btn.active { background: var(--blue-mid); color: #fff; }
+  html[data-theme="high-contrast"] .theme-btn.active { background: var(--blue-bright); color: #000; }
+  html[data-theme="crimson"]       .theme-btn.active { background: var(--blue-mid); color: #fff; }
 
   .live-badge {
     display: flex; align-items: center; gap: 7px;
@@ -1380,6 +1519,12 @@
     <div class="clock" id="clock">00:00:00 UTC</div>
     <div class="session-badge" id="session-badge">—</div>
     <div style="font-size:11px;color:var(--text-muted)">↻ {{ refresh }}s</div>
+    <div class="theme-toggle" title="Switch display theme">
+      <button class="theme-btn" data-theme="dark"          onclick="setTheme('dark')">DARK</button>
+      <button class="theme-btn" data-theme="light"         onclick="setTheme('light')">LIGHT</button>
+      <button class="theme-btn" data-theme="high-contrast" onclick="setTheme('high-contrast')">HI-CON</button>
+      <button class="theme-btn" data-theme="crimson"       onclick="setTheme('crimson')">CRIMSON</button>
+    </div>
   </div>
 </div>
 
@@ -2443,6 +2588,28 @@ function utcToNYDate(utcStr) {
   } catch(e) { return "—"; }
 }
 
+function utcToNYFull(utcStr) {
+  // Returns "Mon May 12 · 3:45 PM ET" — precise timestamp with weekday + tz label
+  if (!utcStr || utcStr === "—") return "—";
+  try {
+    const dt = new Date(utcStr.trim().replace(" ", "T") + "Z");
+    if (isNaN(dt)) return "—";
+    const weekday = dt.toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short" });
+    const date    = dt.toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
+    const time    = dt.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true });
+    return `${weekday} ${date} · ${time} ET`;
+  } catch(e) { return "—"; }
+}
+
+function fmtDuration(minutes) {
+  // "2h 14m" or "45m" or "—"
+  if (minutes == null || minutes === "" || isNaN(minutes)) return "—";
+  const m = parseInt(minutes);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60), rem = m % 60;
+  return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
+}
+
 function isToday_NY(utcStr) {
   if (!utcStr) return false;
   try {
@@ -2591,7 +2758,7 @@ function renderPerformance(perf, recentSignals) {
     const outCls = s.outcome === "WIN"  ? "perf-log-outcome-win"
                  : s.outcome === "LOSS" ? "perf-log-outcome-loss" : "perf-log-outcome-none";
     const outTxt = s.outcome || "—";
-    const time   = utcToNY(s.timestamp_utc);
+    const time   = utcToNYFull(s.timestamp_utc);
 
     const isTaken = s.taken === true || s.taken === "True" || s.taken === "true" || s.taken === 1;
     const isOpen  = isTaken && (!s.outcome || s.outcome === "" || s.outcome === "NEUTRAL");
@@ -2688,8 +2855,8 @@ function renderPerformance(perf, recentSignals) {
 
     return `
       <div style="margin-bottom:4px;">
-        <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 60px 60px 1fr 80px auto auto auto auto;">
-          <span class="perf-log-time">${time}</span>
+        <div class="perf-log-row" style="grid-template-columns:160px 80px 60px 60px 60px 1fr 80px auto auto auto auto;">
+          <span class="perf-log-time" title="${s.timestamp_utc||''}">${time}</span>
           <span class="perf-log-pair">${(s.pair||"").replace("_","/")}${agentModeBadge}</span>
           <span class="${dirCls}">${dirSym} ${(s.direction||"").slice(0,4).toUpperCase()}</span>
           <span class="perf-log-grade">${s.grade||"—"}</span>
@@ -3984,7 +4151,7 @@ function renderManualTrades(trades) {
     const outCls  = t.outcome === "WIN"  ? "perf-log-outcome-win"
                   : t.outcome === "LOSS" ? "perf-log-outcome-loss" : "perf-log-outcome-none";
     const outTxt  = t.outcome || "watching...";
-    const time    = utcToNY(t.timestamp_utc);
+    const time    = utcToNYFull(t.timestamp_utc);
     const postMortem = t.post_mortem
       ? `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;padding:4px 8px;
                      background:rgba(255,255,255,.02);border-radius:3px;font-family:'JetBrains Mono',monospace;">
@@ -4056,30 +4223,37 @@ function renderManualTrades(trades) {
       : "";
 
     // ── Forensic close info (compact, closed trades only) ──────────────────
-    const exitTs  = t.exit_timestamp ? utcToNY(t.exit_timestamp) : null;
+    const exitTs  = t.exit_timestamp ? utcToNYFull(t.exit_timestamp) : null;
     const exitReason = t.exit_reason || null;
-    const exitReasonColor = exitReason === "TP_HIT"      ? "var(--green)"
-                          : exitReason === "SL_HIT"      ? "var(--red)"
+    const exitReasonColor = exitReason === "TP_HIT"       ? "var(--green)"
+                          : exitReason === "SL_HIT"       ? "var(--red)"
                           : exitReason === "MANUAL_CLOSE" ? "var(--yellow)"
                           : "var(--text-muted)";
     const exitReasonLabel = exitReason ? exitReason.replace(/_/g," ") : null;
-    const forensicHtml = !isOpen && (exitTs || exitReasonLabel) ? `
+    const durStr = fmtDuration(t.trade_duration_minutes);
+    const forensicHtml = !isOpen ? `
       <div style="font-size:9px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;
-                  margin-top:2px;padding:2px 4px;line-height:1.6;">
-        <span>closed:</span> ${exitTs || "—"}
-        ${exitReasonLabel ? `<span style="color:${exitReasonColor};margin-left:4px;">${exitReasonLabel}</span>` : ""}
-        ${t.exit_price != null ? `<span style="margin-left:4px;">@ <b>${t.exit_price}</b></span>` : ""}
-        ${t.trade_duration_minutes != null ? `<span style="color:var(--text-muted);margin-left:4px;">${t.trade_duration_minutes}min</span>` : ""}
-        ${t.max_favorable_excursion != null ? `<span style="color:var(--green);margin-left:4px;">MFE +${parseFloat(t.max_favorable_excursion).toFixed(1)}p</span>` : ""}
-        ${t.max_adverse_excursion != null ? `<span style="color:var(--red);margin-left:4px;">MAE -${parseFloat(t.max_adverse_excursion).toFixed(1)}p</span>` : ""}
+                  margin-top:2px;padding:3px 6px;background:rgba(255,255,255,.02);border-radius:3px;
+                  border-left:2px solid var(--navy-border);line-height:1.8;">
+        <span style="color:var(--text-dim);">ENTRY</span>
+        <span style="margin-left:4px;" title="${t.timestamp_utc||''}">${utcToNYFull(t.timestamp_utc)||"—"}</span>
+        ${exitTs ? `
+        <span style="margin-left:10px;color:var(--text-dim);">EXIT</span>
+        <span style="margin-left:4px;" title="${t.exit_timestamp||''}">${exitTs}</span>
+        ${exitReasonLabel ? `<span style="color:${exitReasonColor};margin-left:4px;font-weight:600;">${exitReasonLabel}</span>` : ""}
+        ${t.exit_price != null ? `<span style="margin-left:4px;">@ <b style="color:var(--text-primary)">${t.exit_price}</b></span>` : ""}
+        ` : `<span style="margin-left:10px;color:var(--text-dim);">EXIT</span> <span style="margin-left:4px;">—</span>`}
+        ${durStr !== "—" ? `<span style="margin-left:10px;color:var(--blue-bright);">⏱ ${durStr}</span>` : ""}
+        ${t.max_favorable_excursion != null ? `<span style="color:var(--green);margin-left:8px;">MFE +${parseFloat(t.max_favorable_excursion).toFixed(1)}p</span>` : ""}
+        ${t.max_adverse_excursion  != null ? `<span style="color:var(--red);margin-left:6px;">MAE -${parseFloat(t.max_adverse_excursion).toFixed(1)}p</span>` : ""}
       </div>` : "";
 
     const tvPair = (t.pair||"").replace("_","");  // XAU_USD → XAUUSD
     return `
       <div style="margin-bottom:6px;">
-        <div class="perf-log-row" style="grid-template-columns:110px 80px 60px 1fr auto auto auto;cursor:pointer;"
+        <div class="perf-log-row" style="grid-template-columns:160px 80px 60px 1fr auto auto auto;cursor:pointer;"
              onclick="toggleChart('${t.signal_id}','${tvPair}','${t.entry_price||0}','${t.sl_price||0}','${t.tp1_price||0}','${t.direction||"bullish"}')">
-          <span class="perf-log-time">${time}</span>
+          <span class="perf-log-time" title="${t.timestamp_utc||''}">${time}</span>
           <span class="perf-log-pair">${(t.pair||"").replace("_","/")}${manualModeBadge}</span>
           <span class="${dirCls}">${dirSym} ${(t.direction||"").slice(0,4).toUpperCase()}</span>
           <span style="color:var(--text-muted);font-size:10px;">
@@ -4728,6 +4902,27 @@ function renderAuditModal(d) {
 
   return seqHtml + sweepHtml + chochHtml + h1Html + pdHtml + ctxHtml + scoreHtml + verdictHtml;
 }
+
+// ── THEME TOGGLE ──────────────────────────────────────────────────────────────
+const _THEMES = ["dark", "light", "high-contrast", "crimson"];
+
+function setTheme(theme) {
+  if (!_THEMES.includes(theme)) theme = "dark";
+  document.documentElement.setAttribute("data-theme", theme);
+  try { localStorage.setItem("fx_theme", theme); } catch(e) {}
+  document.querySelectorAll(".theme-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.theme === theme);
+  });
+}
+
+function _initTheme() {
+  let saved = "dark";
+  try { saved = localStorage.getItem("fx_theme") || "dark"; } catch(e) {}
+  if (!_THEMES.includes(saved)) saved = "dark";
+  setTheme(saved);
+}
+
+_initTheme();
 
 </script>
 

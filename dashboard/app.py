@@ -1351,6 +1351,23 @@ def api_signals_extra():
     })
 
 
+@app.route("/api/version")
+def api_version():
+    """
+    Deploy identity — returns git SHA, branch, and process start time.
+
+    Use this to prove which commit is actually running on Railway.
+    git_sha resolution order:
+      1. GIT_SHA env var
+      2. RAILWAY_GIT_COMMIT_SHA env var (Railway injects on git-linked deploys)
+      3. RAILWAY_GIT_COMMIT env var (older Railway name)
+      4. Local git rev-parse HEAD (dev only — not available in Railway container)
+      5. "unknown"
+    """
+    from version import get_version
+    return jsonify(get_version())
+
+
 def start_dashboard():
     host = DASHBOARD_CONFIG.get("host", "127.0.0.1")
     port = DASHBOARD_CONFIG.get("port", 5000)

@@ -28,6 +28,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
+# Log deploy identity at startup — visible in Railway logs for commit verification
+from version import log_startup_version
+log_startup_version()
+
 # Alert cooldown — don't alert same pair within N minutes
 ALERT_COOLDOWN_MINUTES   = 15
 BREAKOUT_COOLDOWN_MINUTES = 60  # Breakout alerts max once per hour per pair
