@@ -535,6 +535,21 @@ def api_mark_taken():
         if notes:
             from db.database import save_note
             save_note(signal_id, notes, "agent")
+
+        # Start lifecycle monitor for this taken signal
+        try:
+            from db.database import get_agent_signal
+            from ml.agent_trade_monitor import start_agent_monitor
+            sig2  = get_agent_signal(signal_id)
+            if sig2:
+                _sl   = float(sig2.get("actual_sl")  or sig2.get("user_sl")  or sig2.get("sl_price")  or 0)
+                _tp1  = float(sig2.get("actual_tp1") or sig2.get("user_tp1") or sig2.get("tp1_price") or 0)
+                _entr = float(sig2.get("entry_price") or 0)
+                if _sl > 0 and _tp1 > 0 and _entr > 0:
+                    start_agent_monitor(signal_id, sig2["pair"], sig2["direction"], _entr, _sl, _tp1)
+        except Exception as _me:
+            logger.warning(f"Could not start agent monitor for {signal_id}: {_me}")
+
         return jsonify({"ok": True, "signal_id": signal_id})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -544,22 +559,98 @@ def api_mark_taken():
 def api_mark_outcome():
     """
     Manually mark a signal outcome from the dashboard.
-    Body: { "signal_id": "XAU_USD_20260409_143022", "outcome": "WIN" | "LOSS", "notes": "" }
-    SQLite is source of truth — written first. CSV update is best-effort (may not exist on Railway).
+    Body: {
+        "signal_id": "...",
+        "outcome":   "WIN" | "LOSS" | "NEUTRAL",
+        "notes":     "",
+        "override_reason": ""  ← REQUIRED if signal is taken+open (monitor active)
+    }
+
+    Gate: If the signal is taken+open (monitor running), a plain W/L click is rejected
+    with HTTP 409 {"requires_override": true}. The caller must provide override_reason
+    to confirm they understand the monitor will be stopped and the close is manual.
+
+    SQLite is source of truth — written first. CSV update is best-effort.
     """
     try:
-        from db.database import update_agent_signal_outcome
-        body      = request.get_json(silent=True) or {}
-        signal_id = body.get("signal_id", "").strip()
-        outcome   = body.get("outcome", "").upper().strip()
-        notes     = body.get("notes", "")
+        from db.database import get_agent_signal, update_agent_signal_outcome, update_agent_signal_forensic
+        body            = request.get_json(silent=True) or {}
+        signal_id       = body.get("signal_id", "").strip()
+        outcome         = body.get("outcome", "").upper().strip()
+        notes           = body.get("notes", "")
+        override_reason = body.get("override_reason", "").strip()
 
         if not signal_id:
             return jsonify({"ok": False, "error": "signal_id required"}), 400
         if outcome not in ("WIN", "LOSS", "NEUTRAL"):
             return jsonify({"ok": False, "error": "outcome must be WIN, LOSS, or NEUTRAL"}), 400
 
-        # SQLite first — this is the source of truth on Railway
+        # ── W/L integrity gate: taken+open signals require override_reason ─────
+        sig = get_agent_signal(signal_id)
+        if sig:
+            _is_taken = sig.get("taken") == 1 or sig.get("taken") is True
+            _is_open  = not sig.get("outcome") or sig.get("outcome") == ""
+            _has_exit = bool(sig.get("exit_timestamp"))
+            if _is_taken and _is_open and not _has_exit:
+                if not override_reason:
+                    return jsonify({
+                        "ok": False,
+                        "error": (
+                            "Signal is taken and open — the monitor will auto-close on TP/SL. "
+                            "Provide override_reason to mark manually."
+                        ),
+                        "requires_override": True,
+                    }), 409
+
+                # Valid manual override — stop monitor and write with forensic fields
+                try:
+                    from ml.agent_trade_monitor import stop_agent_monitor
+                    stop_agent_monitor(signal_id)
+                except Exception as _se:
+                    logger.warning(f"Could not stop agent monitor for {signal_id}: {_se}")
+
+                now_utc          = datetime.now(timezone.utc)
+                exit_ts          = now_utc.strftime("%Y-%m-%d %H:%M:%S")
+                duration_minutes = None
+                entry_ts_str     = sig.get("timestamp_utc")
+                if entry_ts_str:
+                    try:
+                        entry_dt = datetime.strptime(str(entry_ts_str), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        duration_minutes = max(0, int((now_utc - entry_dt).total_seconds() / 60))
+                    except Exception:
+                        pass
+
+                override_note = f"[MANUAL_OVERRIDE] {outcome} | reason: {override_reason}"
+                if notes:
+                    override_note += f" | {notes}"
+
+                update_agent_signal_forensic(
+                    signal_id              = signal_id,
+                    outcome                = outcome,
+                    outcome_pips           = 0,
+                    notes                  = override_note,
+                    exit_timestamp         = exit_ts,
+                    exit_reason            = "MANUAL_OVERRIDE",
+                    trade_duration_minutes = duration_minutes,
+                )
+                try:
+                    from alerts.logger import update_outcome
+                    update_outcome(signal_id, outcome, pips=0, notes=override_note)
+                except Exception:
+                    pass
+
+                logger.info(
+                    f"Manual override: {signal_id} → {outcome} "
+                    f"| reason: {override_reason} | duration={duration_minutes}min"
+                )
+                return jsonify({
+                    "ok":          True,
+                    "signal_id":   signal_id,
+                    "outcome":     outcome,
+                    "exit_reason": "MANUAL_OVERRIDE",
+                })
+
+        # ── Normal path: not taken+open — plain outcome write ─────────────────
         update_agent_signal_outcome(signal_id, outcome, pips=0, notes=notes)
 
         # CSV best-effort (may not exist on Railway — that's fine)
@@ -809,7 +900,16 @@ def api_close_agent_trade():
         if not entry_price:
             return jsonify({"ok": False, "error": "entry_price missing on signal"}), 400
 
-        result = close_agent_trade(signal_id, exit_price, entry_price, direction, pip)
+        result = close_agent_trade(signal_id, exit_price, entry_price, direction, pip,
+                                   exit_reason="MANUAL_CLOSE")
+
+        # Stop the lifecycle monitor — trade is now closed
+        try:
+            from ml.agent_trade_monitor import stop_agent_monitor
+            stop_agent_monitor(signal_id)
+        except Exception as _me:
+            logger.warning(f"Could not stop agent monitor after manual close {signal_id}: {_me}")
+
         return jsonify({"ok": True, "signal_id": signal_id, **result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -980,6 +1080,25 @@ def api_update_agent_levels():
             )
         except Exception as le_err:
             logger.warning(f"level_edits insert failed for {signal_id}: {le_err}")
+
+        # Restart lifecycle monitor with updated levels (if signal is still open+taken)
+        try:
+            from ml.agent_trade_monitor import stop_agent_monitor, start_agent_monitor
+            stop_agent_monitor(signal_id)
+            _updated = get_agent_signal(signal_id)
+            if _updated:
+                _is_open  = not _updated.get("outcome") or _updated.get("outcome") == ""
+                _is_taken = _updated.get("taken") == 1 or _updated.get("taken") is True
+                _no_exit  = not _updated.get("exit_timestamp")
+                if _is_open and _is_taken and _no_exit:
+                    _new_sl   = float(_updated.get("actual_sl")  or _updated.get("sl_price")  or 0)
+                    _new_tp1  = float(_updated.get("actual_tp1") or _updated.get("tp1_price") or 0)
+                    _entry_px = float(_updated.get("entry_price") or 0)
+                    if _new_sl > 0 and _new_tp1 > 0 and _entry_px > 0:
+                        start_agent_monitor(signal_id, current["pair"], current["direction"],
+                                            _entry_px, _new_sl, _new_tp1)
+        except Exception as _me:
+            logger.warning(f"Could not restart agent monitor after level update {signal_id}: {_me}")
 
         return jsonify({
             "ok":           True,
@@ -1189,6 +1308,17 @@ def api_take_trade():
             from db.database import save_note
             save_note(signal_id, body["notes"], "agent")
 
+        # Start lifecycle monitor — use fill_price as entry if available
+        try:
+            from ml.agent_trade_monitor import start_agent_monitor
+            _entry_px = fill_price or float(signal.get("entry_price") or 0)
+            _sl_px    = float(sl_price)
+            _tp_px    = float(tp1_price)
+            if _entry_px > 0 and _sl_px > 0 and _tp_px > 0:
+                start_agent_monitor(signal_id, pair, direction, _entry_px, _sl_px, _tp_px)
+        except Exception as _me:
+            logger.warning(f"Could not start agent monitor after take_trade {signal_id}: {_me}")
+
         logger.info(f"OANDA order placed: {pair} {units_int} units | fill={fill_price} | trade={trade_id}")
         return jsonify({
             "ok":         True,
@@ -1349,6 +1479,17 @@ def api_signals_extra():
         "count":       len(data),
         "updated_at":  datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
     })
+
+
+@app.route("/api/agent_monitors")
+def api_agent_monitors():
+    """Return list of signal_ids currently being monitored by the agent trade monitor."""
+    try:
+        from ml.agent_trade_monitor import get_active_agent_monitors
+        active = get_active_agent_monitors()
+        return jsonify({"ok": True, "active": active, "count": len(active)})
+    except Exception as e:
+        return jsonify({"ok": False, "active": [], "error": str(e)})
 
 
 @app.route("/api/debug/status")
@@ -1586,6 +1727,13 @@ def start_dashboard():
         resume_monitors_on_startup()
     except Exception as e:
         logger.warning(f"Could not resume manual trade monitors: {e}")
+
+    # Resume monitors for any taken+open agent signals from last session
+    try:
+        from ml.agent_trade_monitor import resume_agent_monitors_on_startup
+        resume_agent_monitors_on_startup()
+    except Exception as e:
+        logger.warning(f"Could not resume agent trade monitors: {e}")
 
     # Start outcome labeler in background — auto-labels agent signals after 15 min
     labeler_thread = threading.Thread(target=_run_outcome_labeler, daemon=True, name="OutcomeLabeler")

@@ -2835,6 +2835,54 @@ function renderPerformance(perf, recentSignals) {
       ? _liveTracker(s.pair, s.direction, s.entry_price, _agentSL, _agentTP)
       : "";
 
+    // ── Forensic block — shown for all taken agent signals ────────────────────
+    const agentForensicHtml = isTaken ? (() => {
+      const _exitTs  = s.exit_timestamp ? utcToNYFull(s.exit_timestamp) : null;
+      const _exitRsn = s.exit_reason || null;
+      const _exitRsnColor = _exitRsn === "TP_HIT"          ? "var(--green)"
+                          : _exitRsn === "SL_HIT"          ? "var(--red)"
+                          : _exitRsn === "MANUAL_CLOSE"    ? "var(--yellow)"
+                          : _exitRsn === "MANUAL_OVERRIDE" ? "#ff9500"
+                          : "var(--text-muted)";
+      const _exitRsnLabel = _exitRsn ? _exitRsn.replace(/_/g," ") : null;
+      const _durStr = fmtDuration(s.trade_duration_minutes);
+
+      // Open trades: live duration with ⬤ indicator
+      let _openDurStr = "—";
+      if (isOpen && s.timestamp_utc) {
+        try {
+          const _entMs = new Date(s.timestamp_utc.trim().replace(" ","T") + "Z").getTime();
+          if (!isNaN(_entMs)) {
+            _openDurStr = fmtDuration(Math.floor((Date.now() - _entMs) / 60000)) + " ⬤";
+          }
+        } catch(_e) {}
+      }
+
+      const _forensicBorder = isOpen ? "rgba(255,215,64,.3)" : "var(--navy-border)";
+      return `
+        <div style="font-size:9px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;
+                    margin-top:2px;padding:3px 6px;background:rgba(255,255,255,.02);border-radius:3px;
+                    border-left:2px solid ${_forensicBorder};line-height:1.8;">
+          <span style="color:var(--text-dim);">ENTRY</span>
+          <span style="margin-left:4px;" title="${s.timestamp_utc||''}">${utcToNYFull(s.timestamp_utc)||"—"}</span>
+          ${isOpen ? `
+          <span style="margin-left:10px;color:var(--text-dim);">EXIT</span>
+          <span style="margin-left:4px;color:var(--text-dim);">—</span>
+          <span style="margin-left:10px;color:var(--yellow);">⏱ ${_openDurStr}</span>
+          ` : `
+          ${_exitTs ? `
+          <span style="margin-left:10px;color:var(--text-dim);">EXIT</span>
+          <span style="margin-left:4px;" title="${s.exit_timestamp||''}">${_exitTs}</span>
+          ${_exitRsnLabel ? `<span style="color:${_exitRsnColor};margin-left:4px;font-weight:600;">${_exitRsnLabel}</span>` : ""}
+          ${s.exit_price != null ? `<span style="margin-left:4px;">@ <b style="color:var(--text-primary)">${s.exit_price}</b></span>` : ""}
+          ` : `<span style="margin-left:10px;color:var(--text-dim);">EXIT</span> <span style="margin-left:4px;">—</span>`}
+          ${_durStr !== "—" ? `<span style="margin-left:10px;color:var(--blue-bright);">⏱ ${_durStr}</span>` : ""}
+          ${s.max_favorable_excursion != null ? `<span style="color:var(--green);margin-left:8px;">MFE +${parseFloat(s.max_favorable_excursion).toFixed(1)}p</span>` : ""}
+          ${s.max_adverse_excursion   != null ? `<span style="color:var(--red);margin-left:6px;">MAE -${parseFloat(s.max_adverse_excursion).toFixed(1)}p</span>` : ""}
+          `}
+        </div>`;
+    })() : "";
+
     // Inline SL/TP for taken agent signals
     const agentInlineHtml = isTaken ? `
       <div style="display:flex;align-items:center;gap:6px;margin-top:4px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:4px;border:1px solid rgba(255,255,255,.05);">
@@ -2889,6 +2937,7 @@ function renderPerformance(perf, recentSignals) {
         <div id="debate-result-${s.signal_id}" style="display:none;"></div>
         ${agentInlineHtml}
         ${agentTrackerHtml}
+        ${agentForensicHtml}
       </div>`;
   }).join("");
 }
@@ -3023,7 +3072,59 @@ function showToast(msg, isError = false) {
 
 async function markOutcome(signalId, outcome, btn) {
   if (!signalId) return;
-  // Optimistic UI — dim the button immediately
+
+  // ── W/L integrity gate: taken+open signals require override reason ─────────
+  const _cachedSigs = (window._lastPerfData && window._lastPerfData.signals) || [];
+  const _sig = _cachedSigs.find(s => s.signal_id === signalId);
+  if (_sig) {
+    const _isTaken = _sig.taken === 1 || _sig.taken === true || _sig.taken === "True" || _sig.taken === "true";
+    const _isOpen  = !_sig.outcome || _sig.outcome === "";
+    const _hasExit = !!_sig.exit_timestamp;
+    if (_isTaken && _isOpen && !_hasExit) {
+      const _reason = prompt(
+        "⚠️  This signal is TAKEN and OPEN.\n\n" +
+        "The monitor will auto-close it when TP/SL is hit.\n\n" +
+        "To override manually, enter a reason (required — cannot be blank):"
+      );
+      if (!_reason || !_reason.trim()) {
+        showToast("Override cancelled — monitor will auto-close on TP/SL hit", false);
+        return;
+      }
+      // Proceed with override flow (include override_reason in body)
+      btn.style.opacity = "0.4";
+      btn.disabled = true;
+      try {
+        const resp = await fetch("/api/mark_outcome", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ signal_id: signalId, outcome, override_reason: _reason.trim() }),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+          const container = btn.closest("span") || btn.parentElement;
+          const cls = outcome === "WIN" ? "perf-log-outcome-win" : "perf-log-outcome-loss";
+          container.outerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;">
+            <span class="outcome-marked ${cls}">${outcome}</span>
+            <span style="font-size:8px;color:#ff9500;font-family:'JetBrains Mono',monospace;margin-left:2px;">[OVERRIDE]</span>
+            <button class="outcome-btn" style="padding:1px 5px;font-size:9px;color:var(--text-muted);border-color:rgba(255,255,255,.1);" onclick="deleteSignal('${signalId}','agent',this)">✕</button>
+          </span>`;
+          showToast(`${outcome} saved [MANUAL OVERRIDE] ✓`);
+          if (!_perfPanelCollapsed) fetchPerformance();
+        } else {
+          btn.style.opacity = "1";
+          btn.disabled = false;
+          showToast(`Override failed: ${data.error || "unknown"}`, true);
+        }
+      } catch(e) {
+        btn.style.opacity = "1";
+        btn.disabled = false;
+        showToast("Override failed: network error", true);
+      }
+      return;
+    }
+  }
+
+  // ── Normal path: not taken+open — plain outcome write ─────────────────────
   btn.style.opacity = "0.4";
   btn.disabled = true;
   try {
@@ -3439,6 +3540,8 @@ fetchLocalStatus();                     // local DB counts via localhost:5001
 fetchOmExtra();                         // OM Gold Scalp watch-only panel
 setInterval(fetchAndRender, REFRESH_MS);
 setInterval(fetchPerformance, 10000);   // performance stats refresh every 10s
+// Agent tab is default — start its poller immediately
+_startAgentSignalPoller();
 setInterval(fetchOmExtra,     REFRESH_MS); // OM panel refreshes with main loop
 setInterval(updateClock, 1000);
 updateClock();
@@ -3999,6 +4102,8 @@ function switchPerfTab(tab) {
   document.getElementById("tab-journal").classList.toggle("active", tab === "journal");
   if (tab === "manual") { fetchManualTrades(); _startLiveTradePoller(); }
   else                  { _stopLiveTradePoller(); }
+  if (tab === "agent")  { _startAgentSignalPoller(); }
+  else                  { _stopAgentSignalPoller(); }
   if (tab === "journal") fetchJournal();
 }
 
@@ -4061,16 +4166,79 @@ async function _pollLivePricesNow() {
   }
 }
 
-// Stop poller when browser tab is hidden (e.g. user switches browser tabs)
+// Stop pollers when browser tab is hidden (e.g. user switches browser tabs)
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { _stopLiveTradePoller(); }
-  else {
-    // Restart only if manual trades tab is currently active
-    if (typeof _currentPerfTab !== "undefined" && _currentPerfTab === "manual") {
-      _startLiveTradePoller();
+  if (document.hidden) {
+    _stopLiveTradePoller();
+    _stopAgentSignalPoller();
+  } else {
+    if (typeof _currentPerfTab !== "undefined") {
+      if (_currentPerfTab === "manual") _startLiveTradePoller();
+      if (_currentPerfTab === "agent")  _startAgentSignalPoller();
     }
   }
 });
+
+// ── LIVE PRICE POLLER FOR TAKEN+OPEN AGENT SIGNALS ───────────────────────────
+// Polls /api/live-price every 4s for each taken+open agent signal pair.
+// Only runs when the Agent Signals tab is active.
+// Reuses _livePrices and _livePricesMeta — same objects as manual poller.
+
+let _agentSignalPollerTimer = null;
+
+function _startAgentSignalPoller() {
+  _stopAgentSignalPoller();
+  _pollAgentSignalPricesNow();
+  _agentSignalPollerTimer = setInterval(_pollAgentSignalPricesNow, _LIVE_POLL_MS);
+}
+
+function _stopAgentSignalPoller() {
+  if (_agentSignalPollerTimer !== null) {
+    clearInterval(_agentSignalPollerTimer);
+    _agentSignalPollerTimer = null;
+  }
+}
+
+async function _pollAgentSignalPricesNow() {
+  const signals = (window._lastPerfData && window._lastPerfData.signals) || [];
+  // Unique pairs for taken+open agent signals only
+  const openPairs = [...new Set(
+    signals
+      .filter(s => {
+        const taken = s.taken === 1 || s.taken === true || s.taken === "True" || s.taken === "true";
+        const open  = !s.outcome || s.outcome === "";
+        return taken && open;
+      })
+      .map(s => s.pair)
+      .filter(Boolean)
+  )];
+  if (!openPairs.length) { _stopAgentSignalPoller(); return; }
+
+  for (const pair of openPairs) {
+    try {
+      const resp = await fetch(`/api/live-price?pair=${encodeURIComponent(pair)}`);
+      if (!resp.ok) continue;
+      const d = await resp.json();
+      if (d.error || !d.mid) continue;
+
+      const prevPx = (window._livePrices || {})[pair];
+      window._livePrices = window._livePrices || {};
+      window._livePricesMeta = window._livePricesMeta || {};
+      window._livePrices[pair] = d.mid;
+      window._livePricesMeta[pair] = {
+        updatedAt: Date.now(),
+        prev:      prevPx || d.mid,
+        source:    d.source || "oanda_pricing",
+        bid:       d.bid,
+        ask:       d.ask,
+      };
+    } catch(_e) { /* network error — skip silently */ }
+  }
+  // Re-render agent signals with fresh prices
+  if (window._lastPerfData) {
+    renderPerformance(window._lastPerfData.perf, window._lastPerfData.signals);
+  }
+}
 
 // ── JOURNAL ──────────────────────────────────────────────────────────────────
 

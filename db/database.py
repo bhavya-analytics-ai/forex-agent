@@ -178,6 +178,20 @@ def init_db():
         except Exception:
             pass  # column already exists
 
+    # agent_signals: lifecycle forensic fields (agent signal lifecycle — Phase 1)
+    for col, typedef in [
+        ("exit_timestamp",          "TEXT"),     # UTC "YYYY-MM-DD HH:MM:SS" when monitor detected TP/SL
+        ("exit_reason",             "TEXT"),     # SL_HIT | TP_HIT | MANUAL_CLOSE | MANUAL_OVERRIDE
+        ("trade_duration_minutes",  "INTEGER"),  # entry → exit elapsed minutes
+        ("max_favorable_excursion", "REAL"),     # MFE in pips tracked during live monitoring
+        ("max_adverse_excursion",   "REAL"),     # MAE in pips tracked during live monitoring
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE agent_signals ADD COLUMN {col} {typedef}")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
     # manual_trades: model-training context fields + forensic execution fields
     for col, typedef in [
         ("session",     "TEXT"),
@@ -684,12 +698,14 @@ def get_unlabeled_taken_signals() -> list[dict]:
 
 
 def close_agent_trade(signal_id: str, exit_price: float, entry_price: float,
-                      direction: str, pip: float) -> dict:
+                      direction: str, pip: float,
+                      exit_reason: str = "MANUAL_CLOSE") -> dict:
     """
     Close an agent signal mid-trade at exit_price.
-    Calculates outcome + pips direction-aware, writes to DB.
+    Calculates outcome + pips direction-aware, writes to DB with forensic fields.
     Returns {outcome, outcome_pips}.
     """
+    from datetime import datetime, timezone as _tz
     is_bull = "bull" in direction.lower()
     if is_bull:
         pips = round((exit_price - entry_price) / pip, 1)
@@ -697,18 +713,91 @@ def close_agent_trade(signal_id: str, exit_price: float, entry_price: float,
         pips = round((entry_price - exit_price) / pip, 1)
 
     outcome = "WIN" if pips > 0 else "LOSS"
-    note = f"[early close] {outcome} {pips:+.1f}p @ {exit_price}"
+    note = f"[{exit_reason.lower().replace('_',' ')}] {outcome} {pips:+.1f}p @ {exit_price}"
 
+    now_utc  = datetime.now(_tz.utc)
+    exit_ts  = now_utc.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Compute trade duration from DB-stored entry timestamp
+    duration_minutes = None
+    conn = _get_conn()
+    row  = conn.execute(
+        "SELECT timestamp_utc FROM agent_signals WHERE signal_id=?", (signal_id,)
+    ).fetchone()
+    if row and row["timestamp_utc"]:
+        try:
+            entry_dt = datetime.strptime(str(row["timestamp_utc"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=_tz.utc)
+            duration_minutes = max(0, int((now_utc - entry_dt).total_seconds() / 60))
+        except Exception:
+            pass
+
+    with _write_lock:
+        conn.execute("""
+            UPDATE agent_signals
+            SET exit_price=?, outcome=?, outcome_pips=?, notes=?,
+                exit_timestamp=?, exit_reason=?, trade_duration_minutes=?
+            WHERE signal_id=?
+        """, (exit_price, outcome, pips, note,
+              exit_ts, exit_reason, duration_minutes,
+              signal_id))
+        conn.commit()
+
+    return {"outcome": outcome, "outcome_pips": pips}
+
+
+def update_agent_signal_forensic(signal_id: str, outcome: str, outcome_pips: float,
+                                  notes: str = "",
+                                  exit_timestamp: str = None,
+                                  exit_reason: str = None,
+                                  exit_price: float = None,
+                                  trade_duration_minutes: int = None,
+                                  max_favorable_excursion: float = None,
+                                  max_adverse_excursion: float = None):
+    """
+    Write outcome + all forensic fields to agent_signals in one UPDATE.
+    Called by the agent trade monitor on TP/SL hit, and by api_mark_outcome on manual override.
+
+    Idempotency: the WHERE clause includes `exit_timestamp IS NULL` so the first
+    writer wins.  If a concurrent monitor fires a TP_HIT write at the same instant
+    as a MANUAL_OVERRIDE (or vice-versa), the second write is silently ignored and
+    the DB is left in the state the first writer established.
+    """
     conn = _get_conn()
     with _write_lock:
         conn.execute("""
             UPDATE agent_signals
-            SET exit_price=?, outcome=?, outcome_pips=?, notes=?
-            WHERE signal_id=?
-        """, (exit_price, outcome, pips, note, signal_id))
+            SET outcome=?, outcome_pips=?, notes=?,
+                exit_timestamp=?, exit_reason=?, exit_price=?,
+                trade_duration_minutes=?, max_favorable_excursion=?, max_adverse_excursion=?
+            WHERE signal_id=? AND (exit_timestamp IS NULL)
+        """, (outcome, outcome_pips, notes,
+              exit_timestamp, exit_reason, exit_price,
+              trade_duration_minutes, max_favorable_excursion, max_adverse_excursion,
+              signal_id))
         conn.commit()
 
-    return {"outcome": outcome, "outcome_pips": pips}
+
+def get_open_taken_agent_signals() -> list[dict]:
+    """
+    Return taken agent signals with no outcome and no exit_timestamp.
+    These are candidates for the agent trade monitor on startup/resume.
+    Resolves SL/TP using actual_sl/user_sl/sl_price priority chain.
+    """
+    conn = _get_conn()
+    rows = conn.execute("""
+        SELECT signal_id, pair, direction, entry_price, timestamp_utc,
+               COALESCE(actual_sl,  user_sl,  sl_price)    AS resolved_sl,
+               COALESCE(actual_tp1, user_tp1, tp1_price)   AS resolved_tp1,
+               sl_pips
+        FROM agent_signals
+        WHERE taken = 1
+          AND COALESCE(is_archived, 0) = 0
+          AND (outcome IS NULL OR outcome = '')
+          AND (exit_timestamp IS NULL)
+          AND COALESCE(actual_sl,  user_sl,  sl_price)    > 0
+          AND COALESCE(actual_tp1, user_tp1, tp1_price)   > 0
+    """).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_agent_signal(signal_id: str) -> dict | None:
